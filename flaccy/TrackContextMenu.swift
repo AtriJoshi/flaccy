@@ -12,6 +12,7 @@ enum TrackContextMenu {
         var hideGoToArtist = false
         var hideLyrics = false
         var extraSections: [UIMenuElement] = []
+        var otherCopies: [Track] = []
     }
 
     static func build(
@@ -32,10 +33,24 @@ enum TrackContextMenu {
             sections.append(UIMenu(options: .displayInline, children: navigation))
         }
         sections.append(UIMenu(options: .displayInline, children: shareActions(for: track, in: host)))
+        if !context.otherCopies.isEmpty {
+            sections.append(UIMenu(options: .displayInline, children: [copiesAction(for: track, others: context.otherCopies, in: host)]))
+        }
         sections.append(contentsOf: context.extraSections)
         sections.append(UIMenu(options: .displayInline, children: [deleteAction(for: track, in: host)]))
 
         return UIMenu(title: track.qualityBadge ?? "", children: sections)
+    }
+
+    private static func copiesAction(for track: Track, others: [Track], in host: UIViewController) -> UIMenuElement {
+        UIAction(
+            title: String(localized: "Show \(others.count + 1) Copies"),
+            image: UIImage(systemName: "square.on.square")
+        ) { [weak host] _ in
+            guard let host else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            DuplicateCopiesViewController.present(shown: track, others: others, from: host)
+        }
     }
 
     private static func deleteAction(for track: Track, in host: UIViewController) -> UIMenuElement {

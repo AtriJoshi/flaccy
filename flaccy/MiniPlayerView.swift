@@ -163,6 +163,14 @@ final class MiniPlayerView: UIView {
         NotificationCenter.default.addObserver(
             self, selector: #selector(sleepTimerDidUpdate), name: AudioPlayer.sleepTimerDidUpdate, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(artworkDidChange), name: AlbumArtworkCache.didChangeNotification, object: nil
+        )
+    }
+
+    @objc private func artworkDidChange() {
+        guard let track = AudioPlayer.shared.currentTrack else { return }
+        configure(with: track, isPlaying: AudioPlayer.shared.isPlaying)
     }
 
     @available(*, unavailable)

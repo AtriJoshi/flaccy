@@ -281,6 +281,65 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
         animator.startAnimation()
     }
 
+    /// Playlist entries that repeat a song an earlier entry already plays, in
+    /// any release. The first entry keeps the person's place in the order.
+    private func duplicateEntryIDs() -> [Int64] {
+        guard let all = try? db.fetchAllTracks() else { return [] }
+        let tracksByURL = Dictionary(all.map { ($0.fileURL, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen: [String: [TimeInterval]] = [:]
+        var ids: [Int64] = []
+        for entry in playlistTrackRecords {
+            guard let id = entry.id, let record = tracksByURL[entry.trackFileURL] else { continue }
+            let track = Track.from(record: record, artwork: nil)
+            let key = LibraryHygiene.songKey(title: track.title, artist: track.artist)
+            let tolerance = LibraryHygiene.songDurationTolerance
+            if seen[key]?.contains(where: { abs($0 - track.duration) <= tolerance }) == true {
+                ids.append(id)
+            } else {
+                seen[key, default: []].append(track.duration)
+            }
+        }
+        return ids
+    }
+
+    private func updateOverflowMenu() {
+        let duplicates = duplicateEntryIDs()
+        let remove = UIAction(
+            title: duplicates.isEmpty
+                ? String(localized: "No Duplicate Songs")
+                : String(localized: "Remove \(duplicates.count) Duplicate Songs"),
+            image: UIImage(systemName: "square.on.square"),
+            attributes: duplicates.isEmpty ? .disabled : []
+        ) { [weak self] _ in
+            self?.confirmRemoval(of: duplicates)
+        }
+        let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [remove]))
+        menuButton.accessibilityLabel = String(localized: "More")
+        navigationItem.rightBarButtonItems = [editButtonItem, menuButton]
+    }
+
+    private func confirmRemoval(of ids: [Int64]) {
+        let alert = UIAlertController(
+            title: String(localized: "Remove \(ids.count) Duplicate Songs?"),
+            message: String(localized: "Each song stays in the playlist once, at its first position. Your files are not deleted."),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "Remove"), style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            do {
+                for id in ids { try self.db.removeTrackFromPlaylist(id: id) }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                self.loadTracks()
+                ToastView.show(String(localized: "Removed \(ids.count) duplicates"), in: self.view, style: .success)
+            } catch {
+                AppLogger.error("Failed to remove duplicates: \(error.localizedDescription)", category: .database)
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        })
+        present(alert, animated: true)
+    }
+
     private func loadTracks() {
         do {
             playlistTrackRecords = try db.fetchPlaylistTracks(playlistId: playlistId)
@@ -294,6 +353,7 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
 
             tableView.reloadData()
             updateMosaic()
+            updateOverflowMenu()
             hasLoadedOnce = true
         } catch {
             AppLogger.error("Failed to load playlist tracks: \(error.localizedDescription)", category: .database)

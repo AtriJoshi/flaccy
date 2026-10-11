@@ -153,6 +153,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				AdaptiveLayout.swift,
+				AlbumArtworkEditor.swift,
 				AlbumCell.swift,
 				AlbumDetailViewController.swift,
 				AmbientPaletteBackdropView.swift,
@@ -160,9 +161,12 @@
 				AppDelegate.swift,
 				ArtistDetailViewController.swift,
 				ArtistImageService.swift,
+				ArtworkCropView.swift,
+				ArtworkEditorViewController.swift,
 				Assets.xcassets,
 				ChartsViewController.swift,
 				ComputerTransferGuideViewController.swift,
+				DuplicateCopiesViewController.swift,
 				EnrichmentReportViewController.swift,
 				FilterChipsView.swift,
 				HeatmapView.swift,

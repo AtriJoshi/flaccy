@@ -52,6 +52,7 @@ final class AlbumDetailViewController: UIViewController, SonglinkShareable {
         NotificationCenter.default.addObserver(self, selector: #selector(playbackChanged), name: AudioPlayer.trackDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(playbackChanged), name: AudioPlayer.playbackStateDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(lovedChanged), name: LovedTracksService.didChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(artworkChanged), name: AlbumArtworkCache.didChangeNotification, object: nil)
         loadEnrichment()
         repairMetadataIfNeeded()
     }
@@ -134,8 +135,39 @@ final class AlbumDetailViewController: UIViewController, SonglinkShareable {
         }
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             image: UIImage(systemName: "ellipsis.circle"),
-            menu: UIMenu(children: [delete])
+            menu: UIMenu(children: [editArtworkAction(), UIMenu(options: .displayInline, children: [delete])])
         )
+    }
+
+    private func editArtworkAction() -> UIAction {
+        UIAction(title: String(localized: "Edit Artwork"), image: UIImage(systemName: "photo.badge.pencil")) { [weak self] _ in
+            self?.presentArtworkEditor()
+        }
+    }
+
+    private func presentArtworkEditor() {
+        impactLight.impactOccurred()
+        ArtworkEditorViewController.present(for: album, from: self) { [weak self] in
+            guard let self else { return }
+            ToastView.show(String(localized: "Artwork updated"), in: self.view, style: .success)
+        }
+    }
+
+    @objc private func artworkChanged() {
+        AlbumArtworkCache.shared.loadArtwork(forAlbum: album.title, artist: album.artist) { [weak self] image in
+            guard let self else { return }
+            guard let image else {
+                self.artworkView.contentMode = .center
+                self.artworkView.image = UIImage(systemName: "music.note")
+                self.applyPalette(from: nil, animated: true)
+                return
+            }
+            UIView.transition(with: self.artworkView, duration: 0.3, options: .transitionCrossDissolve) {
+                self.artworkView.contentMode = .scaleAspectFill
+                self.artworkView.image = image
+            }
+            self.applyPalette(from: image, animated: true)
+        }
     }
 
     @objc private func playbackChanged() {
@@ -521,6 +553,14 @@ final class AlbumDetailViewController: UIViewController, SonglinkShareable {
         artworkView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 56, weight: .ultraLight)
         artworkView.isAccessibilityElement = true
         artworkView.accessibilityLabel = String(localized: "Album artwork for \(album.title)")
+        artworkView.isUserInteractionEnabled = true
+        artworkView.addInteraction(UIContextMenuInteraction(delegate: self))
+        artworkView.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: String(localized: "Edit Artwork")) { [weak self] _ in
+                self?.presentArtworkEditor()
+                return true
+            },
+        ]
 
         if let artwork = resolvedArtwork() {
             artworkView.image = artwork
@@ -986,6 +1026,18 @@ final class NowPlayingBarsView: UIView {
             animation.repeatCount = .infinity
             animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             bar.add(animation, forKey: "bounce")
+        }
+    }
+}
+
+extension AlbumDetailViewController: UIContextMenuInteractionDelegate {
+
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            guard let self else { return nil }
+            return UIMenu(children: [self.editArtworkAction()])
         }
     }
 }

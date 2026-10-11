@@ -539,6 +539,12 @@ nonisolated final class DatabaseManager: Sendable {
             }
         }
 
+        migrator.registerMigration("v12") { db in
+            try db.alter(table: "albumInfo") { t in
+                t.add(column: "customCoverData", .blob)
+            }
+        }
+
         return migrator
     }
 
@@ -1552,6 +1558,9 @@ nonisolated final class DatabaseManager: Sendable {
     /// album that shares the consolidation key.
     func fetchAlbumArtwork(title: String, artist: String) throws -> Data? {
         try dbQueue.read { db in
+            if let chosen = try Self.customCover(db: db, title: title, artist: artist) {
+                return chosen
+            }
             if let exact = try Self.artworkPair(db: db, title: title, artist: artist) {
                 return exact
             }
@@ -1566,6 +1575,9 @@ nonisolated final class DatabaseManager: Sendable {
                 guard LibraryHygiene.consolidationKey(title: variantTitle, artist: artist) == targetKey else {
                     continue
                 }
+                if let chosen = try Self.customCover(db: db, title: variantTitle, artist: artist) {
+                    return chosen
+                }
                 guard let candidate = try Self.artworkPair(db: db, title: variantTitle, artist: artist) else {
                     continue
                 }
@@ -1575,6 +1587,50 @@ nonisolated final class DatabaseManager: Sendable {
             }
             return best
         }
+    }
+
+    /// The cover the person chose themselves, which outranks every embedded
+    /// and downloaded one and is never written by enrichment.
+    private static func customCover(db: Database, title: String, artist: String) throws -> Data? {
+        try Row.fetchOne(
+            db,
+            sql: "SELECT customCoverData FROM albumInfo WHERE title = ? AND artist = ? AND customCoverData IS NOT NULL",
+            arguments: [title, artist]
+        )?["customCoverData"]
+    }
+
+    /// Stores a person-chosen cover under every key a surface can ask for this
+    /// release by: tracks look their art up by their own album title and
+    /// performing artist, album cards by the grouped title and artist.
+    func saveCustomCover(_ data: Data, forKeys keys: [(title: String, artist: String)]) throws {
+        try dbQueue.write { db in
+            for key in keys {
+                try db.execute(sql: """
+                    INSERT INTO albumInfo (title, artist, customCoverData) VALUES (?, ?, ?)
+                    ON CONFLICT(title, artist) DO UPDATE SET customCoverData = excluded.customCoverData
+                    """, arguments: [key.title, key.artist, data])
+            }
+        }
+    }
+
+    func clearCustomCover(forKeys keys: [(title: String, artist: String)]) throws {
+        try dbQueue.write { db in
+            for key in keys {
+                try db.execute(
+                    sql: "UPDATE albumInfo SET customCoverData = NULL WHERE title = ? AND artist = ?",
+                    arguments: [key.title, key.artist]
+                )
+            }
+        }
+    }
+
+    func hasCustomCover(forKeys keys: [(title: String, artist: String)]) -> Bool {
+        (try? dbQueue.read { db in
+            for key in keys where try Self.customCover(db: db, title: key.title, artist: key.artist) != nil {
+                return true
+            }
+            return false
+        }) ?? false
     }
 
     private static func artworkPair(db: Database, title: String, artist: String) throws -> Data? {

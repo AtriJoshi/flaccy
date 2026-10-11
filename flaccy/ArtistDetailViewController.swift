@@ -145,6 +145,9 @@ final class ArtistDetailViewController: UIViewController, SonglinkShareable {
         applySnapshot()
         fetchArtistPhoto()
         loadEnrichment()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(artworkChanged), name: AlbumArtworkCache.didChangeNotification, object: nil
+        )
     }
 
     /// Fetches similar-library artists, Last.fm popular tracks, and genre tags
@@ -192,10 +195,17 @@ final class ArtistDetailViewController: UIViewController, SonglinkShareable {
     /// Taking only credited albums would hand a composer on a compilation an
     /// empty queue while the library holds thirty-one of their tracks. Mirrors
     /// `Core::artist_tracks` in the Linux client.
+    @objc private func artworkChanged() {
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
     private func ownedTracks() -> [Track] {
         let key = LibraryHygiene.artistKey(artistName)
-        return albums.flatMap(\.tracks)
+        let tracks = albums.flatMap(\.tracks)
             + appearsOn.flatMap { $0.tracks.filter { LibraryHygiene.artistKey($0.artist) == key } }
+        return HideDuplicateSongsSetting.uniquePool(tracks)
     }
 
     private func ownedTracksByTitle() -> [String: Track] {

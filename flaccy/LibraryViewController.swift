@@ -417,7 +417,17 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
                 action.accessibilityIdentifier = "sort.option.\(sort.rawValue)"
                 return action
             }
-        return UIMenu(title: String(localized: "Sort By"), image: UIImage(systemName: "arrow.up.arrow.down"), children: actions)
+        let sortMenu = UIMenu(title: String(localized: "Sort By"), image: UIImage(systemName: "arrow.up.arrow.down"), children: actions)
+        let hideDuplicates = UIAction(
+            title: String(localized: "Hide Duplicate Songs"),
+            image: UIImage(systemName: "square.on.square"),
+            state: HideDuplicateSongsSetting.isEnabled ? .on : .off
+        ) { [weak self] _ in
+            self?.impactLight.impactOccurred()
+            HideDuplicateSongsSetting.set(!HideDuplicateSongsSetting.isEnabled)
+            self?.updateRightBarButton(for: .songs)
+        }
+        return UIMenu(children: [sortMenu, UIMenu(options: .displayInline, children: [hideDuplicates])])
     }
 
     private func scrollToTopForSortChange() {
@@ -1411,6 +1421,11 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
             .sink { [weak self] state in self?.render(loadState: state) }
             .store(in: &cancellables)
 
+        NotificationCenter.default.publisher(for: AlbumArtworkCache.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconfigureVisibleArtwork() }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: Library.albumCoversHoisted)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in self?.absorbHoistedCovers(notification) }
@@ -1432,6 +1447,16 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
         if segmentChanged || isFirstRender { return true }
         guard viewModel.snapshotIntent == .replaceList else { return false }
         return snapshot.numberOfItems > 200
+    }
+
+    /// Repaints the artwork of every visible card and row after a cover was
+    /// changed, which the cache has already forgotten.
+    private func reconfigureVisibleArtwork() {
+        let affected = collectionView.indexPathsForVisibleItems.compactMap { dataSource.itemIdentifier(for: $0) }
+        guard !affected.isEmpty else { return }
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems(affected)
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     /// Refreshes loved heart indicators when love state changes elsewhere. When
@@ -1612,12 +1637,15 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
     }
 
     private func buildSongContextMenu(for track: Track) -> UIMenu {
-        TrackContextMenu.build(
+        var context = TrackContextMenu.Context()
+        context.otherCopies = viewModel.duplicateCopies[track.fileURL] ?? []
+        return TrackContextMenu.build(
             for: track,
             in: self,
             push: { [weak self] viewController in
                 self?.navigationController?.pushViewController(viewController, animated: true)
-            }
+            },
+            context: context
         )
     }
 
@@ -1742,7 +1770,14 @@ extension LibraryViewController: UICollectionViewDelegate {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     self.shareAlbumViaSonglink(title: album.title, artist: album.artist, from: self.view)
                 }
-                let shareMenu = UIMenu(options: .displayInline, children: [shareAlbum])
+                let editArtwork = UIAction(title: String(localized: "Edit Artwork"), image: UIImage(systemName: "photo.badge.pencil")) { [weak self] _ in
+                    guard let self else { return }
+                    ArtworkEditorViewController.present(for: album, from: self) { [weak self] in
+                        guard let self else { return }
+                        ToastView.show(String(localized: "Artwork updated"), in: self.view, style: .success)
+                    }
+                }
+                let shareMenu = UIMenu(options: .displayInline, children: [editArtwork, shareAlbum])
                 let deleteAlbum = UIAction(title: String(localized: "Delete from Library"), image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
                     guard let self else { return }
                     TrackContextMenu.confirmDelete(

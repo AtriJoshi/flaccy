@@ -189,7 +189,18 @@ final class AudioPlayer: AudioPlaying {
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleLovedTracksDidChange), name: LovedTracksService.didChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleArtworkDidChange), name: AlbumArtworkCache.didChangeNotification, object: nil
+        )
         startNetworkMonitoring()
+    }
+
+    /// Reloads the lock-screen and Control Center cover when the person swaps
+    /// the artwork of the album that is playing.
+    @objc private func handleArtworkDidChange() {
+        guard let track = currentTrack else { return }
+        nowPlayingArtworkKey = nil
+        ensureArtworkLoaded(for: track)
     }
 
     /// Keeps the system Now Playing heart (lock screen / Dynamic Island) in
@@ -1545,6 +1556,7 @@ final class AudioPlayer: AudioPlaying {
         let pool = Library.shared.allTracks
         AppLogger.info("Building artist station for \(seedArtist) from \(pool.count) library tracks", category: .playback)
         Task.detached { [weak self] in
+            let pool = HideDuplicateSongsSetting.uniquePool(pool)
             let tracks = await StationBuilder.artistStation(
                 seedArtist: seedArtist, pool: pool, excluding: [], limit: StationBuilder.stationSize
             )
@@ -1561,6 +1573,7 @@ final class AudioPlayer: AudioPlaying {
         let pool = Library.shared.allTracks
         AppLogger.info("Building track station for \(seedTrack.title) - \(seedTrack.artist)", category: .playback)
         Task.detached { [weak self] in
+            let pool = HideDuplicateSongsSetting.uniquePool(pool, preferring: [seedTrack])
             let tracks = await StationBuilder.trackStation(
                 seedTrack: seedTrack, pool: pool, excluding: [], limit: StationBuilder.stationSize
             )
@@ -1577,6 +1590,7 @@ final class AudioPlayer: AudioPlaying {
         let pool = Library.shared.allTracks
         AppLogger.info("Building library radio from \(pool.count) library tracks", category: .playback)
         Task.detached { [weak self] in
+            let pool = HideDuplicateSongsSetting.uniquePool(pool)
             let counts = (try? DatabaseManager.shared.playCountByTrack()) ?? []
             let tracks = StationBuilder.libraryRadio(
                 pool: pool, playCounts: counts, excluding: [], limit: StationBuilder.stationSize
@@ -1594,6 +1608,7 @@ final class AudioPlayer: AudioPlaying {
         let pool = Library.shared.allTracks
         AppLogger.info("Building crate dig from \(pool.count) library tracks", category: .playback)
         Task.detached { [weak self] in
+            let pool = HideDuplicateSongsSetting.uniquePool(pool)
             let counts = (try? DatabaseManager.shared.playCountByTrack()) ?? []
             let tracks = StationBuilder.crateDig(
                 pool: pool, playCounts: counts, excluding: [], limit: StationBuilder.stationSize
@@ -1625,11 +1640,13 @@ final class AudioPlayer: AudioPlaying {
         guard !autoplayContinuationInFlight else { completion?(false); return }
         autoplayContinuationInFlight = true
         let pool = Library.shared.allTracks
-        let existing = Set(queue.map(\.fileURL))
+        let queued = queue
+        let existing = Set(queued.map(\.fileURL))
         let seedArtist = stationSeedArtist ?? currentTrack?.artist
         let seedTrack = currentTrack
         Task { [weak self] in
             let batch = await Task.detached { () -> [Track] in
+                let pool = HideDuplicateSongsSetting.uniquePool(pool, preferring: queued)
                 if let seedArtist {
                     return await StationBuilder.artistStation(
                         seedArtist: seedArtist, pool: pool, excluding: existing, limit: StationBuilder.continuationBatchSize

@@ -616,6 +616,7 @@ final class LibrarySettingsPane: SettingsPane {
     private let storageLabel = NSTextField(labelWithString: String(localized: "Storage: …"))
     private let rescanButton = NSButton(title: String(localized: "Rescan Library"), target: nil, action: nil)
     private let analyzeButton = NSButton(title: String(localized: "Re-analyze with AI…"), target: nil, action: nil)
+    private let hideDuplicatesCheckbox = NSButton(checkboxWithTitle: String(localized: "Hide duplicate songs"), target: nil, action: nil)
     private let groupEditionsCheckbox = NSButton(checkboxWithTitle: String(localized: "Group album editions (Deluxe, Remaster…) as one album"), target: nil, action: nil)
     private let cleanUpButton = NSButton(title: String(localized: "Clean Up Library…"), target: nil, action: nil)
     private let activitySpinner = NSProgressIndicator()
@@ -671,6 +672,10 @@ final class LibrarySettingsPane: SettingsPane {
         groupEditionsCheckbox.action = #selector(groupEditionsToggled)
         formStack.addArrangedSubview(groupEditionsCheckbox)
         addFullWidth(explanation(String(localized: "Collapses \u{201C}Album\u{201D}, \u{201C}Album (Deluxe)\u{201D} and \u{201C}Album (Remastered)\u{201D} into one card and keeps a single best-quality copy of each shared song so Albums and Songs stay free of near-duplicates.")))
+        hideDuplicatesCheckbox.target = self
+        hideDuplicatesCheckbox.action = #selector(hideDuplicatesToggled)
+        formStack.addArrangedSubview(hideDuplicatesCheckbox)
+        addFullWidth(explanation(String(localized: "Lists a song once when it sits on several albums, such as a single and the album it came from. Your files stay untouched.")))
         cleanUpButton.bezelStyle = .rounded
         cleanUpButton.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
         cleanUpButton.imagePosition = .imageLeading
@@ -743,6 +748,7 @@ final class LibrarySettingsPane: SettingsPane {
         refreshMetadata()
         renderActivity()
         groupEditionsCheckbox.state = GroupAlbumEditionsSetting.isEnabled ? .on : .off
+        hideDuplicatesCheckbox.state = HideDuplicateSongsSetting.isEnabled ? .on : .off
         appleMusicCheckbox.state = AppleMusicArtworkSetting.isEnabled ? .on : .off
         NotificationCenter.default.addObserver(
             self, selector: #selector(libraryChanged), name: Library.didUpdateNotification, object: nil
@@ -756,6 +762,10 @@ final class LibrarySettingsPane: SettingsPane {
         NotificationCenter.default.addObserver(
             self, selector: #selector(activityChanged), name: EnrichmentCoordinator.progressDidChange, object: nil
         )
+    }
+
+    @objc private func hideDuplicatesToggled() {
+        HideDuplicateSongsSetting.set(hideDuplicatesCheckbox.state == .on)
     }
 
     @objc private func groupEditionsToggled() {

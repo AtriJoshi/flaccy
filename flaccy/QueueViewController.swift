@@ -33,6 +33,7 @@ final class QueueViewController: UIViewController, SonglinkShareable {
         NotificationCenter.default.addObserver(self, selector: #selector(playbackStateDidChange), name: AudioPlayer.playbackStateDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(updateUpNextSummary), name: AudioPlayer.playbackProgressDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: LovedTracksService.didChange, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(reload), name: AlbumArtworkCache.didChangeNotification, object: nil)
     }
 
     override func viewDidLayoutSubviews() {

@@ -15,6 +15,8 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
 
     static let shared = AlbumArtworkCache()
 
+    static let didChangeNotification = Notification.Name("AlbumArtworkDidChange")
+
     private static let thumbnailMaxPixelSize: CGFloat = 480
     private static let fullMaxPixelSize: CGFloat = 1600
 
@@ -23,6 +25,7 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
     private var pending = Set<String>()
     private var completionsByKey = [String: [(PlatformImage?) -> Void]]()
     private let pendingLock = NSLock()
+    private var epoch = 0
 
     private init() {
         memoryCache.countLimit = 600
@@ -51,6 +54,30 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
 
     func preloadArtwork(forAlbum title: String, artist: String) {
         load(title: title, artist: artist, tier: .full, completion: nil)
+    }
+
+    /// Forgets both decoded tiers for each release and tells every surface to
+    /// ask again. A decode already in flight when this runs belongs to an older
+    /// epoch and is not allowed to put its stale image back.
+    func invalidate(keys: [(title: String, artist: String)]) {
+        pendingLock.lock()
+        epoch += 1
+        pendingLock.unlock()
+        for key in keys {
+            for tier in [Tier.thumbnail, Tier.full] {
+                memoryCache.removeObject(forKey: cacheKey(title: key.title, artist: key.artist, tier: tier) as NSString)
+            }
+        }
+        let post = {
+            NotificationCenter.default.post(name: AlbumArtworkCache.didChangeNotification, object: nil)
+        }
+        if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }
+    }
+
+    private func currentEpoch() -> Int {
+        pendingLock.lock()
+        defer { pendingLock.unlock() }
+        return epoch
     }
 
     private enum Tier {
@@ -83,10 +110,11 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
         loadQueue.async { [weak self] in
             guard let self else { return }
 
+            let startedAtEpoch = self.currentEpoch()
             var image: PlatformImage?
             if let data = try? DatabaseManager.shared.fetchAlbumArtwork(title: title, artist: artist) {
                 image = Self.decode(data, maxPixelSize: tier.maxPixelSize)
-                if let image {
+                if let image, startedAtEpoch == self.currentEpoch() {
                     self.memoryCache.setObject(image, forKey: key as NSString, cost: image.memoryCost)
                 }
             }

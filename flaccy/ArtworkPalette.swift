@@ -38,6 +38,10 @@ enum ArtworkPaletteExtractor {
         init(_ palette: ArtworkPalette) { self.palette = palette }
     }
 
+    static func invalidate(title: String, artist: String) {
+        cache.removeObject(forKey: "\(title)\0\(artist)" as NSString)
+    }
+
     static func palette(
         for image: PlatformImage?,
         cacheKey: String,

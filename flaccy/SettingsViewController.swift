@@ -60,12 +60,13 @@ final class SettingsViewController: UITableViewController {
             return "\(gapless)\n\n\(formats)\n\n\(autoplay)"
         }
 
-        /// Two sentences, one per switch in the section, in the order the
-        /// switches appear.
+        /// One sentence per switch in the section, in the order the switches
+        /// appear.
         private static var libraryFooter: String {
             let editions = String(localized: "Group editions folds Deluxe, Remaster, and Explicit variants into one album and keeps a single best copy of each song.")
+            let duplicates = String(localized: "Hide duplicate songs lists a song once when it sits on several albums, such as a single and the album it came from. Press and hold a song to see every copy.")
             let appleMusic = String(localized: "Flaccy asks Apple Music for covers it can't find anywhere else. Turning this on asks for permission once.")
-            return "\(editions)\n\n\(appleMusic)"
+            return "\(editions)\n\n\(duplicates)\n\n\(appleMusic)"
         }
     }
 
@@ -86,6 +87,7 @@ final class SettingsViewController: UITableViewController {
         case importFiles
         case rescanLibrary
         case groupAlbumEditions
+        case hideDuplicateSongs
         case metadataReport(complete: Int, gaveUp: Int)
         case findMissingArtwork(count: Int)
         case appleMusicArtwork(Bool)
@@ -376,6 +378,7 @@ final class SettingsViewController: UITableViewController {
             .importFiles,
             .rescanLibrary,
             .groupAlbumEditions,
+            .hideDuplicateSongs,
             .metadataReport(complete: counts.complete, gaveUp: counts.gaveUp),
         ]
         if counts.inProgress > 0 {
@@ -560,6 +563,15 @@ final class SettingsViewController: UITableViewController {
             cell.accessibilityLabel = String(localized: "Group Album Editions")
             cell.accessibilityHint = String(localized: "Folds deluxe, remaster, and explicit variants into one album")
 
+        case .hideDuplicateSongs:
+            content.image = RowIcon.image(systemName: "square.on.square", tint: .systemTeal)
+            content.text = String(localized: "Hide Duplicate Songs")
+            cell.selectionStyle = .none
+            cell.accessibilityTraits = .none
+            cell.accessoryView = makeHideDuplicatesSwitch()
+            cell.accessibilityLabel = String(localized: "Hide Duplicate Songs")
+            cell.accessibilityHint = String(localized: "Lists one copy of a song that appears on several albums")
+
         case .metadataReport(let complete, let gaveUp):
             content.image = RowIcon.image(systemName: "tag.fill", tint: .systemBlue)
             content.text = String(localized: "Metadata")
@@ -662,6 +674,18 @@ final class SettingsViewController: UITableViewController {
         let spinner = UIActivityIndicatorView(style: .medium)
         spinner.startAnimating()
         return spinner
+    }
+
+    private func makeHideDuplicatesSwitch() -> UISwitch {
+        let toggle = UISwitch()
+        toggle.isOn = HideDuplicateSongsSetting.isEnabled
+        toggle.accessibilityLabel = String(localized: "Hide Duplicate Songs")
+        toggle.addAction(UIAction { [weak self] action in
+            guard let toggle = action.sender as? UISwitch else { return }
+            self?.selectionFeedback.selectionChanged()
+            HideDuplicateSongsSetting.set(toggle.isOn)
+        }, for: .valueChanged)
+        return toggle
     }
 
     private func makeGroupEditionsSwitch() -> UISwitch {
@@ -813,7 +837,7 @@ final class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, shouldHighlightRowAt indexPath: IndexPath) -> Bool {
         guard let row = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch row {
-        case .appearance, .trialReminders, .gaplessPlayback, .autoplaySimilar, .groupAlbumEditions,
+        case .appearance, .trialReminders, .gaplessPlayback, .autoplaySimilar, .groupAlbumEditions, .hideDuplicateSongs,
              .libraryStats, .storage, .appleMusicArtwork, .libraryDebutSummary:
             return false
         case .importLastFM: return lastFMImportProgress == nil
@@ -840,7 +864,7 @@ final class SettingsViewController: UITableViewController {
         case .rescanLibrary: handleRescanTap()
         case .metadataReport: handleMetadataTap()
         case .findMissingArtwork: handleFindMissingArtworkTap()
-        case .appearance, .trialReminders, .gaplessPlayback, .autoplaySimilar, .groupAlbumEditions,
+        case .appearance, .trialReminders, .gaplessPlayback, .autoplaySimilar, .groupAlbumEditions, .hideDuplicateSongs,
              .libraryStats, .storage, .appleMusicArtwork, .libraryDebutSummary:
             break
         }

@@ -50,6 +50,9 @@ final class NowPlayingViewModel {
         NotificationCenter.default.addObserver(
             self, selector: #selector(progressChanged), name: AudioPlayer.playbackProgressDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(stateChanged), name: AlbumArtworkCache.didChangeNotification, object: nil
+        )
     }
 
     deinit {

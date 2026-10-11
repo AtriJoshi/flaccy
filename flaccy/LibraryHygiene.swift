@@ -179,6 +179,77 @@ nonisolated enum LibraryHygiene {
         return DuplicateGroup(keeper: ranked[0], losers: Array(ranked.dropFirst()))
     }
 
+    // MARK: Duplicate songs across albums
+
+    /// What marks a bracketed or dashed title suffix as the same recording
+    /// re-released. Live, acoustic, demo, instrumental and remix are left out
+    /// on purpose: those are different recordings of the song.
+    static let songEditionKeywords: Set<String> = [
+        "remaster", "remastered", "remasters", "mono", "stereo", "explicit", "clean",
+        "deluxe", "edition", "bonus", "reissue", "reissued", "expanded", "anniversary",
+        "feat", "featuring", "ft.",
+    ]
+
+    /// Copies of one song whose lengths differ by more than this are treated as
+    /// different recordings even when title and artist agree.
+    static let songDurationTolerance: TimeInterval = 3.0
+
+    /// The identity of a song regardless of the release it sits on: the lead
+    /// artist and the title with re-release decoration removed.
+    static func songKey(title: String, artist: String) -> String {
+        artistKey(artist) + "\u{0}" + baseTitle(title, keywords: songEditionKeywords)
+    }
+
+    struct DuplicateSongs: Sendable {
+        let tracks: [Track]
+        let copies: [URL: [Track]]
+    }
+
+    /// Keeps one copy of every song in `tracks` and reports the copies it hid.
+    /// Same song means the same `songKey` with lengths that chain together
+    /// within `songDurationTolerance`. The keeper is the copy `prefers` ranks
+    /// highest (the one the person loved or plays), then the highest fidelity,
+    /// then the oldest row. The original order is preserved.
+    static func collapsingDuplicateSongs(
+        _ tracks: [Track],
+        prefers rank: (Track) -> Int = { _ in 0 }
+    ) -> DuplicateSongs {
+        var byKey: [String: [Track]] = [:]
+        for track in tracks where !track.title.isEmpty {
+            byKey[songKey(title: track.title, artist: track.artist), default: []].append(track)
+        }
+        var hidden = Set<URL>()
+        var copies: [URL: [Track]] = [:]
+        for members in byKey.values where members.count >= 2 {
+            let sorted = members.sorted { $0.duration < $1.duration }
+            var cluster: [Track] = []
+            func flush() {
+                defer { cluster = [] }
+                guard cluster.count >= 2 else { return }
+                let ranked = cluster.sorted { lhs, rhs in
+                    let lRank = rank(lhs), rRank = rank(rhs)
+                    if lRank != rRank { return lRank > rRank }
+                    let lQuality = trackQualityScalar(lhs), rQuality = trackQualityScalar(rhs)
+                    if lQuality != rQuality { return lQuality > rQuality }
+                    let lID = lhs.dbID ?? Int64.max, rID = rhs.dbID ?? Int64.max
+                    if lID != rID { return lID < rID }
+                    return lhs.fileURL.path < rhs.fileURL.path
+                }
+                copies[ranked[0].fileURL] = Array(ranked.dropFirst())
+                for loser in ranked.dropFirst() { hidden.insert(loser.fileURL) }
+            }
+            var previous: TimeInterval?
+            for track in sorted {
+                if let previous, track.duration - previous > songDurationTolerance { flush() }
+                cluster.append(track)
+                previous = track.duration
+            }
+            flush()
+        }
+        guard !hidden.isEmpty else { return DuplicateSongs(tracks: tracks, copies: [:]) }
+        return DuplicateSongs(tracks: tracks.filter { !hidden.contains($0.fileURL) }, copies: copies)
+    }
+
     // MARK: Album-variation consolidation
 
     struct AlbumVariant: Sendable, Hashable {

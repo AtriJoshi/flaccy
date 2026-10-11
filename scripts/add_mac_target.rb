@@ -23,6 +23,7 @@ SHARED_IOS_FILES = %w[
   EnrichmentTasks.swift
   GroqService.swift
   GroupAlbumEditionsSetting.swift
+  HideDuplicateSongsSetting.swift
   ImageCache.swift
   ImportOutcomeCopy.swift
   LastFMService.swift

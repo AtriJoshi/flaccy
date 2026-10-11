@@ -508,6 +508,7 @@ final class LibraryViewModel {
 
     private(set) var emptyState: EmptyState = .none
     private(set) var visibleSongs: [Track] = []
+    private(set) var duplicateCopies: [URL: [Track]] = [:]
 
     var sortedAlbums: [Album] {
         cacheLock.lock()
@@ -1271,7 +1272,7 @@ final class LibraryViewModel {
         suggestionsLoading = true
         let pool = library.allTracks
         Task.detached(priority: .utility) { [weak self] in
-            let suggestions = SuggestedPlaylistService.build(pool: pool)
+            let suggestions = SuggestedPlaylistService.build(pool: HideDuplicateSongsSetting.uniquePool(pool))
             await MainActor.run {
                 guard let self else { return }
                 self.cachedSuggestions = suggestions
@@ -1315,6 +1316,21 @@ final class LibraryViewModel {
         return map
     }
 
+    /// Keeps one copy of each song in the visible list, preferring the copy the
+    /// person loved and then the one they have played, so a Favorites or
+    /// Recently Played pivot never loses a row to a twin it has no history for.
+    private func collapsingDuplicates(in songs: [Track]) -> [Track] {
+        guard HideDuplicateSongsSetting.isEnabled else {
+            duplicateCopies = [:]
+            return songs
+        }
+        let result = LibraryHygiene.collapsingDuplicateSongs(songs) { [self] track in
+            (LovedTracksService.shared.isLoved(track: track) ? 2 : 0) + (meta(for: track)?.lastPlayed != nil ? 1 : 0)
+        }
+        duplicateCopies = result.copies
+        return result.tracks
+    }
+
     private func buildSnapshot() -> Snapshot {
         var snapshot = Snapshot()
         let query = Self.searchFold(searchQuery)
@@ -1348,6 +1364,7 @@ final class LibraryViewModel {
                     return Self.searchFold("\(track.title)\n\(track.artist)\n\(track.albumTitle)").contains(query)
                 }
             }
+            songs = collapsingDuplicates(in: songs)
             visibleSongs = songs
             snapshot.appendItems(songs.map { .song($0) })
         case .artists:
