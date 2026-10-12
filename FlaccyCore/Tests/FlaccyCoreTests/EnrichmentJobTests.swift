@@ -261,6 +261,70 @@ final class EnrichmentJobTests: XCTestCase {
         XCTAssertEqual(decoded, record)
     }
 
+    func testQuotaResetIsTheNextUTCMidnightPlusTheCushion() {
+        let afternoon = Date(timeIntervalSince1970: 1_791_815_331)
+        let midnight = Date(timeIntervalSince1970: 1_791_849_600)
+        XCTAssertEqual(
+            EnrichmentPolicy.nextQuotaReset(after: afternoon),
+            midnight.addingTimeInterval(EnrichmentPolicy.quotaResetCushion)
+        )
+    }
+
+    func testQuotaResetOneSecondBeforeMidnightIsStillThatMidnight() {
+        let justBefore = Date(timeIntervalSince1970: 1_791_849_599)
+        XCTAssertEqual(
+            EnrichmentPolicy.nextQuotaReset(after: justBefore),
+            Date(timeIntervalSince1970: 1_791_849_600 + EnrichmentPolicy.quotaResetCushion)
+        )
+    }
+
+    func testQuotaResetAtMidnightIsAFullDayAway() {
+        let midnight = Date(timeIntervalSince1970: 1_791_849_600)
+        XCTAssertEqual(
+            EnrichmentPolicy.nextQuotaReset(after: midnight),
+            Date(timeIntervalSince1970: 1_791_849_600 + 86_400 + EnrichmentPolicy.quotaResetCushion)
+        )
+    }
+
+    func testQuotaResetIsNeverMoreThanADayAhead() {
+        for offset in stride(from: 0.0, to: 3 * 86_400, by: 5_417) {
+            let moment = Date(timeIntervalSince1970: 1_791_763_200 + offset)
+            let reset = EnrichmentPolicy.nextQuotaReset(after: moment)
+            XCTAssertGreaterThan(reset, moment)
+            XCTAssertLessThanOrEqual(
+                reset.timeIntervalSince(moment), 86_400 + EnrichmentPolicy.quotaResetCushion
+            )
+        }
+    }
+
+    func testOnlyTheStoppedActivitiesArePaused() {
+        let paused: Set<EnrichmentJobProgress.Activity> = [.waitingForNetwork, .dailyLimit, .serviceUnavailable]
+        for activity in [EnrichmentJobProgress.Activity.idle, .running, .waitingForNetwork,
+                         .needsEntitlement, .dailyLimit, .serviceUnavailable] {
+            XCTAssertEqual(activity.isPaused, paused.contains(activity), "\(activity)")
+        }
+    }
+
+    func testPausedSnapshotCarriesItsResumeMomentThroughCodable() throws {
+        let resumes = Date(timeIntervalSince1970: 1_791_849_630)
+        let snapshot = EnrichmentJobProgress(
+            activity: .dailyLimit, scope: .aiBatch, remaining: 312, completedThisRun: 140,
+            exhausted: 0, currentTitle: nil, startedAt: nil, resumesAt: resumes
+        )
+        let decoded = try JSONDecoder().decode(
+            EnrichmentJobProgress.self, from: JSONEncoder().encode(snapshot)
+        )
+        XCTAssertEqual(decoded, snapshot)
+        XCTAssertEqual(decoded.resumesAt, resumes)
+    }
+
+    func testSnapshotWrittenBeforeResumesAtExistedStillDecodes() throws {
+        let legacy = #"{"activity":"waitingForNetwork","scope":"album","remaining":7,"completedThisRun":2,"exhausted":0}"#
+        let decoded = try JSONDecoder().decode(EnrichmentJobProgress.self, from: Data(legacy.utf8))
+        XCTAssertEqual(decoded.activity, .waitingForNetwork)
+        XCTAssertNil(decoded.resumesAt)
+    }
+
     func testJobProgressExposesNoFraction() {
         let children = Mirror(reflecting: EnrichmentJobProgress.idle).children
         let labels = children.compactMap(\.label)

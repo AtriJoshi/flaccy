@@ -192,6 +192,32 @@ final class LibrarySurfaceRouterTests: XCTestCase {
         XCTAssertEqual(surface, .ambient)
     }
 
+    func testEveryPausedStateKeepsTheAmbientSurface() {
+        for activity: EnrichmentJobProgress.Activity in [.waitingForNetwork, .dailyLimit, .serviceUnavailable] {
+            var router = LibrarySurfaceRouter()
+            let surface = router.route(
+                load: .idle,
+                job: job(activity, remaining: 300, completedThisRun: 4),
+                debutCompleted: true,
+                hasLibrary: true,
+                elapsed: 12
+            )
+            XCTAssertEqual(surface, .ambient, "\(activity)")
+        }
+    }
+
+    func testAPausedJobThatHasCompletedNothingStaysOutOfTheWay() {
+        var router = LibrarySurfaceRouter()
+        let surface = router.route(
+            load: .idle,
+            job: job(.dailyLimit, remaining: 300, completedThisRun: 0),
+            debutCompleted: true,
+            hasLibrary: true,
+            elapsed: 60
+        )
+        XCTAssertEqual(surface, .none)
+    }
+
     func testNeedsEntitlementNeverRaisesTheAmbientSurface() {
         var router = LibrarySurfaceRouter()
         let surface = router.route(

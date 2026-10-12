@@ -30,7 +30,7 @@ public struct LibrarySurfaceRouter: Sendable, Equatable {
         }
         if debutLatched && !debutCompleted && !hasLibrary { return .debut }
         if load.isActive && hasLibrary { return .ambient }
-        if job.activity == .running || job.activity == .waitingForNetwork {
+        if job.activity == .running || job.activity.isPaused {
             guard job.completedThisRun >= 1, elapsed >= Self.ambientGrace else { return .none }
             return .ambient
         }

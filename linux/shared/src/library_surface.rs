@@ -49,7 +49,7 @@ impl SurfaceRouter {
         if load.is_active() && has_library {
             return Surface::Ambient;
         }
-        if job.activity == Activity::Running || job.activity == Activity::WaitingForNetwork {
+        if job.activity == Activity::Running || job.activity.is_paused() {
             if job.completed_this_run >= 1 && elapsed >= AMBIENT_GRACE {
                 return Surface::Ambient;
             }
@@ -213,6 +213,35 @@ mod tests {
         assert_eq!(
             router.route(&LoadProgress::default(), &job, true, true, 10.0),
             Surface::Ambient
+        );
+    }
+
+    #[test]
+    fn every_paused_state_keeps_the_ambient_surface() {
+        for activity in [
+            Activity::WaitingForNetwork,
+            Activity::DailyLimit,
+            Activity::ServiceUnavailable,
+        ] {
+            let mut router = SurfaceRouter::new();
+            let mut job = working(4);
+            job.activity = activity;
+            assert_eq!(
+                router.route(&LoadProgress::default(), &job, true, true, 12.0),
+                Surface::Ambient,
+                "{activity:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_paused_job_that_completed_nothing_stays_out_of_the_way() {
+        let mut router = SurfaceRouter::new();
+        let mut job = working(0);
+        job.activity = Activity::DailyLimit;
+        assert_eq!(
+            router.route(&LoadProgress::default(), &job, true, true, 60.0),
+            Surface::None
         );
     }
 

@@ -853,10 +853,11 @@ final class LibrarySettingsPane: SettingsPane {
             activitySpinner.startAnimation(nil)
             activityLabel.stringValue = EnrichmentJobCopy.headline(for: job.scope)
             activityDetail.stringValue = EnrichmentJobCopy.detail(remaining: job.remaining)
-        case .waitingForNetwork:
+        case .waitingForNetwork, .dailyLimit, .serviceUnavailable:
             activitySpinner.stopAnimation(nil)
-            activityLabel.stringValue = EnrichmentJobCopy.waitingForNetwork
-            activityDetail.stringValue = ""
+            let pause = EnrichmentJobCopy.pause(for: job)
+            activityLabel.stringValue = pause.headline
+            activityDetail.stringValue = pause.detail
         case .needsEntitlement:
             activitySpinner.stopAnimation(nil)
             activityLabel.stringValue = EnrichmentJobCopy.needsEntitlement

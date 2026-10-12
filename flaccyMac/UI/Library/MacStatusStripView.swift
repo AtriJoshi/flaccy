@@ -162,9 +162,10 @@ final class MacStatusStripView: NSView {
         case .running:
             headline.stringValue = EnrichmentJobCopy.headline(for: progress.scope)
             detail.stringValue = EnrichmentJobCopy.detail(remaining: progress.remaining)
-        case .waitingForNetwork:
-            headline.stringValue = EnrichmentJobCopy.waitingForNetwork
-            detail.stringValue = ""
+        case .waitingForNetwork, .dailyLimit, .serviceUnavailable:
+            let pause = EnrichmentJobCopy.pause(for: progress)
+            headline.stringValue = pause.headline
+            detail.stringValue = pause.detail
         case .needsEntitlement:
             headline.stringValue = EnrichmentJobCopy.needsEntitlement
             detail.stringValue = ""

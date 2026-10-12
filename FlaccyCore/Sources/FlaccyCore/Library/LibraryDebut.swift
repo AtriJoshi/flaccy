@@ -87,7 +87,7 @@ public struct LibraryDebutDirector: Sendable {
         if current == .finishing {
             let drained = jobHeardFrom && (job.activity == .idle || job.remaining == 0)
             let curtain = elapsedInFinishing >= curtainBudget
-            let blocked = job.activity == .needsEntitlement
+            let blocked = job.activity == .needsEntitlement || job.activity == .dailyLimit
             return (drained || curtain || blocked) ? .summary : .finishing
         }
         return current

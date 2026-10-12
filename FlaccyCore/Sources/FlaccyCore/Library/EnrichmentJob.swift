@@ -112,6 +112,27 @@ public enum EnrichmentPolicy {
     /// captive portal five more round trips per page.
     public static let transportFailuresBeforeWaiting = 5
 
+    /// How long a pass leaves the AI proxy alone after it has failed
+    /// `transportFailuresBeforeWaiting` times running with an answer of its own —
+    /// an error status, not silence. The route is fine, so waiting for it to
+    /// change would wait forever; the service gets a fixed breather instead.
+    public static let serviceRetryInterval: TimeInterval = 15 * 60
+
+    /// The proxy counts its daily allowance by UTC calendar day, so a spent
+    /// allowance comes back at the next UTC midnight whatever the reader's time
+    /// zone says. The cushion keeps the first request after it from landing on
+    /// the wrong side of the boundary when the two clocks disagree by a moment.
+    public static let quotaResetCushion: TimeInterval = 30
+
+    /// The first instant at which a day's allowance can be assumed fresh again.
+    public static func nextQuotaReset(after now: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? calendar.timeZone
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400)
+        return tomorrow.addingTimeInterval(quotaResetCushion)
+    }
+
     public static func isDue(_ record: EnrichmentRecord?, scope: EnrichmentScope, now: Date) -> Bool {
         guard let record else { return true }
         if record.fields.isSuperset(of: EnrichmentFields.required(for: scope)) { return false }
@@ -196,6 +217,20 @@ public enum EnrichmentKey {
 public struct EnrichmentJobProgress: Codable, Sendable, Equatable {
     public enum Activity: String, Codable, Sendable {
         case idle, running, waitingForNetwork, needsEntitlement
+
+        /// The AI proxy has spent its allowance for the day and the job is asleep
+        /// until `resumesAt`. The connection is fine, so it must never be reported
+        /// as one that is missing.
+        case dailyLimit
+
+        /// The AI proxy keeps answering with errors; the job retries on a timer.
+        case serviceUnavailable
+
+        /// Stopped on purpose, with a reason worth saying out loud and a way back
+        /// that needs nothing from the reader.
+        public var isPaused: Bool {
+            self == .waitingForNetwork || self == .dailyLimit || self == .serviceUnavailable
+        }
     }
     public var activity: Activity
     public var scope: EnrichmentScope
@@ -205,6 +240,10 @@ public struct EnrichmentJobProgress: Codable, Sendable, Equatable {
     public var currentTitle: String?
     public var startedAt: Date?
 
+    /// When a paused job will try again on its own. Nil for every state that has
+    /// no such moment, and absent from snapshots written before it existed.
+    public var resumesAt: Date?
+
     public init(
         activity: Activity,
         scope: EnrichmentScope,
@@ -212,7 +251,8 @@ public struct EnrichmentJobProgress: Codable, Sendable, Equatable {
         completedThisRun: Int,
         exhausted: Int,
         currentTitle: String?,
-        startedAt: Date?
+        startedAt: Date?,
+        resumesAt: Date? = nil
     ) {
         self.activity = activity
         self.scope = scope
@@ -221,6 +261,7 @@ public struct EnrichmentJobProgress: Codable, Sendable, Equatable {
         self.exhausted = exhausted
         self.currentTitle = currentTitle
         self.startedAt = startedAt
+        self.resumesAt = resumesAt
     }
 
     public static let idle = EnrichmentJobProgress(

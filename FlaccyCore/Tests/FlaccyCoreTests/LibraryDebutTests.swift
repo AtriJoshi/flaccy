@@ -122,6 +122,24 @@ final class LibraryDebutTests: XCTestCase {
         XCTAssertEqual(director.act, .summary)
     }
 
+    func testFinishingEndsImmediatelyWhenTheDailyAILimitIsSpent() {
+        var director = directorInFinishing()
+        XCTAssertTrue(
+            director.advance(load: .idle, job: job(.dailyLimit, remaining: 128),
+                             albumCount: 214, elapsedInFinishing: 0)
+        )
+        XCTAssertEqual(director.act, .summary)
+    }
+
+    func testFinishingKeepsWaitingThroughAServiceOutage() {
+        var director = directorInFinishing()
+        XCTAssertFalse(
+            director.advance(load: .idle, job: job(.serviceUnavailable, remaining: 128),
+                             albumCount: 214, elapsedInFinishing: 0)
+        )
+        XCTAssertEqual(director.act, .finishing)
+    }
+
     func testSummaryRoundTripsThroughCodable() throws {
         let summary = LibraryDebutSummary(
             trackCount: 2_847,

@@ -120,9 +120,9 @@ final class LibraryStatusBanner: UIView {
         accessibilityValue = LibraryLoadPhaseCopy.accessibilityValue(for: progress, fraction: fraction)
     }
 
-    /// The job has no bar by design. Waiting for a connection is the one state
-    /// that also stops the spinner: a spinner that keeps turning while nothing
-    /// is being fetched claims progress that is not happening.
+    /// The job has no bar by design. Every paused state also stops the spinner:
+    /// a spinner that keeps turning while nothing is being fetched claims
+    /// progress that is not happening.
     private func renderJob(_ progress: EnrichmentJobProgress) {
         progressView.isHidden = true
         progressView.setProgress(0, animated: false)
@@ -132,10 +132,11 @@ final class LibraryStatusBanner: UIView {
             spinner.startAnimating()
             label.text = EnrichmentJobCopy.headline(for: progress.scope)
             countLabel.text = EnrichmentJobCopy.detail(remaining: progress.remaining)
-        case .waitingForNetwork:
+        case .waitingForNetwork, .dailyLimit, .serviceUnavailable:
             spinner.stopAnimating()
-            label.text = EnrichmentJobCopy.waitingForNetwork
-            countLabel.text = nil
+            let pause = EnrichmentJobCopy.pause(for: progress)
+            label.text = pause.headline
+            countLabel.text = pause.detail.isEmpty ? nil : pause.detail
         case .needsEntitlement:
             spinner.stopAnimating()
             label.text = EnrichmentJobCopy.needsEntitlement

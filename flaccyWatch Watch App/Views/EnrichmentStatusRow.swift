@@ -43,8 +43,8 @@ struct EnrichmentStatusRow: View {
     }
 
     @ViewBuilder private var indicator: some View {
-        if content.isWaiting {
-            Image(systemName: "wifi.slash")
+        if let symbol = content.pausedSymbol {
+            Image(systemName: symbol)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
         } else {
@@ -61,12 +61,14 @@ extension EnrichmentStatusRow {
     /// What the wrist is allowed to say about the phone's job. `idle` and
     /// `needsEntitlement` produce nothing at all: an ended trial is told once on
     /// the phone and then only in Settings, and it is never launch chrome — on
-    /// any client, least of all the smallest one.
+    /// any client, least of all the smallest one. A paused job says why in the
+    /// detail line and swaps the ring for a glyph that names the reason; the
+    /// resume time is left to the phone, because a clock time does not fit.
     struct Content: Equatable {
 
         let headline: String
         let detail: String
-        let isWaiting: Bool
+        let pausedSymbol: String?
         let accessibilityValue: String
 
         init?(_ progress: EnrichmentJobProgress) {
@@ -74,11 +76,17 @@ extension EnrichmentStatusRow {
             case .idle, .needsEntitlement:
                 return nil
             case .running:
-                isWaiting = false
+                pausedSymbol = nil
                 detail = EnrichmentJobCopy.detail(remaining: progress.remaining)
             case .waitingForNetwork:
-                isWaiting = true
+                pausedSymbol = "wifi.slash"
                 detail = EnrichmentJobCopy.waitingForNetwork
+            case .dailyLimit:
+                pausedSymbol = "hourglass"
+                detail = EnrichmentJobCopy.dailyLimit
+            case .serviceUnavailable:
+                pausedSymbol = "exclamationmark.triangle"
+                detail = EnrichmentJobCopy.serviceUnavailable
             }
             headline = EnrichmentJobCopy.headline(for: progress.scope)
             accessibilityValue = EnrichmentJobCopy.accessibilityValue(for: progress)

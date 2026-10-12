@@ -51,6 +51,11 @@ nonisolated struct EnrichmentTaskOutcome: Sendable {
     let failure: EnrichmentFailure?
     let status: EnrichmentStatus
 
+    /// Set when the AI proxy stopped the attempt for a reason the job should act
+    /// on — sleep until the allowance resets, give the service a breather —
+    /// rather than count against the connection.
+    let interruption: AIInterruption?
+
     /// False when the entity was already settled and no source was consulted,
     /// so a run that touches nothing cannot inflate the completion count.
     let attempted: Bool
@@ -104,7 +109,8 @@ nonisolated enum EnrichmentTasks {
         resolved: EnrichmentFields = [],
         gained: EnrichmentFields = [],
         failure: EnrichmentFailure? = nil,
-        attempted: Bool
+        attempted: Bool,
+        interruption: AIInterruption? = nil
     ) -> EnrichmentTaskOutcome {
         EnrichmentTaskOutcome(
             scope: entity.scope,
@@ -114,6 +120,7 @@ nonisolated enum EnrichmentTasks {
             gained: gained,
             failure: failure,
             status: record.status,
+            interruption: interruption,
             attempted: attempted
         )
     }
@@ -242,8 +249,9 @@ nonisolated enum ArtistEnrichmentTask {
 ///
 /// Lifted from `Library.analyzeLibrary`, which walked the whole library on every
 /// launch with only an in-memory retry interval to stop it. The batch is now a
-/// durable entity: a folder Groq has been through is never sent again, and a
-/// folder it could not read backs off on the shared ladder.
+/// durable entity: a folder the AI has been through is never sent again, and a
+/// folder it could not read backs off on the shared ladder. A folder the pass was
+/// interrupted in keeps whatever was identified and stays queued for the rest.
 nonisolated enum AIIdentificationTask {
 
     /// A batch that matched anything has retitled albums, and a retitle is a new
@@ -286,14 +294,29 @@ nonisolated enum AIIdentificationTask {
 
         await AppLogger.info("AI batch: \(directory) (\(tracks.count) tracks)", category: .content)
 
-        guard let identified = await GroqService.shared.analyzeLibrary(tracks: contexts) else {
+        let analysis = await GroqService.shared.analyzeLibrary(tracks: contexts)
+        let matched = if let identified = analysis.music { await apply(identified, to: tracks, in: db) } else { 0 }
+        if matched > 0 { try? db.sweepOrphanedAlbumEnrichment() }
+
+        if let interruption = analysis.interruption {
+            EnrichmentPolicy.apply(to: &record, scope: .aiBatch, resolved: [], failure: .transport, now: now)
+            try? db.upsertEnrichmentRecord(record)
+            await AppLogger.info(
+                "AI batch \(directory): interrupted after \(matched)/\(tracks.count) tracks (\(interruption))",
+                category: .content
+            )
+            return EnrichmentTasks.outcome(
+                entity, record: record, gained: matched > 0 ? [.identified] : [],
+                failure: .transport, attempted: true, interruption: interruption
+            )
+        }
+
+        guard analysis.music != nil else {
             EnrichmentPolicy.apply(to: &record, scope: .aiBatch, resolved: [], failure: .transport, now: now)
             try? db.upsertEnrichmentRecord(record)
             return EnrichmentTasks.outcome(entity, record: record, failure: .transport, attempted: true)
         }
 
-        let matched = await apply(identified, to: tracks, in: db)
-        if matched > 0 { try? db.sweepOrphanedAlbumEnrichment() }
         let resolved: EnrichmentFields = matched > 0 ? [.identified] : []
         let failure: EnrichmentFailure? = matched > 0 ? nil : .notFound
 
@@ -308,7 +331,7 @@ nonisolated enum AIIdentificationTask {
         )
     }
 
-    /// Writes what Groq recognised and returns how many track rows it matched.
+    /// Writes what the AI recognised and returns how many track rows it matched.
     /// A batch that matches nothing is the model answering that it cannot read
     /// these filenames, which is a `.notFound` and costs the folder an attempt.
     private static func apply(

@@ -80,10 +80,10 @@ final class SyncTitlebarAccessoryController: NSTitlebarAccessoryViewController {
             setShown(true)
             label.stringValue = EnrichmentJobCopy.detail(remaining: job.remaining)
             pill.toolTip = EnrichmentJobCopy.line(for: job)
-        case .waitingForNetwork:
+        case .waitingForNetwork, .dailyLimit, .serviceUnavailable:
             setShown(true)
-            label.stringValue = EnrichmentJobCopy.waitingForNetwork
-            pill.toolTip = EnrichmentJobCopy.waitingForNetwork
+            label.stringValue = EnrichmentJobCopy.pause(for: job).headline
+            pill.toolTip = EnrichmentJobCopy.line(for: job)
         }
         view.setAccessibilityLabel(EnrichmentJobCopy.accessibilityValue(for: job))
         sizeToChip()

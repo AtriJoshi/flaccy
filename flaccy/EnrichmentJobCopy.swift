@@ -32,6 +32,44 @@ nonisolated enum EnrichmentJobCopy {
         String(localized: "AI cleanup needs Flaccy Lifetime")
     }
 
+    static var dailyLimit: String {
+        String(localized: "Daily AI limit reached")
+    }
+
+    static var serviceUnavailable: String {
+        String(localized: "AI is unavailable right now")
+    }
+
+    /// The clock time the daily allowance comes back, in the reader's own format.
+    static func resumes(at date: Date) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        return String(localized: "Resumes at \(time)")
+    }
+
+    /// Two-slot surfaces — a headline and a detail — say why the job is stopped
+    /// in the same two slots whatever the reason. Only the stopped activities
+    /// have anything to say; the rest answer with nothing. A daily-limit snapshot
+    /// that somehow lacks its resume moment still gets the true answer, the
+    /// proxy's next UTC midnight, rather than a blank.
+    struct Pause: Equatable {
+        let headline: String
+        let detail: String
+    }
+
+    static func pause(for progress: EnrichmentJobProgress) -> Pause {
+        switch progress.activity {
+        case .waitingForNetwork:
+            return Pause(headline: waitingForNetwork, detail: "")
+        case .dailyLimit:
+            let resumesAt = progress.resumesAt ?? EnrichmentPolicy.nextQuotaReset(after: Date())
+            return Pause(headline: dailyLimit, detail: resumes(at: resumesAt))
+        case .serviceUnavailable:
+            return Pause(headline: serviceUnavailable, detail: "")
+        case .idle, .running, .needsEntitlement:
+            return Pause(headline: "", detail: "")
+        }
+    }
+
     /// The single line an ambient surface shows: the headline and the countdown,
     /// or the state that has replaced them both. An idle job says nothing at all
     /// — a surface with no line is the point of the whole design.
@@ -39,8 +77,11 @@ nonisolated enum EnrichmentJobCopy {
         switch progress.activity {
         case .idle:
             return ""
-        case .waitingForNetwork:
-            return waitingForNetwork
+        case .waitingForNetwork, .serviceUnavailable:
+            return pause(for: progress).headline
+        case .dailyLimit:
+            let stopped = pause(for: progress)
+            return String(localized: "\(stopped.headline) · \(stopped.detail)")
         case .needsEntitlement:
             return needsEntitlement
         case .running:
@@ -113,14 +154,22 @@ nonisolated enum EnrichmentJobCopy {
     }
 
     /// Spoken form for assistive technologies: the same two facts as the line,
-    /// as a sentence. Offline is named rather than counted, because the count is
-    /// not what changed.
+    /// as a sentence. A stopped job names why it stopped rather than counting,
+    /// because the count is not what changed.
     static func accessibilityValue(for progress: EnrichmentJobProgress) -> String {
         let headline = headline(for: progress.scope)
-        guard progress.activity != .waitingForNetwork else {
+        switch progress.activity {
+        case .waitingForNetwork:
             return String(localized: "\(headline), waiting for a connection")
+        case .dailyLimit:
+            let time = (progress.resumesAt ?? EnrichmentPolicy.nextQuotaReset(after: Date()))
+                .formatted(date: .omitted, time: .shortened)
+            return String(localized: "\(headline), daily AI limit reached, resumes at \(time)")
+        case .serviceUnavailable:
+            return String(localized: "\(headline), AI is unavailable right now")
+        case .idle, .running, .needsEntitlement:
+            let count = LibraryLoadPhaseCopy.number(progress.remaining)
+            return String(localized: "\(headline), \(count) albums left")
         }
-        let count = LibraryLoadPhaseCopy.number(progress.remaining)
-        return String(localized: "\(headline), \(count) albums left")
     }
 }

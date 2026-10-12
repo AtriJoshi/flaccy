@@ -32,8 +32,28 @@ nonisolated struct TrackContext: Sendable {
     let trackNumber: Int
 }
 
+/// Why the AI pass stopped asking about a folder's tracks. Each reason wants a
+/// different answer from the job — wait for the route, sleep until the daily
+/// allowance resets, or give the service a breather — so none of them is folded
+/// into a bare failure.
+nonisolated enum AIInterruption: Sendable, Equatable {
+    case unreachable
+    case quotaReached(resetsAt: Date)
+    case unavailable
+}
+
+/// What an analysis managed before it stopped. `music` holds whatever was
+/// identified and is kept even when `interruption` is set, because a half
+/// answered folder is worth writing down and re-asking about only for the rest.
+nonisolated struct AIAnalysis: Sendable {
+    let music: IdentifiedMusic?
+    let interruption: AIInterruption?
+
+    static let nothing = AIAnalysis(music: nil, interruption: nil)
+}
+
 protocol MetadataClassifying: AnyObject, Sendable {
-    func analyzeLibrary(tracks: [TrackContext]) async -> IdentifiedMusic?
+    func analyzeLibrary(tracks: [TrackContext]) async -> AIAnalysis
     func classifyGenre(artist: String, album: String, trackTitles: [String]) async -> GenreClassification?
 }
 
@@ -42,7 +62,6 @@ final class GroqService: MetadataClassifying {
     static let shared: MetadataClassifying = GroqService()
 
     nonisolated private static let endpoint = URL(string: "https://flaccy-api.midgarcorp.cc/v1/metadata")!
-    nonisolated private static let model = "llama-3.3-70b-versatile"
 
     nonisolated private static let deviceIdentifier: String = {
         let key = "flaccy.deviceIdentifier"
@@ -62,27 +81,30 @@ final class GroqService: MetadataClassifying {
 
     nonisolated private static let maxBatchSize = 40
     nonisolated private static let minBatchSize = 5
+    nonisolated private static let busyBackoff = [10, 20, 40]
 
     nonisolated private static func hasActiveEntitlement() async -> Bool {
         await MainActor.run { PurchaseManager.shared.allowsPlayback }
     }
 
-    nonisolated func analyzeLibrary(tracks: [TrackContext]) async -> IdentifiedMusic? {
-        guard !tracks.isEmpty else { return nil }
+    nonisolated func analyzeLibrary(tracks: [TrackContext]) async -> AIAnalysis {
+        guard !tracks.isEmpty else { return .nothing }
         guard await Self.hasActiveEntitlement() else {
             await AppLogger.info("Skipping AI analysis: no active entitlement", category: .content)
-            return nil
+            return .nothing
         }
 
-        let albums = await analyzeBatch(tracks)
-        guard !albums.isEmpty else { return nil }
+        let batch = await analyzeBatch(tracks)
+        guard !batch.albums.isEmpty else {
+            return AIAnalysis(music: nil, interruption: batch.interruption)
+        }
 
-        let merged = Self.mergeDuplicateAlbums(albums)
-        await AppLogger.info("Groq analyzed library: \(merged.count) albums identified", category: .content)
-        return IdentifiedMusic(albums: merged)
+        let merged = Self.mergeDuplicateAlbums(batch.albums)
+        await AppLogger.info("AI analyzed library: \(merged.count) albums identified", category: .content)
+        return AIAnalysis(music: IdentifiedMusic(albums: merged), interruption: batch.interruption)
     }
 
-    nonisolated private func analyzeBatch(_ tracks: [TrackContext]) async -> [IdentifiedAlbum] {
+    nonisolated private func analyzeBatch(_ tracks: [TrackContext]) async -> BatchResult {
         if tracks.count > Self.maxBatchSize {
             return await bisectAndAnalyze(tracks)
         }
@@ -92,7 +114,8 @@ final class GroqService: MetadataClassifying {
         switch await performRequest(request) {
         case .success(let data):
             do {
-                return try JSONDecoder().decode(IdentifiedMusic.self, from: data).albums
+                let albums = try JSONDecoder().decode(IdentifiedMusic.self, from: data).albums
+                return BatchResult(albums: albums, interruption: nil)
             } catch {
                 await AppLogger.error("Failed to decode library analysis: \(error.localizedDescription)", category: .content)
                 return await splitOrGiveUp(tracks, reason: "undecodable response")
@@ -101,27 +124,31 @@ final class GroqService: MetadataClassifying {
             return await splitOrGiveUp(tracks, reason: "payload too large")
         case .truncated:
             return await splitOrGiveUp(tracks, reason: "response truncated at token limit")
-        case .failure:
-            return []
+        case .interrupted(let interruption):
+            return BatchResult(albums: [], interruption: interruption)
         }
     }
 
     /// Bisects a failed or oversized batch and retries each half, giving up once
     /// the batch is at or below the minimum size where splitting cannot help.
-    nonisolated private func splitOrGiveUp(_ tracks: [TrackContext], reason: String) async -> [IdentifiedAlbum] {
+    nonisolated private func splitOrGiveUp(_ tracks: [TrackContext], reason: String) async -> BatchResult {
         guard tracks.count > Self.minBatchSize else {
             await AppLogger.warning("Giving up on batch of \(tracks.count) tracks: \(reason)", category: .content)
-            return []
+            return BatchResult(albums: [], interruption: nil)
         }
         await AppLogger.info("Splitting batch of \(tracks.count) tracks: \(reason)", category: .content)
         return await bisectAndAnalyze(tracks)
     }
 
-    nonisolated private func bisectAndAnalyze(_ tracks: [TrackContext]) async -> [IdentifiedAlbum] {
+    /// Stops at the first half that was interrupted: a spent allowance or a dead
+    /// service will answer the second half no differently, and asking anyway is
+    /// how a day's requests disappear into a failure.
+    nonisolated private func bisectAndAnalyze(_ tracks: [TrackContext]) async -> BatchResult {
         let mid = tracks.count / 2
         let firstHalf = await analyzeBatch(Array(tracks[..<mid]))
+        guard firstHalf.interruption == nil else { return firstHalf }
         let secondHalf = await analyzeBatch(Array(tracks[mid...]))
-        return firstHalf + secondHalf
+        return BatchResult(albums: firstHalf.albums + secondHalf.albums, interruption: secondHalf.interruption)
     }
 
     /// Recombines albums that were split across batches so the caller sees one
@@ -158,7 +185,6 @@ final class GroqService: MetadataClassifying {
         }.joined(separator: "\n")
 
         return ChatRequest(
-            model: Self.model,
             messages: [
                 ChatMessage(role: "system", content: """
                     You are an expert music librarian with encyclopedic knowledge of music. Your job is to analyze a collection of audio files and organize them into the correct artist/album/track structure.
@@ -195,7 +221,6 @@ final class GroqService: MetadataClassifying {
         let tracks = trackTitles.joined(separator: ", ")
 
         let request = ChatRequest(
-            model: Self.model,
             messages: [
                 ChatMessage(role: "system", content: "You are a music classification expert. Classify the genre. Respond with JSON: {\"genre\": \"...\", \"subGenre\": \"...\", \"mood\": \"...\"}"),
                 ChatMessage(role: "user", content: "Artist: \(artist), Album: \(album), Tracks: \(tracks)"),
@@ -225,43 +250,62 @@ final class GroqService: MetadataClassifying {
 
             let (data, response) = try await session.data(for: urlRequest)
 
-            guard let http = response as? HTTPURLResponse else { return .failure }
+            guard let http = response as? HTTPURLResponse else { return .interrupted(.unreachable) }
 
-            if http.statusCode == 429 && retryCount < 3 {
-                let waitSeconds = [10, 20, 40][retryCount]
-                await AppLogger.info("Groq rate limited, waiting \(waitSeconds)s (retry \(retryCount + 1)/3)", category: .content)
+            let reply = AIProxyReply.classify(
+                status: http.statusCode,
+                errorCode: Self.errorCode(in: data),
+                retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init),
+                now: Date()
+            )
+
+            switch reply {
+            case .answer:
+                break
+            case .busy:
+                guard retryCount < Self.busyBackoff.count else {
+                    await AppLogger.warning("AI proxy stayed busy through every retry", category: .content)
+                    return .interrupted(.unavailable)
+                }
+                let waitSeconds = Self.busyBackoff[retryCount]
+                await AppLogger.info("AI proxy busy, waiting \(waitSeconds)s (retry \(retryCount + 1)/\(Self.busyBackoff.count))", category: .content)
                 try? await Task.sleep(for: .seconds(waitSeconds))
                 return await performRequest(chatRequest, retryCount: retryCount + 1)
-            }
-
-            if http.statusCode == 413 {
-                await AppLogger.warning("Groq request too large", category: .content)
+            case .quotaReached(let resetsAt):
+                await AppLogger.info("AI daily limit reached; resumes \(resetsAt.formatted(date: .abbreviated, time: .shortened))", category: .content)
+                return .interrupted(.quotaReached(resetsAt: resetsAt))
+            case .payloadTooLarge:
+                await AppLogger.warning("AI request too large", category: .content)
                 return .payloadTooLarge
-            }
-
-            guard (200...299).contains(http.statusCode) else {
+            case .unavailable:
                 if let body = String(data: data, encoding: .utf8) {
-                    await AppLogger.error("Groq API \(http.statusCode): \(body.prefix(200))", category: .content)
+                    await AppLogger.error("AI proxy \(http.statusCode): \(body.prefix(200))", category: .content)
                 }
-                return .failure
+                return .interrupted(.unavailable)
             }
 
             let chatResponse = try JSONDecoder().decode(ChatResponse.self, from: data)
             guard let choice = chatResponse.choices.first else {
-                await AppLogger.error("Groq API returned empty response", category: .content)
-                return .failure
+                await AppLogger.error("AI proxy returned an empty response", category: .content)
+                return .interrupted(.unavailable)
             }
 
             if choice.finish_reason == "length" {
-                await AppLogger.warning("Groq response truncated at token limit", category: .content)
+                await AppLogger.warning("AI response truncated at token limit", category: .content)
                 return .truncated
             }
 
             return .success(Data(choice.message.content.utf8))
         } catch {
-            await AppLogger.error("Groq API error: \(error.localizedDescription)", category: .content)
-            return .failure
+            await AppLogger.error("AI proxy error: \(error.localizedDescription)", category: .content)
+            return .interrupted(error is URLError ? .unreachable : .unavailable)
         }
+    }
+
+    /// The proxy's machine-readable reason, `{"error": "<code>"}`; absent from an
+    /// answer, and from the raw upstream bodies an older proxy passed through.
+    nonisolated private static func errorCode(in data: Data) -> String? {
+        (try? JSONDecoder().decode(ProxyError.self, from: data))?.error
     }
 }
 
@@ -269,11 +313,19 @@ private nonisolated enum RequestOutcome {
     case success(Data)
     case payloadTooLarge
     case truncated
-    case failure
+    case interrupted(AIInterruption)
+}
+
+private nonisolated struct BatchResult {
+    let albums: [IdentifiedAlbum]
+    let interruption: AIInterruption?
+}
+
+private nonisolated struct ProxyError: Decodable {
+    let error: String
 }
 
 private nonisolated struct ChatRequest: Encodable {
-    let model: String
     let messages: [ChatMessage]
     let temperature: Double
     let max_completion_tokens: Int

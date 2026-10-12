@@ -5,7 +5,7 @@
 //! selective invalidation, and transport failures that never burn an attempt.
 //! `is_due` is the only thing in either codebase allowed to gate an attempt.
 
-use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -258,6 +258,26 @@ pub const RATE_LIMIT_DEFERRAL_SECONDS: i64 = 15 * 60;
 /// round trips per page. Mirrors `EnrichmentPolicy.transportFailuresBeforeWaiting`.
 pub const TRANSPORT_FAILURES_BEFORE_WAITING: i64 = 5;
 
+/// How long a pass leaves the AI proxy alone after it kept answering with
+/// errors. Mirrors `EnrichmentPolicy.serviceRetryInterval`.
+pub const SERVICE_RETRY_SECONDS: i64 = 15 * 60;
+
+/// The proxy counts its daily allowance by UTC calendar day, so a spent
+/// allowance comes back at the next UTC midnight; this cushion keeps the first
+/// request after it off the wrong side of the boundary. Mirrors
+/// `EnrichmentPolicy.quotaResetCushion`.
+pub const QUOTA_RESET_CUSHION_SECONDS: i64 = 30;
+
+/// The first instant a day's allowance can be assumed fresh again. Mirrors
+/// `EnrichmentPolicy.nextQuotaReset(after:)`.
+pub fn next_quota_reset(now: DateTime<Utc>) -> DateTime<Utc> {
+    let midnight = (now.date_naive() + Duration::days(1))
+        .and_hms_opt(0, 0, 0)
+        .map(|naive| Utc.from_utc_datetime(&naive))
+        .unwrap_or(now + Duration::days(1));
+    midnight + Duration::seconds(QUOTA_RESET_CUSHION_SECONDS)
+}
+
 /// Satisfaction is re-derived from `fields` on every read rather than trusted
 /// from `status`, so widening `Fields::required` in a future release revives
 /// exactly the entities that no longer meet the bar, with no migration.
@@ -432,6 +452,23 @@ pub enum Activity {
     Running,
     WaitingForNetwork,
     NeedsEntitlement,
+    /// The AI proxy has spent its allowance for the day and the job sleeps until
+    /// `resumes_at`. Linux never calls the proxy, so it never reports this; the
+    /// variant exists so the two models stay the same shape.
+    DailyLimit,
+    /// The AI proxy keeps answering with errors; the job retries on a timer.
+    ServiceUnavailable,
+}
+
+impl Activity {
+    /// Stopped on purpose, with a reason worth saying out loud and a way back
+    /// that needs nothing from the reader.
+    pub fn is_paused(self) -> bool {
+        matches!(
+            self,
+            Activity::WaitingForNetwork | Activity::DailyLimit | Activity::ServiceUnavailable
+        )
+    }
 }
 
 /// Deliberately fraction-free: the job is unbounded network work, so it is
@@ -445,6 +482,10 @@ pub struct JobProgress {
     pub exhausted: usize,
     pub current_title: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
+    /// When a paused job tries again on its own; absent for every state that has
+    /// no such moment, and from snapshots written before it existed.
+    #[serde(default)]
+    pub resumes_at: Option<DateTime<Utc>>,
 }
 
 impl JobProgress {
@@ -457,6 +498,7 @@ impl JobProgress {
             exhausted: 0,
             current_title: None,
             started_at: None,
+            resumes_at: None,
         }
     }
 
@@ -598,9 +640,12 @@ FROM artists";
 pub mod copy {
     use super::{Activity, Fields, JobProgress, Scope};
     use crate::load_progress::group_digits;
+    use chrono::{Local, Utc};
 
     pub const WAITING_FOR_NETWORK: &str = "Waiting for a connection";
     pub const NEEDS_ENTITLEMENT: &str = "AI cleanup needs Flaccy Lifetime";
+    pub const DAILY_LIMIT: &str = "Daily AI limit reached";
+    pub const SERVICE_UNAVAILABLE: &str = "AI is unavailable right now";
     pub const UP_TO_DATE: &str = "Up to date — every album has artwork and a year.";
     pub const FIND_MISSING_ARTWORK: &str = "Find Missing Artwork";
     pub const TRY_AGAIN: &str = "Try Again";
@@ -623,12 +668,32 @@ pub mod copy {
         }
     }
 
+    /// "Resumes at 03:00": the time arrives already formatted. Apple formats it
+    /// with the reader's own locale; the recorded divergence here is a 24-hour
+    /// local clock.
+    pub fn resumes_at(time: &str) -> String {
+        format!("Resumes at {time}")
+    }
+
+    fn resume_clock(job: &JobProgress) -> String {
+        job.resumes_at
+            .unwrap_or_else(|| super::next_quota_reset(Utc::now()))
+            .with_timezone(&Local)
+            .format("%H:%M")
+            .to_string()
+    }
+
     /// The one line a client shows for a running job, or nothing at all — an
     /// unentitled AI pass is reported in Settings, never as launch chrome.
     pub fn ambient(job: &JobProgress) -> Option<String> {
         match job.activity {
             Activity::Idle | Activity::NeedsEntitlement => None,
             Activity::WaitingForNetwork => Some(WAITING_FOR_NETWORK.to_string()),
+            Activity::ServiceUnavailable => Some(SERVICE_UNAVAILABLE.to_string()),
+            Activity::DailyLimit => Some(format!(
+                "{DAILY_LIMIT} · {}",
+                resumes_at(&resume_clock(job))
+            )),
             Activity::Running => Some(format!(
                 "{} · {}",
                 headline(job.scope),
@@ -686,6 +751,14 @@ pub mod copy {
         match job.activity {
             Activity::WaitingForNetwork => {
                 format!("{}, waiting for a connection", headline(job.scope))
+            }
+            Activity::DailyLimit => format!(
+                "{}, daily AI limit reached, resumes at {}",
+                headline(job.scope),
+                resume_clock(job)
+            ),
+            Activity::ServiceUnavailable => {
+                format!("{}, AI is unavailable right now", headline(job.scope))
             }
             _ => format!(
                 "{}, {} albums left",
@@ -986,6 +1059,7 @@ mod tests {
             exhausted: _,
             current_title: _,
             started_at: _,
+            resumes_at: _,
         } = JobProgress::idle();
         assert!(!JobProgress::idle().is_active());
     }
@@ -1103,6 +1177,80 @@ mod tests {
         );
         job.activity = Activity::NeedsEntitlement;
         assert_eq!(copy::ambient(&job), None);
+    }
+
+    #[test]
+    fn quota_reset_is_the_next_utc_midnight_plus_the_cushion() {
+        let afternoon = Utc.timestamp_opt(1_791_815_331, 0).unwrap();
+        assert_eq!(
+            next_quota_reset(afternoon),
+            Utc.timestamp_opt(1_791_849_600 + QUOTA_RESET_CUSHION_SECONDS, 0).unwrap()
+        );
+        let just_before = Utc.timestamp_opt(1_791_849_599, 0).unwrap();
+        assert_eq!(
+            next_quota_reset(just_before),
+            Utc.timestamp_opt(1_791_849_600 + QUOTA_RESET_CUSHION_SECONDS, 0).unwrap()
+        );
+        let midnight = Utc.timestamp_opt(1_791_849_600, 0).unwrap();
+        assert_eq!(
+            next_quota_reset(midnight),
+            Utc.timestamp_opt(1_791_849_600 + 86_400 + QUOTA_RESET_CUSHION_SECONDS, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn quota_reset_is_never_more_than_a_day_ahead() {
+        let mut offset = 0;
+        while offset < 3 * 86_400 {
+            let moment = Utc.timestamp_opt(1_791_763_200 + offset, 0).unwrap();
+            let reset = next_quota_reset(moment);
+            assert!(reset > moment);
+            assert!(reset - moment <= Duration::seconds(86_400 + QUOTA_RESET_CUSHION_SECONDS));
+            offset += 5_417;
+        }
+    }
+
+    #[test]
+    fn only_the_stopped_activities_are_paused() {
+        let paused = [
+            Activity::WaitingForNetwork,
+            Activity::DailyLimit,
+            Activity::ServiceUnavailable,
+        ];
+        for activity in [
+            Activity::Idle,
+            Activity::Running,
+            Activity::WaitingForNetwork,
+            Activity::NeedsEntitlement,
+            Activity::DailyLimit,
+            Activity::ServiceUnavailable,
+        ] {
+            assert_eq!(activity.is_paused(), paused.contains(&activity), "{activity:?}");
+        }
+    }
+
+    #[test]
+    fn a_snapshot_written_before_resumes_at_existed_still_decodes() {
+        let legacy = r#"{"activity":"waitingForNetwork","scope":"album","remaining":7,"completed_this_run":2,"exhausted":0,"current_title":null,"started_at":null}"#;
+        let decoded: JobProgress = serde_json::from_str(legacy).unwrap();
+        assert_eq!(decoded.activity, Activity::WaitingForNetwork);
+        assert_eq!(decoded.resumes_at, None);
+    }
+
+    #[test]
+    fn paused_lines_read_as_the_apple_copy_deck() {
+        let mut job = JobProgress::idle();
+        job.activity = Activity::ServiceUnavailable;
+        assert_eq!(
+            copy::ambient(&job).as_deref(),
+            Some("AI is unavailable right now")
+        );
+        job.activity = Activity::DailyLimit;
+        job.resumes_at = Some(Utc.timestamp_opt(1_791_849_630, 0).unwrap());
+        let line = copy::ambient(&job).unwrap();
+        assert!(line.starts_with("Daily AI limit reached · Resumes at "), "{line}");
+        assert_eq!(copy::resumes_at("03:00"), "Resumes at 03:00");
+        assert!(copy::accessibility(&job).starts_with("Finding artwork, daily AI limit reached, resumes at "));
     }
 
     #[test]

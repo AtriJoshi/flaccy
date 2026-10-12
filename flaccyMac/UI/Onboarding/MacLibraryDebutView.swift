@@ -178,8 +178,8 @@ final class MacLibraryDebutView: NSView {
         chip.isHidden = !(state.job.scope == .aiBatch && !PurchaseManager.shared.state.isPurchased)
         aiButton.isHidden = true
         countdown.isHidden = false
-        countdown.stringValue = state.job.activity == .waitingForNetwork
-            ? EnrichmentJobCopy.waitingForNetwork
+        countdown.stringValue = state.job.activity.isPaused
+            ? EnrichmentJobCopy.line(for: state.job)
             : EnrichmentJobCopy.detail(remaining: state.job.remaining)
         crossfadeCaption(to: state.job.currentTitle)
         setAccessibilityValueDescription(EnrichmentJobCopy.accessibilityValue(for: state.job))

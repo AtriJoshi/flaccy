@@ -51,7 +51,18 @@ actor EnrichmentCoordinator {
 
     private var completedThisRun = 0
     private var startedAt: Date?
-    private var consecutiveTransportFailures = 0
+    private var breaker = EnrichmentBreaker()
+
+    /// Why the AI scope is asleep and when it wakes. Held here, not in the
+    /// published snapshot, because the other scopes keep running underneath it
+    /// and each of them publishes over the top.
+    private struct AIPause {
+        let activity: EnrichmentJobProgress.Activity
+        let resumesAt: Date
+    }
+
+    private var aiPause: AIPause?
+    private var pauseResume: Task<Void, Never>?
 
     private init() {}
 
@@ -106,10 +117,30 @@ actor EnrichmentCoordinator {
             }
         } while rerunRequested && !Task.isCancelled
 
+        let owedReport = pausedAIReport()
         run = nil
         startedAt = nil
-        if !holdsItsLastReport { publish(.idle) }
+        if let owedReport {
+            publish(owedReport)
+        } else if !holdsItsLastReport {
+            publish(.idle)
+        }
         flushPublish()
+    }
+
+    /// What a pass that ended with the AI scope still asleep owes the reader: the
+    /// album and artist scopes finish and go quiet, and the one thing still
+    /// queued — and why it is not moving — would otherwise vanish with them.
+    private func pausedAIReport() -> EnrichmentJobProgress? {
+        guard let pause = aiPause, pause.resumesAt > Date() else { return nil }
+        let db = DatabaseManager.shared
+        let scope = EnrichmentScope.aiBatch
+        let remaining = (try? db.countDue(scope: scope, version: scope.currentVersion, now: Date())) ?? 0
+        guard remaining > 0 else { return nil }
+        return paused(
+            pause, scope: scope, remaining: remaining,
+            exhausted: (try? db.countExhausted(scope: scope)) ?? 0
+        )
     }
 
     /// Whether the pass ended owing the reader an explanation it must keep on
@@ -131,7 +162,12 @@ actor EnrichmentCoordinator {
     private func drain(scope: EnrichmentScope) async {
         let db = DatabaseManager.shared
         var attempted = Set<String>()
-        consecutiveTransportFailures = 0
+        breaker.reset()
+
+        if scope == .aiBatch, let pause = aiPause {
+            guard pause.resumesAt <= Date() else { return }
+            aiPause = nil
+        }
 
         while !Task.isCancelled {
             let version = scope.currentVersion
@@ -190,22 +226,24 @@ actor EnrichmentCoordinator {
                     announce(title: title, artist: artist)
                 }
 
-                switch outcome.failure {
-                case .transport:
-                    consecutiveTransportFailures += 1
-                case .unauthorized:
+                switch breaker.observe(Self.observation(of: outcome), now: Date()) {
+                case .carryOn:
+                    if !stop {
+                        publish(running(scope: scope, remaining: left, exhausted: exhausted, title: outcome.title))
+                    }
+                case .needsEntitlement:
                     stop = true
                     publish(needsEntitlement(scope: scope, remaining: left, exhausted: exhausted))
-                default:
-                    consecutiveTransportFailures = 0
-                }
-
-                if consecutiveTransportFailures >= EnrichmentPolicy.transportFailuresBeforeWaiting {
+                case .waitForNetwork:
                     stop = true
                     publish(waitingForNetwork(scope: scope, remaining: left, exhausted: exhausted))
                     armNetworkResume(after: network.reachability.generation)
-                } else if !stop {
-                    publish(running(scope: scope, remaining: left, exhausted: exhausted, title: outcome.title))
+                case .pause(let activity, let resumesAt):
+                    stop = true
+                    publish(paused(
+                        pauseAI(activity, until: resumesAt),
+                        scope: scope, remaining: left, exhausted: exhausted
+                    ))
                 }
 
                 guard !stop, next < page.count else { continue }
@@ -216,6 +254,23 @@ actor EnrichmentCoordinator {
         }
 
         return stop
+    }
+
+    /// What one finished attempt tells the breaker. An interruption comes from
+    /// the AI proxy and says more than the failure it is filed under, so it is
+    /// read first.
+    private static func observation(of outcome: EnrichmentTaskOutcome) -> EnrichmentBreaker.Observation {
+        switch outcome.interruption {
+        case .quotaReached(let resetsAt)?: return .quotaReached(resetsAt: resetsAt)
+        case .unavailable?: return .serviceError
+        case .unreachable?: return .transport
+        case nil:
+            switch outcome.failure {
+            case .transport: return .transport
+            case .unauthorized: return .unauthorized
+            default: return .progress
+            }
+        }
     }
 
     /// Builds this page's entities. Albums and artists are named by the queue
@@ -278,6 +333,16 @@ actor EnrichmentCoordinator {
         )
     }
 
+    private func paused(
+        _ pause: AIPause, scope: EnrichmentScope, remaining: Int, exhausted: Int
+    ) -> EnrichmentJobProgress {
+        EnrichmentJobProgress(
+            activity: pause.activity, scope: scope, remaining: remaining,
+            completedThisRun: completedThisRun, exhausted: exhausted,
+            currentTitle: nil, startedAt: startedAt, resumesAt: pause.resumesAt
+        )
+    }
+
     private func needsEntitlement(
         scope: EnrichmentScope, remaining: Int, exhausted: Int
     ) -> EnrichmentJobProgress {
@@ -303,8 +368,35 @@ actor EnrichmentCoordinator {
 
     private func networkReturned() {
         networkResume = nil
-        consecutiveTransportFailures = 0
+        breaker.reset()
         log("Network returned; resuming enrichment")
+        resume()
+    }
+
+    /// Puts the AI scope to sleep until `resumesAt` and arms the wake-up. The
+    /// other scopes carry on: the pause is the proxy's, not the network's, so
+    /// nothing about the route is waited for and nothing durable is written. A
+    /// pass started in the meantime skips the scope without asking, which is what
+    /// keeps every library reload from knocking on a door that is shut.
+    @discardableResult
+    private func pauseAI(_ activity: EnrichmentJobProgress.Activity, until resumesAt: Date) -> AIPause {
+        let pause = AIPause(activity: activity, resumesAt: resumesAt)
+        aiPause = pause
+        pauseResume?.cancel()
+        pauseResume = Task {
+            try? await Task.sleep(for: .seconds(max(1, resumesAt.timeIntervalSinceNow)))
+            guard !Task.isCancelled else { return }
+            await EnrichmentCoordinator.shared.pauseElapsed()
+        }
+        log("AI paused (\(activity.rawValue)) until \(resumesAt.formatted(date: .abbreviated, time: .standard))")
+        return pause
+    }
+
+    private func pauseElapsed() {
+        aiPause = nil
+        pauseResume = nil
+        breaker.reset()
+        log("AI pause over; resuming enrichment")
         resume()
     }
 

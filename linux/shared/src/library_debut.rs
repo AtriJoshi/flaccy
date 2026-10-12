@@ -95,7 +95,8 @@ impl DebutDirector {
         if current == DebutAct::Finishing {
             let drained = job.activity == Activity::Idle || job.remaining == 0;
             let curtain = elapsed_in_finishing >= CURTAIN_BUDGET;
-            let blocked = job.activity == Activity::NeedsEntitlement;
+            let blocked = job.activity == Activity::NeedsEntitlement
+                || job.activity == Activity::DailyLimit;
             return if drained || curtain || blocked {
                 DebutAct::Summary
             } else {
@@ -248,6 +249,26 @@ mod tests {
         blocked.activity = Activity::NeedsEntitlement;
         assert!(director.advance(&built(), &blocked, 214, 0.0));
         assert_eq!(director.act(), DebutAct::Summary);
+    }
+
+    #[test]
+    fn finishing_ends_immediately_when_the_daily_ai_limit_is_spent() {
+        let mut director = DebutDirector::new();
+        director.advance(&built(), &queued(40), 214, 0.0);
+        let mut spent = queued(40);
+        spent.activity = Activity::DailyLimit;
+        assert!(director.advance(&built(), &spent, 214, 0.0));
+        assert_eq!(director.act(), DebutAct::Summary);
+    }
+
+    #[test]
+    fn finishing_keeps_waiting_through_a_service_outage() {
+        let mut director = DebutDirector::new();
+        director.advance(&built(), &queued(40), 214, 0.0);
+        let mut down = queued(40);
+        down.activity = Activity::ServiceUnavailable;
+        assert!(!director.advance(&built(), &down, 214, 0.0));
+        assert_eq!(director.act(), DebutAct::Finishing);
     }
 
     #[test]
