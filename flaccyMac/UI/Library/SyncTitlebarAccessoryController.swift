@@ -75,13 +75,13 @@ final class SyncTitlebarAccessoryController: NSTitlebarAccessoryViewController {
         progress = job
         switch job.activity {
         case .idle, .needsEntitlement:
-            isHidden = true
+            setShown(false)
         case .running:
-            isHidden = false
+            setShown(true)
             label.stringValue = EnrichmentJobCopy.detail(remaining: job.remaining)
             pill.toolTip = EnrichmentJobCopy.line(for: job)
         case .waitingForNetwork:
-            isHidden = false
+            setShown(true)
             label.stringValue = EnrichmentJobCopy.waitingForNetwork
             pill.toolTip = EnrichmentJobCopy.waitingForNetwork
         }
@@ -132,5 +132,17 @@ final class SyncTitlebarAccessoryController: NSTitlebarAccessoryViewController {
 
     @objc private func openLibrarySettings() {
         NSApp.sendAction(#selector(MacAppDelegate.showLibrarySettings(_:)), to: nil, from: nil)
+    }
+}
+
+extension NSTitlebarAccessoryViewController {
+
+    /// `isHidden` alone only asks the titlebar to collapse the accessory's
+    /// slot: on current macOS the view stays drawn, hit-testable and carrying
+    /// its last text, so a pill meant to vanish after a purchase kept offering
+    /// the purchase. Hiding the view as well is what actually removes it.
+    func setShown(_ shown: Bool) {
+        isHidden = !shown
+        view.isHidden = !shown
     }
 }

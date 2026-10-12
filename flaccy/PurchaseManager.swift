@@ -114,8 +114,11 @@ final class PurchaseManager {
 
     private init() {}
 
+    /// An `expired` state derived before RevenueCat has answered is only the
+    /// local trial clock talking, and the answer arrives within a second for
+    /// someone who already paid, so playback is never refused on it.
     var allowsPlayback: Bool {
-        state != .expired
+        state != .expired || !hasReceivedCustomerInfo
     }
 
     var yearlyOffer: PurchaseOffer? { offers.first { $0.plan == .yearly } }

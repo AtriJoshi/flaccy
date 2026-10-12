@@ -59,11 +59,13 @@ final class TrialStatusAccessoryController: NSTitlebarAccessoryViewController {
 
     @objc private func stateChanged() {
         let manager = PurchaseManager.shared
-        guard let line = PaywallCopy.pillLine(state: manager.state, lifetime: manager.lifetimeOfferToPresent) else {
-            isHidden = true
+        guard manager.hasReceivedCustomerInfo,
+              let line = PaywallCopy.pillLine(state: manager.state, lifetime: manager.lifetimeOfferToPresent)
+        else {
+            setShown(false)
             return
         }
-        isHidden = false
+        setShown(true)
         label.stringValue = line
         applyTint(urgent: Self.isUrgent(manager.state))
         sizeToPill()
