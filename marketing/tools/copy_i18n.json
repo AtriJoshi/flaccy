@@ -1,0 +1,512 @@
+{
+  "de": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "Deine Sammlung,\nin *voller Qualität.*"
+    },
+    "nowplaying": {
+      "kicker": "Gerade läuft",
+      "headline": "Hi-Res, bis ins\n*kleinste Detail.*",
+      "sub": "Bit-Tiefe und Samplerate bei jedem Titel."
+    },
+    "lyrics": {
+      "kicker": "Synchronisierte Songtexte",
+      "headline": "Songtexte, die jedem\n*Wort folgen.*",
+      "sub": "Tippe auf eine Zeile, um dorthin zu springen."
+    },
+    "playlists": {
+      "kicker": "Smarte Playlists",
+      "headline": "Playlists, die sich\n*selbst bauen.*",
+      "sub": "Aus deiner eigenen Bibliothek erstellt."
+    },
+    "scrobble": {
+      "kicker": "Last.fm-Scrobbling",
+      "headline": "Jeder Titel gezählt,\n*auch offline.*",
+      "sub": "Sendet automatisch nach, sobald du online bist."
+    },
+    "year": {
+      "kicker": "Dein Jahr in Musik",
+      "headline": "Dein Musikjahr,\n*bereit zum Teilen.*",
+      "sub": "Story-Karten und ein Poster deines Hörens."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "Deine Uhr spielt\nMusik *offline.*",
+      "sub": "Ohne iPhone."
+    },
+    "queue": {
+      "kicker": "Als Nächstes",
+      "headline": "Eine Warteschlange,\n*die sich erinnert.*",
+      "sub": "Per Ziehen sortieren. Übersteht den Neustart."
+    },
+    "wantlist": {
+      "kicker": "Wunschliste",
+      "headline": "Jage deine\n*nächste Platte.*",
+      "sub": "Neuerscheinungen und Lücken in deiner Sammlung."
+    },
+    "themes": {
+      "kicker": "Darstellung",
+      "headline": "Hell oder dunkel.\n*Du entscheidest.*",
+      "sub": "Folgt dem System oder wähle selbst."
+    }
+  },
+  "es": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "Tu colección,\nen *calidad total.*"
+    },
+    "nowplaying": {
+      "kicker": "Reproduciendo",
+      "headline": "Hi-Res, mostrado\n*en cada detalle.*",
+      "sub": "Profundidad de bits y frecuencia en cada pista."
+    },
+    "lyrics": {
+      "kicker": "Letras sincronizadas",
+      "headline": "Letras que siguen\n*cada palabra.*",
+      "sub": "Toca cualquier línea para saltar justo ahí."
+    },
+    "playlists": {
+      "kicker": "Listas inteligentes",
+      "headline": "Listas que\n*se crean solas.*",
+      "sub": "Hechas con tu propia biblioteca."
+    },
+    "scrobble": {
+      "kicker": "Scrobbling en Last.fm",
+      "headline": "Cada escucha cuenta,\n*sin conexión.*",
+      "sub": "Se reintenta solo cuando vuelves a estar en línea."
+    },
+    "year": {
+      "kicker": "Tu año en música",
+      "headline": "Tu año en música,\n*para compartir.*",
+      "sub": "Tarjetas de historias y un póster de tu escucha."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "Tu reloj reproduce\n*sin conexión.*",
+      "sub": "No necesitas iPhone."
+    },
+    "queue": {
+      "kicker": "A continuación",
+      "headline": "Una cola que\n*no olvida.*",
+      "sub": "Arrastra para reordenar. Sobrevive al reinicio."
+    },
+    "wantlist": {
+      "kicker": "Lista de deseos",
+      "headline": "Busca tu\n*próximo disco.*",
+      "sub": "Novedades y los huecos de tu colección."
+    },
+    "themes": {
+      "kicker": "Apariencia",
+      "headline": "Claro u oscuro.\n*Tú decides.*",
+      "sub": "Sigue al sistema o elige uno."
+    }
+  },
+  "fr": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "Votre collection,\nen *qualité totale.*"
+    },
+    "nowplaying": {
+      "kicker": "En cours de lecture",
+      "headline": "Hi-Res, affiché\n*dans chaque détail.*",
+      "sub": "Profondeur et fréquence sur chaque piste."
+    },
+    "lyrics": {
+      "kicker": "Paroles synchronisées",
+      "headline": "Des paroles qui\n*suivent chaque mot.*",
+      "sub": "Touchez une ligne pour sauter directement là."
+    },
+    "playlists": {
+      "kicker": "Playlists intelligentes",
+      "headline": "Des playlists qui\n*se créent seules.*",
+      "sub": "Créées à partir de votre propre bibliothèque."
+    },
+    "scrobble": {
+      "kicker": "Scrobbling Last.fm",
+      "headline": "Toutes vos écoutes,\n*même hors ligne.*",
+      "sub": "Renvoyées automatiquement dès le retour du réseau."
+    },
+    "year": {
+      "kicker": "Votre année en musique",
+      "headline": "Votre bilan musical,\n*prêt à partager.*",
+      "sub": "Cartes story et affiche de vos écoutes."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "Votre montre joue\n*hors ligne.*",
+      "sub": "Pas besoin d'iPhone."
+    },
+    "queue": {
+      "kicker": "À suivre",
+      "headline": "Une file d'attente\n*qui se souvient.*",
+      "sub": "Glissez pour réordonner. Elle survit à la fermeture de l'app."
+    },
+    "wantlist": {
+      "kicker": "Liste de souhaits",
+      "headline": "Traquez votre\n*prochain disque.*",
+      "sub": "Nouveautés et trous dans votre collection."
+    },
+    "themes": {
+      "kicker": "Apparence",
+      "headline": "Clair ou sombre.\n*À vous de choisir.*",
+      "sub": "Suit votre système, ou choisissez."
+    }
+  },
+  "it": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "La tua collezione,\nin *piena qualità.*"
+    },
+    "nowplaying": {
+      "kicker": "In riproduzione",
+      "headline": "Hi-Res, mostrato\n*in ogni dettaglio.*",
+      "sub": "Profondità di bit e frequenza per ogni brano."
+    },
+    "lyrics": {
+      "kicker": "Testi sincronizzati",
+      "headline": "Testi che seguono\n*ogni parola.*",
+      "sub": "Tocca una riga per saltare proprio lì."
+    },
+    "playlists": {
+      "kicker": "Playlist intelligenti",
+      "headline": "Playlist che si\n*creano da sole.*",
+      "sub": "Create dalla tua libreria."
+    },
+    "scrobble": {
+      "kicker": "Scrobbling Last.fm",
+      "headline": "Ogni ascolto conta,\n*anche offline.*",
+      "sub": "Riprova da sola appena torni online."
+    },
+    "year": {
+      "kicker": "Il tuo anno in musica",
+      "headline": "Il tuo anno musicale\n*da condividere.*",
+      "sub": "Schede storia e un poster dei tuoi ascolti."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "Il tuo orologio\nriproduce *offline.*",
+      "sub": "Non serve l'iPhone."
+    },
+    "queue": {
+      "kicker": "Prossimi brani",
+      "headline": "Una coda che\n*non dimentica.*",
+      "sub": "Trascina per riordinare. Sopravvive al riavvio."
+    },
+    "wantlist": {
+      "kicker": "Lista dei desideri",
+      "headline": "Caccia il tuo\n*prossimo disco.*",
+      "sub": "Novità e i buchi nella tua collezione."
+    },
+    "themes": {
+      "kicker": "Aspetto",
+      "headline": "Chiaro o scuro.\n*Decidi tu.*",
+      "sub": "Segue il sistema o scegline uno."
+    }
+  },
+  "ja": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "コレクションを、\n*フル品質で。*"
+    },
+    "nowplaying": {
+      "kicker": "再生中",
+      "headline": "ハイレゾを、\n*細部まで表示。*",
+      "sub": "全曲のビット深度とサンプルレートを表示。"
+    },
+    "lyrics": {
+      "kicker": "同期する歌詞",
+      "headline": "歌詞がすべての\n*言葉に追従。*",
+      "sub": "行をタップすると、その位置にジャンプ。"
+    },
+    "playlists": {
+      "kicker": "スマートプレイリスト",
+      "headline": "プレイリストが\n*自動で編まれる。*",
+      "sub": "あなた自身のライブラリから作成。"
+    },
+    "scrobble": {
+      "kicker": "Last.fm スクロブル",
+      "headline": "オフラインでも\n*すべての再生を記録。*",
+      "sub": "オンラインに戻ると自動で再送信。"
+    },
+    "year": {
+      "kicker": "年間ミュージックレポート",
+      "headline": "今年の音楽を、\n*共有しよう。*",
+      "sub": "ストーリーカードと再生の記録ポスター。"
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "iPhoneなしで\n*音楽を再生。*",
+      "sub": "オフラインでも、iPhoneは不要。"
+    },
+    "queue": {
+      "kicker": "次に再生",
+      "headline": "再起動しても\n*消えないキュー。*",
+      "sub": "ドラッグで並べ替え。"
+    },
+    "wantlist": {
+      "kicker": "ウォントリスト",
+      "headline": "次に欲しい\n*一枚を探そう。*",
+      "sub": "新譜と、コレクションの欠けを表示。"
+    },
+    "themes": {
+      "kicker": "外観",
+      "headline": "ライトも、ダークも。\n*お好みで。*",
+      "sub": "システムに従うか、好みで選択。"
+    }
+  },
+  "ko": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "나만의 컬렉션을,\n*최고 음질로.*"
+    },
+    "nowplaying": {
+      "kicker": "지금 재생 중",
+      "headline": "Hi-Res로,\n*모든 세부까지.*",
+      "sub": "모든 곡의 비트 심도와 샘플 레이트 표시."
+    },
+    "lyrics": {
+      "kicker": "싱크 가사",
+      "headline": "가사가 모든\n*단어를 따라갑니다.*",
+      "sub": "줄을 탭하면 바로 그 부분으로 이동."
+    },
+    "playlists": {
+      "kicker": "스마트 재생목록",
+      "headline": "재생목록이\n*알아서 만들어져요.*",
+      "sub": "내 라이브러리에서 만들어져요."
+    },
+    "scrobble": {
+      "kicker": "Last.fm 스크로블링",
+      "headline": "오프라인에서도\n*모든 재생을 기록.*",
+      "sub": "다시 온라인이 되면 자동으로 재전송."
+    },
+    "year": {
+      "kicker": "올해의 음악",
+      "headline": "올해의 음악,\n*공유할 준비 완료.*",
+      "sub": "스토리 카드와 청취 기록 포스터."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "워치에서 음악을\n*오프라인으로.*",
+      "sub": "iPhone 없이도 재생."
+    },
+    "queue": {
+      "kicker": "다음 곡",
+      "headline": "다시 열어도\n*그대로인 대기열.*",
+      "sub": "드래그로 순서를 바꿔요."
+    },
+    "wantlist": {
+      "kicker": "위시리스트",
+      "headline": "다음 앨범을\n*찾아보세요.*",
+      "sub": "신보와 내 컬렉션에서 빠진 앨범."
+    },
+    "themes": {
+      "kicker": "화면 모드",
+      "headline": "라이트든 다크든.\n*선택은 당신에게.*",
+      "sub": "시스템을 따르거나 직접 고르세요."
+    }
+  },
+  "pl": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "Twoja kolekcja,\nw *pełnej jakości.*"
+    },
+    "nowplaying": {
+      "kicker": "Teraz odtwarzane",
+      "headline": "Hi-Res, pokazane\n*w każdym szczególe.*",
+      "sub": "Głębia bitowa i próbkowanie każdego utworu."
+    },
+    "lyrics": {
+      "kicker": "Teksty zsynchronizowane",
+      "headline": "Tekst, który podąża\n*za każdym słowem.*",
+      "sub": "Dotknij linii, by przeskoczyć dokładnie tam."
+    },
+    "playlists": {
+      "kicker": "Inteligentne playlisty",
+      "headline": "Playlisty, które\n*układają się same.*",
+      "sub": "Tworzone z Twojej własnej biblioteki."
+    },
+    "scrobble": {
+      "kicker": "Scrobbling w Last.fm",
+      "headline": "Każdy odsłuch zapisany,\n*nawet offline.*",
+      "sub": "Sam ponawia wysyłkę, gdy wrócisz online."
+    },
+    "year": {
+      "kicker": "Twój rok w muzyce",
+      "headline": "Twój muzyczny rok,\n*gotowy do dzielenia.*",
+      "sub": "Karty historii i plakat Twoich odsłuchów."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "Zegarek odtwarza\n*muzykę offline.*",
+      "sub": "Nie potrzebujesz iPhone'a."
+    },
+    "queue": {
+      "kicker": "Następne",
+      "headline": "Kolejka, która\n*pamięta.*",
+      "sub": "Przeciągnij, by zmienić kolejność. Przetrwa restart."
+    },
+    "wantlist": {
+      "kicker": "Lista życzeń",
+      "headline": "Poluj na\n*kolejną płytę.*",
+      "sub": "Nowości i luki w Twojej kolekcji."
+    },
+    "themes": {
+      "kicker": "Wygląd",
+      "headline": "Jasny czy ciemny?\n*Ty decydujesz.*",
+      "sub": "Podąża za systemem albo wybierz sam."
+    }
+  },
+  "pt-BR": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "Sua coleção,\nem *qualidade total.*"
+    },
+    "nowplaying": {
+      "kicker": "Tocando agora",
+      "headline": "Hi-Res, mostrado\n*em cada detalhe.*",
+      "sub": "Profundidade de bits e taxa em cada faixa."
+    },
+    "lyrics": {
+      "kicker": "Letras sincronizadas",
+      "headline": "Letras que seguem\n*cada palavra.*",
+      "sub": "Toque em qualquer linha para ir direto a ela."
+    },
+    "playlists": {
+      "kicker": "Playlists inteligentes",
+      "headline": "Playlists que\n*se montam sozinhas.*",
+      "sub": "Feitas com a sua própria biblioteca."
+    },
+    "scrobble": {
+      "kicker": "Scrobbling do Last.fm",
+      "headline": "Cada play contado,\n*mesmo offline.*",
+      "sub": "Reenvia sozinho quando você voltar a ficar online."
+    },
+    "year": {
+      "kicker": "Seu ano em música",
+      "headline": "Seu ano em músicas,\n*para compartilhar.*",
+      "sub": "Cartões de história e um pôster do que você ouviu."
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "Seu relógio toca\n*música offline.*",
+      "sub": "Não precisa de iPhone."
+    },
+    "queue": {
+      "kicker": "A seguir",
+      "headline": "Uma fila que\n*não esquece.*",
+      "sub": "Arraste para reordenar. Sobrevive ao reinício do app."
+    },
+    "wantlist": {
+      "kicker": "Lista de desejos",
+      "headline": "Caçe seu\n*próximo disco.*",
+      "sub": "Lançamentos e as lacunas da sua coleção."
+    },
+    "themes": {
+      "kicker": "Aparência",
+      "headline": "Claro ou escuro.\n*Você decide.*",
+      "sub": "Segue o sistema ou escolha um."
+    }
+  },
+  "zh-Hans": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "你的音乐收藏，\n*全音质呈现。*"
+    },
+    "nowplaying": {
+      "kicker": "正在播放",
+      "headline": "Hi-Res，\n*细节尽显。*",
+      "sub": "每首歌的位深与采样率一目了然。"
+    },
+    "lyrics": {
+      "kicker": "同步歌词",
+      "headline": "歌词紧随\n*每一个字。*",
+      "sub": "点击任意一行，直接跳到那里。"
+    },
+    "playlists": {
+      "kicker": "智能播放列表",
+      "headline": "播放列表，\n*自动为你生成。*",
+      "sub": "基于你自己的音乐库创建。"
+    },
+    "scrobble": {
+      "kicker": "Last.fm 记录",
+      "headline": "离线也能\n*记录每一次播放。*",
+      "sub": "恢复网络后自动补传。"
+    },
+    "year": {
+      "kicker": "年度音乐",
+      "headline": "你的年度音乐，\n*随时分享。*",
+      "sub": "故事卡片与你的聆听海报。"
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "你的手表离线\n*播放音乐。*",
+      "sub": "无需 iPhone。"
+    },
+    "queue": {
+      "kicker": "接下来播放",
+      "headline": "重启之后，\n*队列依然在。*",
+      "sub": "拖动即可调整顺序。"
+    },
+    "wantlist": {
+      "kicker": "愿望清单",
+      "headline": "寻找你的\n*下一张唱片。*",
+      "sub": "新发行与收藏中的空缺。"
+    },
+    "themes": {
+      "kicker": "外观",
+      "headline": "浅色或深色，\n*由你决定。*",
+      "sub": "跟随系统，或自行选择。"
+    }
+  },
+  "zh-Hant": {
+    "hero": {
+      "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+      "headline": "你的音樂收藏，\n*全音質呈現。*"
+    },
+    "nowplaying": {
+      "kicker": "正在播放",
+      "headline": "Hi-Res，\n*細節盡顯。*",
+      "sub": "每首歌的位元深度與取樣率一目了然。"
+    },
+    "lyrics": {
+      "kicker": "同步歌詞",
+      "headline": "歌詞緊隨\n*每一個字。*",
+      "sub": "點選任一行，直接跳到那裡。"
+    },
+    "playlists": {
+      "kicker": "智慧播放清單",
+      "headline": "播放清單，\n*自動為你生成。*",
+      "sub": "以你自己的音樂庫建立。"
+    },
+    "scrobble": {
+      "kicker": "Last.fm 記錄",
+      "headline": "離線也能\n*記錄每一次播放。*",
+      "sub": "恢復連線後自動補傳。"
+    },
+    "year": {
+      "kicker": "年度音樂",
+      "headline": "你的年度音樂，\n*隨時分享。*",
+      "sub": "故事卡片與你的聆聽海報。"
+    },
+    "watch": {
+      "kicker": "Apple Watch",
+      "headline": "你的手錶離線\n*播放音樂。*",
+      "sub": "無需 iPhone。"
+    },
+    "queue": {
+      "kicker": "接下來播放",
+      "headline": "重新開啟之後，\n*佇列依然在。*",
+      "sub": "拖曳即可調整順序。"
+    },
+    "wantlist": {
+      "kicker": "願望清單",
+      "headline": "尋找你的\n*下一張唱片。*",
+      "sub": "新發行與收藏中的空缺。"
+    },
+    "themes": {
+      "kicker": "外觀",
+      "headline": "淺色或深色，\n*由你決定。*",
+      "sub": "跟隨系統，或自行選擇。"
+    }
+  }
+}

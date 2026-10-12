@@ -1,0 +1,51 @@
+{
+  "hero": {
+    "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
+    "headline": "Your collection,\nin *full quality.*"
+  },
+  "nowplaying": {
+    "kicker": "Now Playing",
+    "headline": "Hi-Res, shown\nin *every detail.*",
+    "sub": "Bit depth and sample rate on every track."
+  },
+  "lyrics": {
+    "kicker": "Synced lyrics",
+    "headline": "Lyrics that follow\n*every word.*",
+    "sub": "Tap any line to jump right there."
+  },
+  "playlists": {
+    "kicker": "Smart playlists",
+    "headline": "Playlists that\n*build themselves.*",
+    "sub": "Made from your own library."
+  },
+  "scrobble": {
+    "kicker": "Last.fm scrobbling",
+    "headline": "Every play counted,\n*even offline.*",
+    "sub": "Retries on its own when you're back online."
+  },
+  "year": {
+    "kicker": "Year in Music",
+    "headline": "Your year in music,\n*ready to share.*",
+    "sub": "Story cards and a poster of your listening."
+  },
+  "watch": {
+    "kicker": "Apple Watch",
+    "headline": "Your watch plays\nmusic *offline.*",
+    "sub": "No iPhone needed."
+  },
+  "queue": {
+    "kicker": "Up Next",
+    "headline": "A queue that\n*remembers.*",
+    "sub": "Drag to reorder. Survives relaunches."
+  },
+  "wantlist": {
+    "kicker": "Wantlist",
+    "headline": "Hunt down your\n*next record.*",
+    "sub": "New releases and the gaps in your collection."
+  },
+  "themes": {
+    "kicker": "Appearance",
+    "headline": "Light or dark.\n*Your call.*",
+    "sub": "Follows your system, or pick one."
+  }
+}

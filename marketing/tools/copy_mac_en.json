@@ -1,0 +1,37 @@
+{
+  "library": {
+    "kicker": "Flaccy for Mac",
+    "headline": "Your collection, in *full quality.*",
+    "maxLines": 1
+  },
+  "lyrics": {
+    "kicker": "Now Playing",
+    "headline": "Art, lyrics and queue, *side by side.*",
+    "maxLines": 1
+  },
+  "queue": {
+    "kicker": "Up Next",
+    "headline": "Your queue, *always at hand.*",
+    "maxLines": 1
+  },
+  "songs": {
+    "kicker": "Songs",
+    "headline": "A song list that *sorts your way.*",
+    "maxLines": 1
+  },
+  "scrobble": {
+    "kicker": "Last.fm scrobbling",
+    "headline": "Every play counted, *even offline.*",
+    "maxLines": 1
+  },
+  "year": {
+    "kicker": "Year in Music",
+    "headline": "Your year in music, *ready to share.*",
+    "maxLines": 1
+  },
+  "themes": {
+    "kicker": "Appearance",
+    "headline": "Light or dark. *Your call.*",
+    "maxLines": 1
+  }
+}
