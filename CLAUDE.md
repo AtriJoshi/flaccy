@@ -57,7 +57,7 @@
 
 ## Key Technical Details
 - **Database**: GRDB (SQLite) for library persistence, metadata, scrobble queue
-- **AI**: Groq (llama-3.3-70b) via the flaccy-api proxy Worker (guitaripod/flaccy-api, flaccy-api.midgarcorp.cc) for music identification and metadata cleanup — no API key in the app
+- **AI**: Claude Haiku 5.5 via the flaccy-api proxy Worker (guitaripod/flaccy-api, flaccy-api.midgarcorp.cc, secret `ANTHROPIC_API_KEY`) for music identification and metadata cleanup — no API key in the app. The shipped clients still speak the OpenAI chat-completions shape and still name `GroqService` and a llama model they never read; the Worker alone translates to the Messages API and picks the model, so a model swap needs no app release. Deliberately not routed through mako: it meters per-user credits behind a tenant and wallet, while Flaccy's AI is bundled with the entitlement and keyed only by anonymous device and IP quotas in the Worker.
 - **Scrobbling**: Last.fm API with ASWebAuthenticationSession OAuth
 - **Audio**: AVQueuePlayer for gapless FLAC playback
 - **UI Pattern**: Fully programmatic UIKit (no storyboards/XIBs)
