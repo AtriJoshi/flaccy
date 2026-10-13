@@ -1314,7 +1314,7 @@
 			repositoryURL = "https://github.com/guitaripod/MidgarKit";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 3.0.0;
+				minimumVersion = 3.1.2;
 			};
 		};
 		BF5291636293FE2A88DE954B /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
