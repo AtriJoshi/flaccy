@@ -36,6 +36,11 @@ enum DebugDrive {
                 await exerciseFolderImport()
             }
         }
+        if CommandLine.arguments.contains("--exercise-zoom") {
+            Task {
+                await exerciseZoom(window: window)
+            }
+        }
         if CommandLine.arguments.contains("--exercise-stack") {
             Task {
                 await exerciseStack(window: window)
@@ -305,6 +310,32 @@ enum DebugDrive {
             if let stack = descendToStack(child) { return stack }
         }
         return nil
+    }
+
+    /// Steps the interface scale through its whole range and back while a song
+    /// plays, the way a held ⌘= does, and logs PASS if the window survives it.
+    private static func exerciseZoom(window: NSWindow?) async {
+        try? await Task.sleep(for: .seconds(6))
+        let original = MacInterfaceScale.current
+        MacInterfaceScale.set(MacInterfaceScale.standard)
+        window?.setContentSize(NSSize(width: 1000, height: 640))
+        try? await Task.sleep(for: .seconds(1))
+        startHeroPlayback()
+        try? await Task.sleep(for: .seconds(2))
+        for _ in 0..<2 {
+            NotificationCenter.default.post(name: .flaccyToggleNowPlaying, object: nil)
+            try? await Task.sleep(for: .seconds(2))
+            NotificationCenter.default.post(name: .flaccyToggleNowPlaying, object: nil)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        let steps = (0...10).map { MacInterfaceScale.standard + CGFloat($0) * MacInterfaceScale.step }
+        for scale in steps + steps.reversed() {
+            MacInterfaceScale.set(scale)
+            try? await Task.sleep(for: .milliseconds(450))
+        }
+        MacInterfaceScale.set(original)
+        AudioPlayer.shared.togglePlayPause()
+        AppLogger.info("DebugDrive: zoom exercise PASS — survived \(steps.count * 2) scale changes", category: .general)
     }
 
     private static func startHeroPlayback() {

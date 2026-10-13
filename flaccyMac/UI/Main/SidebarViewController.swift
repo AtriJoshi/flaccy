@@ -95,16 +95,15 @@ extension SidebarViewController: NSOutlineViewDelegate {
         if let group = item as? String {
             let identifier = NSUserInterfaceItemIdentifier("group")
             let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
-                ?? Self.makeCell(identifier: identifier)
+                ?? Self.makeGroupCell(identifier: identifier)
             cell.textField?.stringValue = group
             return cell
         }
         guard let section = item as? SidebarSection else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("row")
-        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView
-            ?? Self.makeCell(identifier: identifier, withImage: true)
-        cell.textField?.stringValue = section.title
-        cell.imageView?.image = NSImage(systemSymbolName: section.symbolName, accessibilityDescription: section.title)
+        let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarRowCellView
+            ?? SidebarRowCellView(identifier: identifier)
+        cell.configure(title: section.title, symbolName: section.symbolName)
         return cell
     }
 
@@ -113,7 +112,7 @@ extension SidebarViewController: NSOutlineViewDelegate {
         onSelect?(section)
     }
 
-    private static func makeCell(identifier: NSUserInterfaceItemIdentifier, withImage: Bool = false) -> NSTableCellView {
+    private static func makeGroupCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
         let cell = NSTableCellView()
         cell.identifier = identifier
 
@@ -123,24 +122,63 @@ extension SidebarViewController: NSOutlineViewDelegate {
         cell.addSubview(text)
         cell.textField = text
 
-        if withImage {
-            let image = NSImageView()
-            image.translatesAutoresizingMaskIntoConstraints = false
-            cell.addSubview(image)
-            cell.imageView = image
-            NSLayoutConstraint.activate([
-                image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-                image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                image.widthAnchor.constraint(equalToConstant: 20),
-                text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
-            ])
-        } else {
-            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2).isActive = true
-        }
         NSLayoutConstraint.activate([
+            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
             text.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
             text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
+    }
+}
+
+/// A sidebar row whose icon is deliberately not the cell's `imageView`.
+/// `NSTableCellView` re-applies a symbol configuration to its `imageView` from
+/// inside its own layout pass, which dirties the constraints it is being laid
+/// out against; under the zoom host's scaled bounds that loops until AppKit
+/// aborts with an exception. Owning the icon keeps AppKit out of it, so the
+/// tint that the cell would have followed for selection is applied here.
+final class SidebarRowCellView: NSTableCellView {
+
+    private let icon = NSImageView()
+    private let label = NSTextField(labelWithString: "")
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.imageScaling = .scaleProportionallyDown
+        icon.symbolConfiguration = .init(pointSize: 15, weight: .regular)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(icon)
+        addSubview(label)
+        textField = label
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 20),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        applyTint()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { applyTint() }
+    }
+
+    func configure(title: String, symbolName: String) {
+        label.stringValue = title
+        icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+    }
+
+    /// White on the emphasized selection, the label colour otherwise.
+    private func applyTint() {
+        icon.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor : .labelColor
     }
 }
