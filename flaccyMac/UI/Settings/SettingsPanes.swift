@@ -2,6 +2,7 @@ import AppKit
 import AuthenticationServices
 import Combine
 import FlaccyCore
+import MidgarKit
 import ServiceManagement
 import UserNotifications
 
@@ -50,6 +51,7 @@ final class GeneralSettingsPane: SettingsPane {
     private var isRestoring = false
 
     override func buildForm() {
+        addMidgarEntry()
         formStack.addArrangedSubview(sectionLabel(String(localized: "Appearance")))
         scaleLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         scaleStepper.minValue = Double(MacInterfaceScale.minimum * 100)
@@ -106,6 +108,16 @@ final class GeneralSettingsPane: SettingsPane {
         menuBarCheckbox.action = #selector(menuBarToggled)
         formStack.addArrangedSubview(menuBarCheckbox)
         addFullWidth(explanation(String(localized: "The menu bar player shows the current track with transport and love controls.")))
+    }
+
+    /// The Midgar portal doorway sits above everything else in Settings, at the
+    /// card's own fixed height, followed by the same rule that divides every
+    /// other section.
+    private func addMidgarEntry() {
+        let entry = MidgarEntryView()
+        addFullWidth(entry)
+        entry.heightAnchor.constraint(equalToConstant: MidgarEntryView.preferredHeight).isActive = true
+        formStack.addArrangedSubview(separator())
     }
 
     override func viewWillAppear() {

@@ -12,6 +12,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>flaccy</string>
+				<string>com.midgarcorp.flaccy</string>
 			</array>
 		</dict>
 	</array>
@@ -20,6 +21,22 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>instagram-stories</string>
+		<string>com.guitaripod.embr</string>
+		<string>com.guitaripod.helia</string>
+		<string>com.guitaripod.payday</string>
+		<string>com.guitaripod.pixie</string>
+		<string>com.guitaripod.psybeam</string>
+		<string>com.guitaripod.tailscode</string>
+		<string>com.marcusziade.aotd</string>
+		<string>com.marcusziade.doublekick</string>
+		<string>com.marcusziade.dreameater</string>
+		<string>com.marcusziade.inventory</string>
+		<string>com.marcusziade.knowtheflag</string>
+		<string>com.marcusziade.psywave</string>
+		<string>com.marcusziade.sforesight</string>
+		<string>com.marcusziade.solarbeam</string>
+		<string>com.midgarcorp.flaccy</string>
+		<string>com.midgarcorp.flaccy.mac</string>
 	</array>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>

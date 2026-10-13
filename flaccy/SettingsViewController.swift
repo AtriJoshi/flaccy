@@ -9,6 +9,7 @@ final class SettingsViewController: UITableViewController {
     var onImportFiles: (() -> Void)?
 
     nonisolated private enum Section: Int, CaseIterable, Hashable {
+        case midgar
         case appearance
         case trial
         case lastFM
@@ -18,10 +19,10 @@ final class SettingsViewController: UITableViewController {
         case watch
         case library
         case setup
-        case moreApps
 
         var header: String? {
             switch self {
+            case .midgar: return nil
             case .appearance: return String(localized: "Appearance")
             case .trial: return String(localized: "Trial")
             case .lastFM: return "Last.fm"
@@ -31,12 +32,12 @@ final class SettingsViewController: UITableViewController {
             case .watch: return String(localized: "Apple Watch")
             case .library: return String(localized: "Library")
             case .setup: return nil
-            case .moreApps: return nil
             }
         }
 
         var footer: String? {
             switch self {
+            case .midgar: return nil
             case .appearance: return String(localized: "System follows your device's light and dark setting.")
             case .trial: return String(localized: "Three reminders at most: two days before your trial ends, on the last day, and once if a welcome-back price becomes available.")
             case .lastFM: return nil
@@ -46,7 +47,6 @@ final class SettingsViewController: UITableViewController {
             case .watch: return nil
             case .library: return Self.libraryFooter
             case .setup: return LibraryDebutCopy.settingsCaveat
-            case .moreApps: return nil
             }
         }
 
@@ -94,7 +94,7 @@ final class SettingsViewController: UITableViewController {
         case libraryStats(albums: Int, tracks: Int)
         case storage(used: String)
         case libraryDebutSummary
-        case moreApps
+        case midgarEntry
     }
 
     /// Renders an Apple-Settings-style icon: a white SF Symbol glyph centered
@@ -162,6 +162,7 @@ final class SettingsViewController: UITableViewController {
         tableView.delegate = self
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: Self.cellReuseIdentifier)
         tableView.register(AppearanceCell.self, forCellReuseIdentifier: AppearanceCell.reuseID)
+        tableView.register(MidgarEntryCell.self, forCellReuseIdentifier: MidgarEntryCell.reuseID)
         view.backgroundColor = .systemGroupedBackground
 
         navigationItem.rightBarButtonItem = makeDoneButton()
@@ -335,6 +336,7 @@ final class SettingsViewController: UITableViewController {
     private func applySnapshot(animated: Bool) {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Row>()
         snapshot.appendSections(Section.allCases.filter { $0 != .trial || isTrialSectionVisible })
+        snapshot.appendItems([.midgarEntry], toSection: .midgar)
         snapshot.appendItems([.appearance(AppAppearance.current)], toSection: .appearance)
         if isTrialSectionVisible {
             snapshot.appendItems([.trialReminders(enabled: TrialReminderScheduler.shared.isEnabled)], toSection: .trial)
@@ -359,7 +361,6 @@ final class SettingsViewController: UITableViewController {
         )
         snapshot.appendItems([.gaplessPlayback, .autoplaySimilar, .libraryRadio, .crateDig], toSection: .playback)
         snapshot.appendItems([.listeningGuide], toSection: .guide)
-        snapshot.appendItems([.moreApps], toSection: .moreApps)
         snapshot.appendItems([.watchSync(syncedCount: WatchSyncService.shared.syncedPaths.count)], toSection: .watch)
         snapshot.appendItems(libraryRows(), toSection: .library)
         if libraryDebut != nil {
@@ -394,6 +395,9 @@ final class SettingsViewController: UITableViewController {
         if case .appearance(let current) = row {
             return appearanceCell(current: current, in: tableView, at: indexPath)
         }
+        if case .midgarEntry = row {
+            return tableView.dequeueReusableCell(withIdentifier: MidgarEntryCell.reuseID, for: indexPath)
+        }
 
         let cell = tableView.dequeueReusableCell(withIdentifier: Self.cellReuseIdentifier, for: indexPath)
         cell.accessoryType = .none
@@ -407,7 +411,7 @@ final class SettingsViewController: UITableViewController {
         var content = Self.baseContent(for: row)
 
         switch row {
-        case .appearance:
+        case .appearance, .midgarEntry:
             break
 
         case .trialReminders(let enabled):
@@ -506,13 +510,6 @@ final class SettingsViewController: UITableViewController {
             content.textProperties.color = .tintColor
             cell.accessibilityLabel = String(localized: "Crate Dig")
             cell.accessibilityHint = String(localized: "Plays deep cuts from albums you already love")
-
-        case .moreApps:
-            content.image = RowIcon.image(systemName: "square.grid.2x2.fill", tint: .systemIndigo)
-            content.text = String(localized: "More Apps")
-            cell.accessoryType = .disclosureIndicator
-            cell.accessibilityLabel = String(localized: "More Apps")
-            cell.accessibilityHint = String(localized: "Browse other apps by this developer")
 
         case .listeningGuide:
             content.image = RowIcon.image(systemName: "waveform", tint: .systemCyan)
@@ -834,11 +831,18 @@ final class SettingsViewController: UITableViewController {
         return String(localized: "Optional. Connect a Last.fm account to scrobble your listens, sync loved tracks, and import your listening history. Everything else works without it.")
     }
 
+    override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        if dataSource.itemIdentifier(for: indexPath) == .midgarEntry {
+            return MidgarEntryView.preferredHeight + 16
+        }
+        return UITableView.automaticDimension
+    }
+
     override func tableView(_ tableView: UITableView, shouldHighlightRowAt indexPath: IndexPath) -> Bool {
         guard let row = dataSource.itemIdentifier(for: indexPath) else { return false }
         switch row {
         case .appearance, .trialReminders, .gaplessPlayback, .autoplaySimilar, .groupAlbumEditions, .hideDuplicateSongs,
-             .libraryStats, .storage, .appleMusicArtwork, .libraryDebutSummary:
+             .libraryStats, .storage, .appleMusicArtwork, .libraryDebutSummary, .midgarEntry:
             return false
         case .importLastFM: return lastFMImportProgress == nil
         case .rescanLibrary: return !isRescanning
@@ -858,14 +862,13 @@ final class SettingsViewController: UITableViewController {
         case .libraryRadio: handleLibraryRadio()
         case .crateDig: handleCrateDig()
         case .listeningGuide: handleListeningGuideTap()
-        case .moreApps: Midgar.present(from: self)
         case .watchSync: handleWatchTap()
         case .importFiles: handleImportTap()
         case .rescanLibrary: handleRescanTap()
         case .metadataReport: handleMetadataTap()
         case .findMissingArtwork: handleFindMissingArtworkTap()
         case .appearance, .trialReminders, .gaplessPlayback, .autoplaySimilar, .groupAlbumEditions, .hideDuplicateSongs,
-             .libraryStats, .storage, .appleMusicArtwork, .libraryDebutSummary:
+             .libraryStats, .storage, .appleMusicArtwork, .libraryDebutSummary, .midgarEntry:
             break
         }
     }
@@ -1210,4 +1213,25 @@ private final class AppearanceCell: UITableViewCell {
         guard let appearance = AppAppearance(rawValue: segmented.selectedSegmentIndex) else { return }
         onChange?(appearance)
     }
+}
+
+/// The Midgar portal doorway as the first row of Settings: transparent, with no
+/// separator or highlight of its own, so the card reads as a card rather than a
+/// list row. The cell steps out of the accessibility tree so VoiceOver reaches
+/// the card itself.
+private final class MidgarEntryCell: UITableViewCell {
+
+    static let reuseID = "MidgarEntryCell"
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .none
+        backgroundConfiguration = .clear()
+        separatorInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: .greatestFiniteMagnitude)
+        isAccessibilityElement = false
+        MidgarEntryView().embed(in: contentView, verticalInset: 8)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
 }

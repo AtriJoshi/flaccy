@@ -13,6 +13,7 @@
 		0F611CB29B05953C0BFA964A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BD76EED031794D71672EFF7 /* RootView.swift */; };
 		20364068D2334231B84E65AD /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2F54FEC40BC514CE9408F611 /* Foundation.framework */; };
 		2C21267046BDFDCB76F13F69 /* FlaccyCore in Frameworks */ = {isa = PBXBuildFile; productRef = A734BCDDBC66217E19FC32B7 /* FlaccyCore */; };
+		2CAA00032F000003007FF196 /* MidgarKit in Frameworks */ = {isa = PBXBuildFile; productRef = 2CAA00022F000002007FF196 /* MidgarKit */; };
 		2C2777462F7D0B80007FF196 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 2C2777012F7D0301007FF196 /* GRDB */; };
 		35D1F1A5118F09ED1EC55619 /* TrialReminderSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA60E7FC6BCDEF10CBFDC99F /* TrialReminderSchedulerTests.swift */; };
 		36074D00E7EB85E910B8AAC6 /* ScanProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D32EB40ABEF2CB5616D1E4B4 /* ScanProgressView.swift */; };
@@ -313,6 +314,7 @@
 				EBDAC9950D4E8507C67D4518 /* Cocoa.framework in Frameworks */,
 				2C21267046BDFDCB76F13F69 /* FlaccyCore in Frameworks */,
 				8E47E1D598B706E94B056080 /* GRDB in Frameworks */,
+				2CAA00032F000003007FF196 /* MidgarKit in Frameworks */,
 				89E88A1A9F95A493FCDDB3BF /* RevenueCat in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -505,6 +507,7 @@
 			packageProductDependencies = (
 				A734BCDDBC66217E19FC32B7 /* FlaccyCore */,
 				C433D55BD6A1974A842EC01C /* GRDB */,
+				2CAA00022F000002007FF196 /* MidgarKit */,
 				46BAB714076C0A5D9D0986AA /* RevenueCat */,
 			);
 			productName = flaccyMac;
@@ -1310,8 +1313,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/guitaripod/MidgarKit";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.1.0;
+				kind = branch;
+				branch = "portal-3.0";
 			};
 		};
 		BF5291636293FE2A88DE954B /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
