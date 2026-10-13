@@ -77,6 +77,39 @@ nonisolated final class DatabaseManagerProofTests: XCTestCase {
         XCTAssertEqual(try db.scrobbleCount(submittedOnly: false), 3)
     }
 
+    func testBatchInsertAndIdentitiesRoundTripThroughTheImportKey() throws {
+        let first = makeScrobble(submitted: true, title: "Café Del Mar", at: 1_750_000_000)
+        let second = makeScrobble(submitted: true, title: "Other", at: 1_750_000_100)
+        try db.insertScrobbles([first, second])
+        try db.insertScrobbles([])
+
+        XCTAssertEqual(try db.scrobbleCount(submittedOnly: true), 2)
+        let identities = try db.scrobbleIdentities()
+        XCTAssertEqual(identities.count, 2)
+        XCTAssertTrue(identities.contains(DatabaseManager.scrobbleIdentity(timestamp: first.timestamp, title: "CAFÉ DEL MAR")))
+        XCTAssertTrue(identities.contains(DatabaseManager.scrobbleIdentity(timestamp: second.timestamp, title: "other")))
+    }
+
+    func testReconcileSetsCountAndLastPlayedOnlyForTracksWithScrobbles() throws {
+        var played = makeTrack()
+        played.playCount = 99
+        var untouched = makeTrack()
+        untouched.playCount = 7
+        try db.insertTracks([played, untouched])
+
+        let plays = [1_750_000_000.0, 1_750_000_500.0, 1_750_000_200.0]
+        try db.insertScrobbles(plays.map { makeScrobble(submitted: true, title: played.title, artist: played.artist, at: $0) })
+        try db.insertScrobbles([makeScrobble(submitted: true, title: played.title, artist: "Someone Else", at: 1_760_000_000)])
+        try db.reconcilePlayCountsFromScrobbles()
+
+        let tracks = try db.fetchAllTracks()
+        let reconciled = try XCTUnwrap(tracks.first { $0.title == played.title })
+        XCTAssertEqual(reconciled.playCount, 3)
+        XCTAssertEqual(try XCTUnwrap(reconciled.lastPlayed).timeIntervalSince1970, 1_750_000_500, accuracy: 0.001)
+        let other = try XCTUnwrap(tracks.first { $0.title == untouched.title })
+        XCTAssertEqual(other.playCount, 7)
+    }
+
     func testLyricsMatchedCountsSyncedRowsOnly() throws {
         try db.saveLyrics(makeLyrics(title: "Synced", synced: "[00:01.00] Hello", plain: "Hello"))
         try db.saveLyrics(makeLyrics(title: "Synced only", synced: "[00:01.00] Hello", plain: nil))
@@ -180,13 +213,18 @@ nonisolated final class DatabaseManagerProofTests: XCTestCase {
         )
     }
 
-    private func makeScrobble(submitted: Bool) -> ScrobbleRecord {
+    private func makeScrobble(
+        submitted: Bool,
+        title: String = "Track",
+        artist: String = "Artist",
+        at timestamp: TimeInterval = 1_750_000_000
+    ) -> ScrobbleRecord {
         ScrobbleRecord(
             id: nil,
-            trackTitle: "Track",
-            artist: "Artist",
+            trackTitle: title,
+            artist: artist,
             albumTitle: "Album",
-            timestamp: Date(timeIntervalSince1970: 1_750_000_000),
+            timestamp: Date(timeIntervalSince1970: timestamp),
             duration: 210,
             submitted: submitted
         )

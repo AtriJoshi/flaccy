@@ -1350,6 +1350,36 @@ nonisolated final class DatabaseManager: Sendable {
         }
     }
 
+    /// Inserts a whole batch in one transaction, so a Last.fm page costs one
+    /// commit rather than one per row.
+    func insertScrobbles(_ scrobbles: [ScrobbleRecord]) throws {
+        guard !scrobbles.isEmpty else { return }
+        try dbQueue.write { db in
+            for scrobble in scrobbles {
+                try scrobble.insert(db)
+            }
+        }
+    }
+
+    /// Identity of every stored scrobble (`timestamp NUL lowercased title`),
+    /// read as two columns instead of decoding whole records.
+    func scrobbleIdentities() throws -> Set<String> {
+        try dbQueue.read { db in
+            var identities = Set<String>()
+            let rows = try Row.fetchCursor(db, sql: "SELECT timestamp, trackTitle FROM scrobbles")
+            while let row = try rows.next() {
+                let timestamp: Date = row["timestamp"]
+                let title: String = row["trackTitle"]
+                identities.insert(Self.scrobbleIdentity(timestamp: timestamp, title: title))
+            }
+            return identities
+        }
+    }
+
+    nonisolated static func scrobbleIdentity(timestamp: Date, title: String) -> String {
+        "\(Int(timestamp.timeIntervalSince1970))\u{0}\(title.lowercased())"
+    }
+
     func fetchPendingScrobbles() throws -> [ScrobbleRecord] {
         try dbQueue.read { db in
             try ScrobbleRecord
@@ -1402,9 +1432,14 @@ nonisolated final class DatabaseManager: Sendable {
         try dbQueue.write { db in
             try db.execute(sql: """
                 UPDATE tracks SET
-                    playCount = (SELECT COUNT(*) FROM scrobbles s WHERE s.trackTitle = tracks.title AND s.artist = tracks.artist),
-                    lastPlayed = (SELECT MAX(s.timestamp) FROM scrobbles s WHERE s.trackTitle = tracks.title AND s.artist = tracks.artist)
-                WHERE EXISTS (SELECT 1 FROM scrobbles s WHERE s.trackTitle = tracks.title AND s.artist = tracks.artist)
+                    playCount = totals.plays,
+                    lastPlayed = totals.last
+                FROM (
+                    SELECT trackTitle, artist, COUNT(*) AS plays, MAX(timestamp) AS last
+                    FROM scrobbles
+                    GROUP BY trackTitle, artist
+                ) AS totals
+                WHERE totals.trackTitle = tracks.title AND totals.artist = tracks.artist
             """)
         }
     }

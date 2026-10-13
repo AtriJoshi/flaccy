@@ -213,13 +213,11 @@ nonisolated final class LastFMStatsService: @unchecked Sendable {
     /// deduplicating against existing rows by timestamp+track. The page bound
     /// only guards against a runaway pagination loop; at 200 rows per page it
     /// admits two million scrobbles, so any real account imports completely.
+    @concurrent
     func importHistory(maxPages: Int = 10_000) async {
         guard lastFM.isAuthenticated else { return }
 
-        let existing = (try? db.fetchAllScrobbleRows()) ?? []
-        var seen = Set(existing.compactMap { row -> String? in
-            "\(Int(row.timestamp.timeIntervalSince1970))\u{0}\(row.trackTitle.lowercased())"
-        })
+        var seen = (try? db.scrobbleIdentities()) ?? []
 
         var page = 1
         var totalPages = 1
@@ -227,26 +225,26 @@ nonisolated final class LastFMStatsService: @unchecked Sendable {
         repeat {
             let result = await lastFM.fetchRecentTracks(page: page, limit: 200)
             totalPages = result.totalPages
+            var batch: [ScrobbleRecord] = []
             for track in result.tracks {
                 guard let uts = track.uts else { continue }
-                let key = "\(uts)\u{0}\(track.name.lowercased())"
-                guard !seen.contains(key) else { continue }
-                seen.insert(key)
-                let record = ScrobbleRecord(
+                let timestamp = Date(timeIntervalSince1970: TimeInterval(uts))
+                guard seen.insert(DatabaseManager.scrobbleIdentity(timestamp: timestamp, title: track.name)).inserted else { continue }
+                batch.append(ScrobbleRecord(
                     id: nil,
                     trackTitle: track.name,
                     artist: track.artist,
                     albumTitle: track.album,
-                    timestamp: Date(timeIntervalSince1970: TimeInterval(uts)),
+                    timestamp: timestamp,
                     duration: 0,
                     submitted: true
-                )
-                do {
-                    try db.insertScrobble(record)
-                    imported += 1
-                } catch {
-                    AppLogger.error("Import scrobble failed: \(error.localizedDescription)", category: .database)
-                }
+                ))
+            }
+            do {
+                try db.insertScrobbles(batch)
+                imported += batch.count
+            } catch {
+                AppLogger.error("Import scrobble page \(page) failed: \(error.localizedDescription)", category: .database)
             }
             page += 1
         } while page <= totalPages && page <= maxPages
