@@ -1275,7 +1275,7 @@ fn copy_without_clobbering(source: &std::path::Path, target: &std::path::Path) -
 }
 
 pub fn activate(app: &adw::Application, smoke: bool) {
-    if let Some(window) = app.active_window() {
+    if let Some(window) = main_window(app) {
         window.present();
         return;
     }
@@ -1283,6 +1283,15 @@ pub fn activate(app: &adw::Application, smoke: bool) {
     let window = ui::window::build(app, &core);
     core.start(&window);
     window.present();
+}
+
+/// The player's own window. Launching Flaccy again must bring this one forward,
+/// never `active_window()`, which is whichever window was used last and can be a
+/// secondary one such as the equalizer.
+fn main_window(app: &adw::Application) -> Option<gtk::Window> {
+    app.windows()
+        .into_iter()
+        .find(|window| window.is::<adw::ApplicationWindow>())
 }
 
 #[cfg(test)]

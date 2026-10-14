@@ -476,12 +476,26 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
                 config.window_height = window.height();
             }
             core.save_config();
+            close_secondary_windows(window);
             crate::logger::info("lifecycle", "window closed, config saved");
             glib::Propagation::Proceed
         });
     }
 
     window
+}
+
+/// Closing the player ends the application, so every other window it owns goes
+/// with it. A hidden equalizer window left behind would keep the process alive
+/// with nothing on screen, and the next launch would then bring up that window
+/// instead of the player.
+fn close_secondary_windows(player: &adw::ApplicationWindow) {
+    let Some(application) = player.application() else { return };
+    for window in application.windows() {
+        if &window != player.upcast_ref::<gtk::Window>() {
+            window.destroy();
+        }
+    }
 }
 
 /// The ambient enrichment surface: one line in the header that counts down and

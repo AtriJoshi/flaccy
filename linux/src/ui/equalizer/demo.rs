@@ -360,6 +360,12 @@ pub fn drive(ui: &Rc<Ui>) {
             "the equalizer action shows a hidden window",
             hidden && screen.window.is_visible(),
         );
+        let application = ui.window.application();
+        ui.window.close();
+        report(
+            "closing the player takes the equalizer window with it so the application can quit",
+            application.is_some_and(|application| application.windows().is_empty()),
+        );
         crate::logger::info("equalizer", "EqualizerUIExercise DONE");
     });
 }
