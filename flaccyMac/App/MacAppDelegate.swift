@@ -81,10 +81,14 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
+        if mainWindow?.isVisible != true {
             mainWindowController?.showWindow(nil)
         }
         return true
+    }
+
+    private var mainWindow: NSWindow? {
+        mainWindowController?.window
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
