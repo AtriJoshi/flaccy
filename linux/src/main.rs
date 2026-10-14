@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod downloads;
 mod enrichment;
+mod eq;
 mod events;
 mod hygiene;
 mod importer;
@@ -55,6 +56,7 @@ fn main() -> glib::ExitCode {
         logger::error("playback", &format!("gstreamer init failed: {err}"));
         return glib::ExitCode::FAILURE;
     }
+    eq::register();
     if gst::ElementFactory::find("playbin3").is_none() {
         logger::error(
             "playback",

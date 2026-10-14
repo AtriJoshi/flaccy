@@ -74,6 +74,7 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
 
     let menu = gio::Menu::new();
     menu.append(Some("Download from Link"), Some("app.downloads"));
+    menu.append(Some("Equalizer"), Some("app.equalizer"));
     menu.append(Some("Rescan Library"), Some("app.rescan"));
     menu.append(Some("Preferences"), Some("app.preferences"));
     let zoom = gio::Menu::new();
@@ -463,6 +464,7 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
     attach_search_reset(&ui, &search);
     attach_file_drop(&ui, &toast_overlay);
     attach_paste_to_download(&ui, &sidebar);
+    ui::equalizer::install(&ui);
     schedule_demo_detail(&ui);
 
     {
@@ -876,6 +878,14 @@ fn register_actions(app: &adw::Application, ui: &Rc<Ui>, search: &gtk::SearchEnt
 
     app.set_accels_for_action("win.focus-search", &["<Control>f"]);
     app.set_accels_for_action("app.preferences", &["<Control>comma"]);
+
+    let equalizer = gio::SimpleAction::new("equalizer", None);
+    {
+        let ui = Rc::clone(ui);
+        equalizer.connect_activate(move |_, _| ui::equalizer::toggle(&ui));
+    }
+    app.add_action(&equalizer);
+    app.set_accels_for_action("app.equalizer", &["<Control>e"]);
     app.set_accels_for_action("app.quit", &["<Control>q"]);
 
     add_string_action(ui, "play-album", |ui, key| {
@@ -1313,7 +1323,7 @@ pub fn set_ui_scale(ui: &Rc<Ui>, scale: f64) -> f64 {
 }
 
 fn present_shortcuts(window: &adw::ApplicationWindow) {
-    let groups: [(&str, &[(&str, &str)]); 4] = [
+    let groups: [(&str, &[(&str, &str)]); 5] = [
         (
             "Playback",
             &[
@@ -1341,6 +1351,20 @@ fn present_shortcuts(window: &adw::ApplicationWindow) {
                 ("Ctrl++", "Zoom in"),
                 ("Ctrl+-", "Zoom out"),
                 ("Ctrl+0", "Actual size"),
+            ],
+        ),
+        (
+            "Equalizer",
+            &[
+                ("Ctrl+E", "Show or hide the equalizer"),
+                ("← →", "Select a band"),
+                ("↑ ↓", "Raise or lower by 0.5 dB"),
+                ("Shift+↑ ↓", "Raise or lower by 2 dB"),
+                ("Alt+↑ ↓", "Raise or lower by 0.1 dB"),
+                ("0", "Reset the band"),
+                ("Space", "Hold to compare"),
+                ("Ctrl+Z", "Undo"),
+                ("Ctrl+Shift+Z", "Redo"),
             ],
         ),
         (
@@ -1728,6 +1752,24 @@ fn schedule_demo_detail(ui: &Rc<Ui>) {
                 crate::scrub_drill::run(&core);
             });
             glib::ControlFlow::Break
+        });
+    }
+    if let Ok(mode) = std::env::var("FLACCY_DEMO_EQ_UI") {
+        let ui = Rc::clone(ui);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1400), move || {
+            ui::equalizer::demo::open(&ui, &mode);
+        });
+    }
+    if std::env::var_os("FLACCY_DEMO_EQ_UI_DRIVE").is_some() {
+        let ui = Rc::clone(ui);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1400), move || {
+            ui::equalizer::demo::drive(&ui);
+        });
+    }
+    if let Ok(mode) = std::env::var("FLACCY_DEMO_EQ") {
+        let core = Rc::clone(&ui.core);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1400), move || {
+            crate::eq::exercise::run(&core, &mode);
         });
     }
     if std::env::var_os("FLACCY_DEMO_ABOUT").is_some() {

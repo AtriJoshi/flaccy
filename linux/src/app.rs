@@ -1,5 +1,6 @@
 use crate::config::{self, Config, Session};
 use crate::db::Db;
+use crate::eq::EqEngine;
 use crate::events::{AppEvent, EventHub};
 use crate::library::{self, Library, Track};
 use crate::load_progress::{LoadPhase, LoadProgress};
@@ -25,6 +26,7 @@ pub struct AppCore {
     pub library: RefCell<Rc<Library>>,
     pub hub: Rc<EventHub>,
     pub player: Rc<Player>,
+    pub eq: Rc<EqEngine>,
     pub session: RefCell<Option<Session>>,
     pub artwork: ui::artwork::ArtworkCache,
     pub scanning: Cell<bool>,
@@ -87,7 +89,8 @@ impl AppCore {
         let hub = Rc::new(EventHub::new());
         let root = config.music_root();
         crate::logger::info("lifecycle", &format!("library root: {}", root.display()));
-        let player = Player::new(Rc::clone(&hub), root);
+        let eq = EqEngine::new(Rc::clone(&hub));
+        let player = Player::new(Rc::clone(&hub), root, eq.element());
         player.set_volume(config.volume);
         player.set_shuffle(config.shuffle);
         player.set_repeat(crate::player::RepeatMode::from_id(&config.repeat_mode));
@@ -112,6 +115,7 @@ impl AppCore {
             library: RefCell::new(Rc::new(Library::empty())),
             hub,
             player,
+            eq,
             session: RefCell::new(session),
             artwork,
             scanning: Cell::new(false),
@@ -372,6 +376,7 @@ impl AppCore {
     }
 
     pub fn start(self: &Rc<Self>, _window: &adw::ApplicationWindow) {
+        self.eq.start();
         self.reload_library();
         self.start_tick();
         crate::mpris::start(self);

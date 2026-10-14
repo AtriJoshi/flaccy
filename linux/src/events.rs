@@ -70,6 +70,15 @@ pub enum AppEvent {
     },
     MusicVideoChanged,
     MusicVideoCandidates,
+    /// The equalizer's saved state, the profile in force or whether it is
+    /// running changed.
+    EqualizerChanged,
+    /// The default audio output changed. `profile_name` is set only when the
+    /// new output keeps a profile of its own.
+    EqualizerOutputChanged {
+        output_name: String,
+        profile_name: Option<String>,
+    },
 }
 
 type Subscriber = Rc<dyn Fn(&AppEvent) -> bool>;

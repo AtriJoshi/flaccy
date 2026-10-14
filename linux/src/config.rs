@@ -19,6 +19,9 @@ pub struct Config {
     pub sidebar_index: i32,
     pub album_sort: String,
     pub np_swap_sides: bool,
+    /// The size the equalizer window was last left at.
+    pub eq_window_width: i32,
+    pub eq_window_height: i32,
     pub np_show_lyrics: bool,
     pub np_show_queue: bool,
     /// Which side panel the library shell had open: "lyrics", "queue", or empty
@@ -83,6 +86,8 @@ impl Default for Config {
             sidebar_index: 0,
             album_sort: "artist".to_string(),
             np_swap_sides: false,
+            eq_window_width: 1080,
+            eq_window_height: 720,
             np_show_lyrics: false,
             np_show_queue: false,
             side_panel: String::new(),

@@ -191,11 +191,12 @@ fn gapless_next_index(shared: &Shared) -> Option<usize> {
 }
 
 impl Player {
-    pub fn new(hub: Rc<EventHub>, root: PathBuf) -> Rc<Self> {
+    pub fn new(hub: Rc<EventHub>, root: PathBuf, audio_filter: gst::Element) -> Rc<Self> {
         let playbin = gst::ElementFactory::make("playbin3")
             .build()
             .expect("playbin3 must be available");
         playbin.set_property_from_str("flags", "audio+soft-volume");
+        playbin.set_property("audio-filter", &audio_filter);
 
         let shared = Arc::new(Mutex::new(Shared {
             queue: Vec::new(),
