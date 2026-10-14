@@ -105,13 +105,13 @@ final class EqualizerViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        engine.beginAnalysis()
+        engine.beginAnalysis(for: self)
         refresh(animated: false)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        engine.endAnalysis()
+        engine.endAnalysis(for: self)
         engine.endCompare()
     }
 

@@ -233,6 +233,79 @@ final class EqualizerKernelTests: XCTestCase {
         }
     }
 
+    func testAKernelBornWithASongHasTheCurveInForceFromItsFirstSample() {
+        let kernel = EqualizerKernel(channelCount: 1, sampleRate: rate)
+        kernel.configure(bands: [], preampDecibels: -6, isEngaged: true, peakGuard: true, startsEngaged: true)
+        let input = [[Float](repeating: 0.5, count: 64)]
+
+        let output = run(kernel, planar: input)[0]
+
+        let expected = Float(0.5 * pow(10, -6.0 / 20))
+        XCTAssertEqual(output[0], expected, accuracy: 1e-6)
+        XCTAssertEqual(output[63], expected, accuracy: 1e-6)
+    }
+
+    func testAKernelThatAppearsUnderAPlayingSongStillFadesIn() {
+        let kernel = EqualizerKernel(channelCount: 1, sampleRate: rate)
+        kernel.configure(bands: [], preampDecibels: -6, isEngaged: true, peakGuard: true)
+        let output = run(kernel, planar: [[Float](repeating: 0.5, count: 64)])[0]
+
+        XCTAssertEqual(output[0], 0.5, accuracy: 1e-3)
+        XCTAssertLessThan(output[63], 0.5)
+    }
+
+    func testTheGuardLeavesAHotMasterAloneWhenNothingIsBoosted() {
+        let kernel = EqualizerKernel(channelCount: 1, sampleRate: rate)
+        kernel.configure(
+            bands: [EqualizerBand(type: .bell, frequency: 60, gain: -2, q: 1.41)],
+            preampDecibels: 0,
+            isEngaged: true,
+            peakGuard: true,
+            startsEngaged: true
+        )
+        let tone = (0..<8_192).map { Float(0.99 * sin(2 * Double.pi * 3_000 * Double($0) / rate)) }
+
+        let output = run(kernel, planar: [tone])[0]
+
+        XCTAssertFalse(kernel.guardReduced)
+        XCTAssertEqual(output.map { abs($0) }.max() ?? 0, 0.99, accuracy: 0.01)
+    }
+
+    func testDisengagingWhileTheGuardIsActingLeavesNoStepWhenItHandsOver() {
+        let kernel = EqualizerKernel(channelCount: 1, sampleRate: rate)
+        kernel.configure(bands: [], preampDecibels: 6, isEngaged: true, peakGuard: true, startsEngaged: true)
+        let loud = [[Float](repeating: 0.8, count: 4_096)]
+        _ = run(kernel, planar: loud)
+        kernel.configure(bands: [], preampDecibels: 6, isEngaged: false, peakGuard: true)
+
+        let output = run(kernel, planar: [[Float](repeating: 0.8, count: 12_000)], chunk: 256)[0]
+
+        let gains = output.map { Double($0) / 0.8 }
+        let largestStep = zip(gains, gains.dropFirst()).map { abs($1 - $0) }.max() ?? 0
+        XCTAssertLessThan(largestStep, 0.002)
+        XCTAssertEqual(output.last ?? 0, 0.8, accuracy: 1e-6)
+        XCTAssertTrue(kernel.isBypassed)
+    }
+
+    func testABandThatIsNotANumberCannotPoisonTheAudio() {
+        let kernel = EqualizerKernel(channelCount: 1, sampleRate: rate)
+        kernel.configure(
+            bands: [
+                EqualizerBand(type: .bell, frequency: .nan, gain: 3, q: 1),
+                EqualizerBand(type: .bell, frequency: 1_000, gain: .nan, q: 1),
+            ],
+            preampDecibels: 0,
+            isEngaged: true,
+            peakGuard: true,
+            startsEngaged: true
+        )
+        let tone = (0..<2_048).map { Float(0.5 * sin(2 * Double.pi * 440 * Double($0) / rate)) }
+
+        let output = run(kernel, planar: [tone])[0]
+
+        XCTAssertTrue(output.allSatisfy(\.isFinite))
+    }
+
     func testResetClearsTheFiltersMemory() {
         let kernel = EqualizerKernel(channelCount: 1, sampleRate: rate)
         kernel.configure(bands: [EqualizerBand(type: .bell, frequency: 200, gain: 10, q: 4)], preampDecibels: 0, isEngaged: true, peakGuard: false)

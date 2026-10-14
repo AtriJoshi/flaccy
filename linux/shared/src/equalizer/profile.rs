@@ -56,14 +56,24 @@ impl EqualizerBand {
     pub fn clamped(&self) -> Self {
         Self {
             filter_type: self.filter_type,
-            frequency: self.frequency.max(Self::FREQUENCY_MIN).min(Self::FREQUENCY_MAX),
+            frequency: Self::forced(self.frequency, Self::FREQUENCY_MIN, Self::FREQUENCY_MAX, 1_000.0),
             gain: if self.filter_type.has_gain() {
-                self.gain.max(Self::GAIN_MIN).min(Self::GAIN_MAX)
+                Self::forced(self.gain, Self::GAIN_MIN, Self::GAIN_MAX, 0.0)
             } else {
                 0.0
             },
-            q: self.q.max(Self::Q_MIN).min(Self::Q_MAX),
+            q: Self::forced(self.q, Self::Q_MIN, Self::Q_MAX, self.filter_type.default_q()),
             is_enabled: self.is_enabled,
+        }
+    }
+
+    /// `value` inside `low..=high`, or `fallback` when it is not a number at all:
+    /// the Swift client has to guard against NaN here, and the answer must match.
+    fn forced(value: f64, low: f64, high: f64, fallback: f64) -> f64 {
+        if value.is_finite() {
+            value.max(low).min(high)
+        } else {
+            fallback
         }
     }
 }
@@ -193,6 +203,13 @@ pub fn new_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clamping_turns_a_nan_band_into_a_usable_one() {
+        let band = EqualizerBand::new(FilterType::Bell, f64::NAN, f64::INFINITY, Some(f64::NAN), true).clamped();
+        assert!(band.frequency.is_finite() && band.gain.is_finite() && band.q.is_finite());
+        assert_eq!(band.gain, 0.0);
+    }
 
     #[test]
     fn a_band_json_uses_the_swift_keys() {

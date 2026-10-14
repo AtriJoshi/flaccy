@@ -64,7 +64,8 @@ nonisolated struct EqualizerMeter: Equatable, Sendable {
 /// tells the engine which tap is the one currently making sound.
 nonisolated final class EqualizerTapContext: @unchecked Sendable {
     let box: EqualizerConfigBox
-    private(set) var kernel: EqualizerKernel?
+    let startsEngaged: Bool
+    private let kernelSlot = OSAllocatedUnfairLock<EqualizerKernel?>(initialState: nil)
     private(set) var lastProcessTick: UInt64 = 0
     private(set) var framesProcessed: UInt64 = 0
     private(set) var sampleRate: Double = 0
@@ -75,8 +76,9 @@ nonisolated final class EqualizerTapContext: @unchecked Sendable {
     private var isInterleaved = false
     private var appliedVersion: UInt64 = 0
 
-    init(box: EqualizerConfigBox) {
+    init(box: EqualizerConfigBox, startsEngaged: Bool) {
         self.box = box
+        self.startsEngaged = startsEngaged
     }
 
     deinit {
@@ -92,25 +94,25 @@ nonisolated final class EqualizerTapContext: @unchecked Sendable {
         isInterleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
         planes?.deallocate()
         planes = nil
-        kernel = nil
+        kernelSlot.withLock { $0 = nil }
         appliedVersion = 0
         guard supportsFormat else { return }
         planes = .allocate(capacity: channels)
         let kernel = EqualizerKernel(channelCount: channels, sampleRate: format.mSampleRate)
-        self.kernel = kernel
-        applyConfig(box.read(), to: kernel)
+        applyConfig(box.read(), to: kernel, startsEngaged: startsEngaged)
+        kernelSlot.withLock { $0 = kernel }
         EqualizerTapRegistry.shared.register(self)
     }
 
     func unprepare() {
         EqualizerTapRegistry.shared.unregister(self)
-        kernel = nil
+        kernelSlot.withLock { $0 = nil }
         planes?.deallocate()
         planes = nil
     }
 
     func process(_ bufferList: UnsafeMutablePointer<AudioBufferList>, frames: Int, startOfStream: Bool) {
-        guard supportsFormat, let kernel, let planes, frames > 0 else { return }
+        guard supportsFormat, frames > 0, let planes, let kernel = kernelSlot.withLockIfAvailable({ $0 }).flatMap({ $0 }) else { return }
         if let config = box.tryRead(), config.version != appliedVersion {
             applyConfig(config, to: kernel)
         }
@@ -139,21 +141,22 @@ nonisolated final class EqualizerTapContext: @unchecked Sendable {
     }
 
     func meter() -> EqualizerMeter? {
-        kernel.map { EqualizerMeter(peak: $0.blockPeak, guardReduced: $0.guardReduced) }
+        kernelSlot.withLock { $0 }.map { EqualizerMeter(peak: $0.blockPeak, guardReduced: $0.guardReduced) }
     }
 
     func copyAnalysis(into output: UnsafeMutablePointer<Float>, count: Int) -> Bool {
-        guard let kernel else { return false }
+        guard let kernel = kernelSlot.withLock({ $0 }) else { return false }
         kernel.copyAnalysis(into: output, count: count)
         return true
     }
 
-    private func applyConfig(_ config: EqualizerConfig, to kernel: EqualizerKernel) {
+    private func applyConfig(_ config: EqualizerConfig, to kernel: EqualizerKernel, startsEngaged: Bool = false) {
         kernel.configure(
             bands: config.bands,
             preampDecibels: config.preampDecibels,
             isEngaged: config.isEngaged,
-            peakGuard: config.peakGuard
+            peakGuard: config.peakGuard,
+            startsEngaged: startsEngaged
         )
         appliedVersion = config.version
     }
@@ -192,8 +195,11 @@ nonisolated final class EqualizerTapRegistry: @unchecked Sendable {
 /// The C callbacks MediaToolbox wants, and the one place a tap is created.
 nonisolated enum EqualizerTapFactory {
 
-    static func makeTap(box: EqualizerConfigBox) -> MTAudioProcessingTap? {
-        let context = EqualizerTapContext(box: box)
+    /// `startsEngaged` is true for a tap on an item that has not begun playing,
+    /// so the curve is in force from its first sample; a tap added under a song
+    /// already playing fades in instead.
+    static func makeTap(box: EqualizerConfigBox, startsEngaged: Bool) -> MTAudioProcessingTap? {
+        let context = EqualizerTapContext(box: box, startsEngaged: startsEngaged)
         let retained = Unmanaged.passRetained(context)
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,

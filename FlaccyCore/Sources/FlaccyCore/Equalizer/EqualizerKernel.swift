@@ -1,7 +1,7 @@
 import Foundation
 
 /// The equalizer's signal path: a cascade of up to ten biquads, a preamp, a
-/// peak guard and a dry/wet crossfade, running on 32-bit float samples.
+/// peak guard and a dry/wet crossfade, running on 32-bit float samples with its filter arithmetic in double precision.
 ///
 /// It is the one piece of audio code the clients share. The Apple taps and the
 /// Linux GStreamer element each only hand it buffers; the arithmetic, the
@@ -19,7 +19,7 @@ public final class EqualizerKernel {
     public static let maxSections = EqualizerBand.maximumPerProfile
     public static let rampFrames = 1_024
     public static let crossfadeFrames = 1_024
-    public static let guardCeiling: Float = 0.891_250_9
+    public static let guardCeiling: Float = 1
     public static let guardReleaseSeconds: Float = 0.05
     public static let analysisCapacity = 4_096
 
@@ -31,17 +31,17 @@ public final class EqualizerKernel {
     public private(set) var analysisWriteIndex = 0
 
     private let sectionSlots = EqualizerKernel.maxSections * 5
-    private let startCoefficients: UnsafeMutablePointer<Float>
-    private let targetCoefficients: UnsafeMutablePointer<Float>
-    private let liveCoefficients: UnsafeMutablePointer<Float>
-    private let delay: UnsafeMutablePointer<Float>
+    private let startCoefficients: UnsafeMutablePointer<Double>
+    private let targetCoefficients: UnsafeMutablePointer<Double>
+    private let liveCoefficients: UnsafeMutablePointer<Double>
+    private let delay: UnsafeMutablePointer<Double>
     private let analysis: UnsafeMutablePointer<Float>
 
     private var liveSections = 0
     private var targetSections = 0
-    private var startGain: Float = 1
-    private var targetGain: Float = 1
-    private var liveGain: Float = 1
+    private var startGain: Double = 1
+    private var targetGain: Double = 1
+    private var liveGain: Double = 1
     private var wet: Float = 0
     private var targetWet: Float = 0
     private var rampPosition = 0
@@ -76,15 +76,21 @@ public final class EqualizerKernel {
         analysis.deallocate()
     }
 
-    /// True when the stage is fully crossfaded out and not asked to come back:
-    /// samples pass through untouched.
+    /// True when the stage is fully crossfaded out, not asked to come back and
+    /// no longer holding the guard down: samples pass through untouched.
     public var isBypassed: Bool {
-        wet == 0 && targetWet == 0
+        wet == 0 && targetWet == 0 && guardGain >= 1
     }
 
     /// Points the stage at a new curve. Called with `isEngaged == false` it
     /// crossfades out and then passes audio through bit for bit.
-    public func configure(bands: [EqualizerBand], preampDecibels: Double, isEngaged: Bool, peakGuard: Bool) {
+    ///
+    /// The first call decides how the stage begins. A kernel that is born with
+    /// the beginning of a song passes `startsEngaged` so the curve is already
+    /// in force on the first sample; one that appears under a song already
+    /// playing leaves it off and crossfades in, so turning the equalizer on
+    /// mid-song does not click.
+    public func configure(bands: [EqualizerBand], preampDecibels: Double, isEngaged: Bool, peakGuard: Bool, startsEngaged: Bool = false) {
         let first = !hasConfiguration
         hasConfiguration = true
         peakGuardEnabled = peakGuard
@@ -97,19 +103,20 @@ public final class EqualizerKernel {
         var count = 0
         for band in bands where band.isEnabled && count < Self.maxSections {
             let c = BiquadMath.coefficients(for: band, sampleRate: sampleRate)
+            guard [c.b0, c.b1, c.b2, c.a1, c.a2].allSatisfy(\.isFinite) else { continue }
             let base = count * 5
-            targetCoefficients[base] = Float(c.b0)
-            targetCoefficients[base + 1] = Float(c.b1)
-            targetCoefficients[base + 2] = Float(c.b2)
-            targetCoefficients[base + 3] = Float(c.a1)
-            targetCoefficients[base + 4] = Float(c.a2)
+            targetCoefficients[base] = c.b0
+            targetCoefficients[base + 1] = c.b1
+            targetCoefficients[base + 2] = c.b2
+            targetCoefficients[base + 3] = c.a1
+            targetCoefficients[base + 4] = c.a2
             count += 1
         }
         if count < Self.maxSections {
             Self.fillIdentity(targetCoefficients + count * 5, sections: Self.maxSections - count)
         }
         targetSections = count
-        targetGain = Float(pow(10, preampDecibels / 20))
+        targetGain = pow(10, preampDecibels / 20)
         targetWet = isEngaged ? 1 : 0
 
         if first {
@@ -122,7 +129,7 @@ public final class EqualizerKernel {
             liveSections = targetSections
             rampTotal = 0
             rampPosition = 0
-            wet = 0
+            wet = startsEngaged && isEngaged ? 1 : 0
         } else {
             rampTotal = Self.rampFrames
             rampPosition = 0
@@ -144,7 +151,7 @@ public final class EqualizerKernel {
         guard frames > 0 else { return }
         let channels = channelCount
 
-        if wet == 0 && targetWet == 0 {
+        if isBypassed {
             var peak: Float = 0
             for channel in 0..<channels {
                 let plane = planes[channel]
@@ -168,11 +175,11 @@ public final class EqualizerKernel {
         var reduced = false
 
         for frame in 0..<frames {
-            var rampFraction: Float = 1
+            var rampFraction: Double = 1
             let ramping = rampPosition < rampTotal
             if ramping {
                 rampPosition += 1
-                rampFraction = Float(rampPosition) / Float(rampTotal)
+                rampFraction = Double(rampPosition) / Double(rampTotal)
                 for slot in 0..<(sections * 5) {
                     let from = startCoefficients[slot]
                     liveCoefficients[slot] = from + (targetCoefficients[slot] - from) * rampFraction
@@ -198,7 +205,7 @@ public final class EqualizerKernel {
             var frameMax: Float = 0
             for channel in 0..<channels {
                 let dry = planes[channel][frame * planeStride]
-                var value = dry * liveGain
+                var value = Double(dry) * liveGain
                 let state = delay + channel * maxSections * 2
                 for section in 0..<sections {
                     let c = liveCoefficients + section * 5
@@ -208,7 +215,7 @@ public final class EqualizerKernel {
                     z[1] = c[2] * value - c[4] * out
                     value = out
                 }
-                let mixed = dry + (value - dry) * mix
+                let mixed = dry + (Float(value) - dry) * mix
                 planes[channel][frame * planeStride] = mixed
                 frameMax = max(frameMax, abs(mixed))
             }
@@ -286,7 +293,7 @@ public final class EqualizerKernel {
         }
     }
 
-    private static func fillIdentity(_ pointer: UnsafeMutablePointer<Float>, sections: Int) {
+    private static func fillIdentity(_ pointer: UnsafeMutablePointer<Double>, sections: Int) {
         for section in 0..<sections {
             let base = section * 5
             pointer[base] = 1

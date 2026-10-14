@@ -37,7 +37,7 @@ enum EqualizerExercise {
         }
 
         engine.setEnabled(false)
-        engine.beginAnalysis()
+        engine.beginAnalysis(for: analysisOwner)
         AudioPlayer.shared.play([track(fileA, "Tone A"), track(fileB, "Tone B")], startingAt: 0)
 
         let tapRunning = await waitUntil(seconds: 10) { processingContext()?.framesProcessed ?? 0 > 0 }
@@ -74,6 +74,7 @@ enum EqualizerExercise {
         let boundary = await crossBoundary()
         report("gapless boundary: largest gap \(format(boundary.largestGap)) ms against \(format(steadyGap)) ms in steady playback", boundary.largestGap <= steadyGap + 40)
         report("the queue advanced to the 96 kHz 24-bit track", boundary.advanced)
+        report("the next track's tap was built to start with the curve in force", boundary.nextTapStartsEngaged)
         if let second = processingContext() {
             report("tap re-prepared for the next item at \(Int(second.sampleRate)) Hz", second.sampleRate == 96_000)
         }
@@ -95,7 +96,7 @@ enum EqualizerExercise {
         report("render callbacks continue after a seek", afterSeek)
 
         engine.setEnabled(false)
-        engine.endAnalysis()
+        engine.endAnalysis(for: analysisOwner)
         let detached = await waitUntil(seconds: 4) { engine.preparedTapCount == 0 }
         report("no tap is left attached once the equalizer is off (\(engine.preparedTapCount) prepared)", detached)
 
@@ -107,6 +108,8 @@ enum EqualizerExercise {
         AppLogger.info("EqualizerExercise finished", category: .playback)
     }
 
+    private static let analysisOwner = NSObject()
+
     private static func autoPreampCheck(engine: EqualizerEngine, dry: Float) async -> Float {
         engine.edit { profile in
             profile.kind = .parametric
@@ -116,7 +119,7 @@ enum EqualizerExercise {
         return await settledPeak()
     }
 
-    private static func crossBoundary() async -> (largestGap: Double, advanced: Bool) {
+    private static func crossBoundary() async -> (largestGap: Double, advanced: Bool, nextTapStartsEngaged: Bool) {
         EqualizerEngine.shared.edit { profile in
             profile.kind = .parametric
             profile.bands = [EqualizerBand(type: .bell, frequency: 220, gain: 9, q: 1)]
@@ -133,7 +136,7 @@ enum EqualizerExercise {
             }
             try? await Task.sleep(for: .milliseconds(4))
         }
-        return (largest, AudioPlayer.shared.currentIndex == 1)
+        return (largest, AudioPlayer.shared.currentIndex == 1, processingContext()?.startsEngaged == true)
     }
 
     private static func largestGap(over seconds: Double) async -> Double {

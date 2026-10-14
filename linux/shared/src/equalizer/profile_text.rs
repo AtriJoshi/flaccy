@@ -58,7 +58,7 @@ impl EqualizerProfileText {
                 let values: Vec<f64> = rest
                     .split(' ')
                     .filter(|part| !part.is_empty())
-                    .filter_map(|part| part.parse::<f64>().ok())
+                    .filter_map(|part| finite_number(part))
                     .collect();
                 if values.len() == GraphicSolver::CENTRES.len() {
                     graphic_targets = Some(values);
@@ -190,13 +190,13 @@ fn parse_filter(line: &str) -> FilterResult {
         let key = rest[index].to_uppercase();
         let has_value = index + 1 < rest.len();
         if key == "FC" && has_value {
-            frequency = rest[index + 1].parse::<f64>().ok();
+            frequency = finite_number(rest[index + 1]);
             index += 2;
         } else if key == "GAIN" && has_value {
-            gain = rest[index + 1].parse::<f64>().ok().unwrap_or(0.0);
+            gain = finite_number(rest[index + 1]).unwrap_or(0.0);
             index += 2;
         } else if key == "Q" && has_value {
-            q = rest[index + 1].parse::<f64>().ok();
+            q = finite_number(rest[index + 1]);
             index += 2;
         } else {
             index += 1;
@@ -240,8 +240,8 @@ fn parse_graphic_points(text: &str) -> Vec<(f64, f64)> {
             if parts.len() < 2 {
                 return None;
             }
-            let frequency = parts[0].parse::<f64>().ok()?;
-            let gain = parts[1].parse::<f64>().ok()?;
+            let frequency = finite_number(parts[0])?;
+            let gain = finite_number(parts[1])?;
             Some((frequency, gain))
         })
         .collect();
@@ -315,6 +315,12 @@ fn with_preamp(profile: EqualizerProfile, preamp: Option<f64>) -> EqualizerProfi
     result
 }
 
+/// A number the text really holds: `str::parse` also accepts "nan" and "inf",
+/// which would otherwise travel into the filters and silence the track.
+fn finite_number(text: &str) -> Option<f64> {
+    text.parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
 fn clamp_gain(value: f64) -> f64 {
     value.max(EqualizerBand::GAIN_MIN).min(EqualizerBand::GAIN_MAX)
 }
@@ -322,7 +328,7 @@ fn clamp_gain(value: f64) -> f64 {
 fn first_number(text: &str) -> Option<f64> {
     text.split(is_separator)
         .filter(|part| !part.is_empty())
-        .find_map(|part| part.parse::<f64>().ok())
+        .find_map(|part| finite_number(part))
 }
 
 /// Two decimals with trailing zeros trimmed, locale independent, so every client
@@ -453,6 +459,15 @@ Filter 4: ON HSC Fc 12000 Hz Gain -1.5 dB Q 0.70";
         assert!(EqualizerProfileText::parse("hello\nworld", "x").is_none());
         assert!(EqualizerProfileText::parse("", "x").is_none());
         assert!(EqualizerProfileText::parse("Preamp: -3 dB", "x").is_none());
+    }
+
+    #[test]
+    fn numbers_that_are_not_numbers_are_not_read() {
+        assert!(EqualizerProfileText::parse("Filter 1: ON PK Fc nan Hz Gain 3 dB Q 1", "x").is_none());
+        let parsed =
+            EqualizerProfileText::parse("Filter 1: ON PK Fc 1000 Hz Gain inf dB Q 1", "x").unwrap();
+        assert_eq!(parsed.profile.bands[0].gain, 0.0);
+        assert!(EqualizerProfileText::parse("Preamp: nan dB", "x").is_none());
     }
 
     #[test]

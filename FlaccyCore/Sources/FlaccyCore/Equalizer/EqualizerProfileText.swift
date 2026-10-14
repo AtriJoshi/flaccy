@@ -38,7 +38,7 @@ public enum EqualizerProfileText {
                 let value = line.dropFirst(nameComment.count).trimmingCharacters(in: .whitespaces)
                 if !value.isEmpty { name = value }
             } else if line.hasPrefix(graphicComment) {
-                let values = line.dropFirst(graphicComment.count).split(separator: " ").compactMap { Double($0) }
+                let values = line.dropFirst(graphicComment.count).split(separator: " ").compactMap { finiteNumber($0) }
                 if values.count == GraphicSolver.centres.count { graphicTargets = values }
             } else if lower.hasPrefix("preamp:") {
                 preamp = firstNumber(in: String(line.dropFirst("preamp:".count)))
@@ -109,13 +109,13 @@ public enum EqualizerProfileText {
         while index < rest.count {
             let key = rest[index].uppercased()
             if key == "FC", index + 1 < rest.count {
-                frequency = Double(rest[index + 1])
+                frequency = finiteNumber(rest[index + 1])
                 index += 2
             } else if key == "GAIN", index + 1 < rest.count {
-                gain = Double(rest[index + 1]) ?? 0
+                gain = finiteNumber(rest[index + 1]) ?? 0
                 index += 2
             } else if key == "Q", index + 1 < rest.count {
-                q = Double(rest[index + 1])
+                q = finiteNumber(rest[index + 1])
                 index += 2
             } else {
                 index += 1
@@ -150,7 +150,7 @@ public enum EqualizerProfileText {
     private static func parseGraphicPoints(_ text: String) -> [(Double, Double)] {
         text.split(separator: ";").compactMap { pair in
             let parts = pair.split(whereSeparator: { $0 == " " || $0 == "\t" })
-            guard parts.count >= 2, let f = Double(parts[0]), let g = Double(parts[1]) else { return nil }
+            guard parts.count >= 2, let f = finiteNumber(parts[0]), let g = finiteNumber(parts[1]) else { return nil }
             return (f, g)
         }.sorted { $0.0 < $1.0 }
     }
@@ -193,12 +193,19 @@ public enum EqualizerProfileText {
         return result
     }
 
+    /// A number the text really holds: `Double` also parses "nan" and "inf",
+    /// which would otherwise travel into the filters and silence the track.
+    private static func finiteNumber<S: StringProtocol>(_ text: S) -> Double? {
+        guard let value = Double(text), value.isFinite else { return nil }
+        return value
+    }
+
     private static func clampGain(_ value: Double) -> Double {
         min(max(value, EqualizerBand.gainRange.lowerBound), EqualizerBand.gainRange.upperBound)
     }
 
     private static func firstNumber(in text: String) -> Double? {
-        text.split(whereSeparator: { $0 == " " || $0 == "\t" }).lazy.compactMap { Double($0) }.first
+        text.split(whereSeparator: { $0 == " " || $0 == "\t" }).lazy.compactMap { finiteNumber($0) }.first
     }
 
     /// Two decimals with trailing zeros trimmed, locale independent, so every client writes the same bytes.

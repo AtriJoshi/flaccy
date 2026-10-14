@@ -29,10 +29,18 @@ public struct EqualizerBand: Codable, Equatable, Sendable {
     /// The band with every value forced into the range the equalizer allows.
     public func clamped() -> EqualizerBand {
         var band = self
-        band.frequency = min(max(frequency, Self.frequencyRange.lowerBound), Self.frequencyRange.upperBound)
-        band.gain = type.hasGain ? min(max(gain, Self.gainRange.lowerBound), Self.gainRange.upperBound) : 0
-        band.q = min(max(q, Self.qRange.lowerBound), Self.qRange.upperBound)
+        band.frequency = Self.forced(frequency, into: Self.frequencyRange, orElse: 1_000)
+        band.gain = type.hasGain ? Self.forced(gain, into: Self.gainRange, orElse: 0) : 0
+        band.q = Self.forced(q, into: Self.qRange, orElse: type.defaultQ)
         return band
+    }
+
+    /// `value` inside `range`, or `fallback` when it is not a number at all:
+    /// `min` and `max` hand a NaN straight through, and one NaN in a filter
+    /// silences the rest of the track.
+    private static func forced(_ value: Double, into range: ClosedRange<Double>, orElse fallback: Double) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, range.lowerBound), range.upperBound)
     }
 }
 

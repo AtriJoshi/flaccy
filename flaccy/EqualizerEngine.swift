@@ -35,7 +35,7 @@ final class EqualizerEngine {
     private let box = EqualizerConfigBox()
     private let items = NSHashTable<AVPlayerItem>.weakObjects()
     private let attachments = NSMapTable<AVPlayerItem, Attachment>.weakToStrongObjects()
-    private var analyzerDemand = 0
+    private var analysisOwners = Set<ObjectIdentifier>()
     private var version: UInt64 = 0
     private var outputWatcher: EqualizerOutputWatcher?
     private var spectrumAnalyzer: SpectrumAnalyzer?
@@ -238,13 +238,15 @@ final class EqualizerEngine {
     }
 
     /// Keeps a tap on the playing item while a screen draws the live spectrum.
-    func beginAnalysis() {
-        analyzerDemand += 1
+    /// Demand is counted per screen, not per call, because a sheet whose
+    /// dismissal is cancelled appears again without having disappeared.
+    func beginAnalysis(for owner: AnyObject) {
+        analysisOwners.insert(ObjectIdentifier(owner))
         refreshAttachments()
     }
 
-    func endAnalysis() {
-        analyzerDemand = max(analyzerDemand - 1, 0)
+    func endAnalysis(for owner: AnyObject) {
+        analysisOwners.remove(ObjectIdentifier(owner))
         refreshAttachments()
     }
 
@@ -297,7 +299,7 @@ final class EqualizerEngine {
     }
 
     private var needsTap: Bool {
-        box.read().isEngaged || analyzerDemand > 0
+        box.read().isEngaged || !analysisOwners.isEmpty
     }
 
     private func commit(reason: String) {
@@ -381,8 +383,14 @@ final class EqualizerEngine {
         }
     }
 
+    /// An item this close to its beginning is still starting, so its tap
+    /// brings the curve in at once; further along, turning the equalizer on
+    /// has to fade in to avoid a click.
+    private static let freshItemSeconds = 0.25
+
     private func installTap(on item: AVPlayerItem, track: AVAssetTrack, attachment: Attachment) {
-        guard !attachment.hasMix, let tap = EqualizerTapFactory.makeTap(box: box) else {
+        let startsEngaged = item.currentTime().seconds < Self.freshItemSeconds
+        guard !attachment.hasMix, let tap = EqualizerTapFactory.makeTap(box: box, startsEngaged: startsEngaged) else {
             if !attachment.hasMix { AppLogger.warning("Equalizer tap could not be created", category: .playback) }
             return
         }

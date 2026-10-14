@@ -74,7 +74,7 @@ final class MacEqualizerViewController: NSViewController {
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        engine.beginAnalysis()
+        engine.beginAnalysis(for: self)
         refresh(animated: false)
     }
 
@@ -85,7 +85,7 @@ final class MacEqualizerViewController: NSViewController {
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
-        engine.endAnalysis()
+        engine.endAnalysis(for: self)
         engine.endCompare()
     }
 

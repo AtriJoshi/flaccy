@@ -1,7 +1,8 @@
 //! Mirrors `FlaccyCore/Sources/FlaccyCore/Equalizer/EqualizerKernel.swift`.
 //!
 //! The equalizer's signal path: a cascade of up to ten biquads, a preamp, a peak
-//! guard and a dry/wet crossfade, running on 32-bit float samples. The arithmetic,
+//! guard and a dry/wet crossfade, running on 32-bit float samples with the filter
+//! arithmetic in double precision. The arithmetic,
 //! the ramping and the guard follow the Swift file line for line, and the impulse
 //! response tests carry the same golden vectors.
 //!
@@ -32,16 +33,16 @@ pub struct EqualizerKernel {
     block_peak: f32,
     guard_reduced: bool,
     analysis_write_index: usize,
-    start_coefficients: Vec<f32>,
-    target_coefficients: Vec<f32>,
-    live_coefficients: Vec<f32>,
-    delay: Vec<f32>,
+    start_coefficients: Vec<f64>,
+    target_coefficients: Vec<f64>,
+    live_coefficients: Vec<f64>,
+    delay: Vec<f64>,
     analysis: Vec<f32>,
     live_sections: usize,
     target_sections: usize,
-    start_gain: f32,
-    target_gain: f32,
-    live_gain: f32,
+    start_gain: f64,
+    target_gain: f64,
+    live_gain: f64,
     wet: f32,
     target_wet: f32,
     ramp_position: usize,
@@ -56,7 +57,7 @@ impl EqualizerKernel {
     pub const MAX_SECTIONS: usize = EqualizerBand::MAXIMUM_PER_PROFILE;
     pub const RAMP_FRAMES: usize = 1_024;
     pub const CROSSFADE_FRAMES: usize = 1_024;
-    pub const GUARD_CEILING: f32 = 0.891_250_9;
+    pub const GUARD_CEILING: f32 = 1.0;
     pub const GUARD_RELEASE_SECONDS: f32 = 0.05;
     pub const ANALYSIS_CAPACITY: usize = 4_096;
 
@@ -66,9 +67,9 @@ impl EqualizerKernel {
     /// until it is configured.
     pub fn new(channel_count: usize, sample_rate: f64) -> Self {
         let channel_count = channel_count.max(1);
-        let mut start_coefficients = vec![0.0f32; Self::SECTION_SLOTS];
-        let mut target_coefficients = vec![0.0f32; Self::SECTION_SLOTS];
-        let mut live_coefficients = vec![0.0f32; Self::SECTION_SLOTS];
+        let mut start_coefficients = vec![0.0f64; Self::SECTION_SLOTS];
+        let mut target_coefficients = vec![0.0f64; Self::SECTION_SLOTS];
+        let mut live_coefficients = vec![0.0f64; Self::SECTION_SLOTS];
         Self::fill_identity(&mut start_coefficients);
         Self::fill_identity(&mut target_coefficients);
         Self::fill_identity(&mut live_coefficients);
@@ -81,7 +82,7 @@ impl EqualizerKernel {
             start_coefficients,
             target_coefficients,
             live_coefficients,
-            delay: vec![0.0f32; channel_count * Self::MAX_SECTIONS * 2],
+            delay: vec![0.0f64; channel_count * Self::MAX_SECTIONS * 2],
             analysis: vec![0.0f32; Self::ANALYSIS_CAPACITY],
             live_sections: 0,
             target_sections: 0,
@@ -121,20 +122,37 @@ impl EqualizerKernel {
         self.analysis_write_index
     }
 
-    /// True when the stage is fully crossfaded out and not asked to come back:
-    /// samples pass through untouched.
+    /// True when the stage is fully crossfaded out, not asked to come back and no
+    /// longer holding the guard down: samples pass through untouched.
     pub fn is_bypassed(&self) -> bool {
-        self.wet == 0.0 && self.target_wet == 0.0
+        self.wet == 0.0 && self.target_wet == 0.0 && self.guard_gain >= 1.0
     }
 
     /// Points the stage at a new curve. Called with `is_engaged == false` it
-    /// crossfades out and then passes audio through bit for bit.
+    /// crossfades out and then passes audio through bit for bit. A kernel that
+    /// has not been configured yet fades the curve in; see `configure_starting`.
     pub fn configure(
         &mut self,
         bands: &[EqualizerBand],
         preamp_decibels: f64,
         is_engaged: bool,
         peak_guard: bool,
+    ) {
+        self.configure_starting(bands, preamp_decibels, is_engaged, peak_guard, false);
+    }
+
+    /// `configure`, and for the first call it decides how the stage begins. A
+    /// kernel born with the beginning of a song passes `starts_engaged` so the
+    /// curve is in force on the first sample; one that appears under a song
+    /// already playing leaves it off and crossfades in, so turning the equalizer
+    /// on mid-song does not click.
+    pub fn configure_starting(
+        &mut self,
+        bands: &[EqualizerBand],
+        preamp_decibels: f64,
+        is_engaged: bool,
+        peak_guard: bool,
+        starts_engaged: bool,
     ) {
         let first = !self.has_configuration;
         self.has_configuration = true;
@@ -151,19 +169,22 @@ impl EqualizerKernel {
             .take(Self::MAX_SECTIONS)
         {
             let c = BiquadMath::coefficients_for(band, self.sample_rate);
+            if ![c.b0, c.b1, c.b2, c.a1, c.a2].iter().all(|value| value.is_finite()) {
+                continue;
+            }
             let base = count * 5;
-            self.target_coefficients[base] = c.b0 as f32;
-            self.target_coefficients[base + 1] = c.b1 as f32;
-            self.target_coefficients[base + 2] = c.b2 as f32;
-            self.target_coefficients[base + 3] = c.a1 as f32;
-            self.target_coefficients[base + 4] = c.a2 as f32;
+            self.target_coefficients[base] = c.b0;
+            self.target_coefficients[base + 1] = c.b1;
+            self.target_coefficients[base + 2] = c.b2;
+            self.target_coefficients[base + 3] = c.a1;
+            self.target_coefficients[base + 4] = c.a2;
             count += 1;
         }
         if count < Self::MAX_SECTIONS {
             Self::fill_identity(&mut self.target_coefficients[count * 5..]);
         }
         self.target_sections = count;
-        self.target_gain = 10f64.powf(preamp_decibels / 20.0) as f32;
+        self.target_gain = 10f64.powf(preamp_decibels / 20.0);
         self.target_wet = if is_engaged { 1.0 } else { 0.0 };
 
         if first {
@@ -176,7 +197,7 @@ impl EqualizerKernel {
             self.live_sections = self.target_sections;
             self.ramp_total = 0;
             self.ramp_position = 0;
-            self.wet = 0.0;
+            self.wet = if starts_engaged && is_engaged { 1.0 } else { 0.0 };
         } else {
             self.ramp_total = Self::RAMP_FRAMES;
             self.ramp_position = 0;
@@ -206,7 +227,7 @@ impl EqualizerKernel {
             );
         }
 
-        if self.wet == 0.0 && self.target_wet == 0.0 {
+        if self.is_bypassed() {
             let mut peak = 0.0f32;
             for plane in planes {
                 for frame in 0..frames {
@@ -230,7 +251,7 @@ impl EqualizerKernel {
         for frame in 0..frames {
             if self.ramp_position < self.ramp_total {
                 self.ramp_position += 1;
-                let ramp_fraction = self.ramp_position as f32 / self.ramp_total as f32;
+                let ramp_fraction = self.ramp_position as f64 / self.ramp_total as f64;
                 for slot in 0..(sections * 5) {
                     let from = self.start_coefficients[slot];
                     self.live_coefficients[slot] =
@@ -258,7 +279,7 @@ impl EqualizerKernel {
             for channel in 0..self.channel_count {
                 let index = Self::index(planes[channel], frame);
                 let dry = buffer[index];
-                let mut value = dry * self.live_gain;
+                let mut value = f64::from(dry) * self.live_gain;
                 let state = channel * Self::MAX_SECTIONS * 2;
                 for section in 0..sections {
                     let c = section * 5;
@@ -271,7 +292,7 @@ impl EqualizerKernel {
                         self.live_coefficients[c + 2] * value - self.live_coefficients[c + 4] * out;
                     value = out;
                 }
-                let mixed = dry + (value - dry) * mix;
+                let mixed = dry + (value as f32 - dry) * mix;
                 buffer[index] = mixed;
                 frame_max = frame_max.max(mixed.abs());
             }
@@ -359,7 +380,7 @@ impl EqualizerKernel {
         }
     }
 
-    fn fill_identity(slots: &mut [f32]) {
+    fn fill_identity(slots: &mut [f64]) {
         for section in slots.chunks_exact_mut(5) {
             section.copy_from_slice(&[1.0, 0.0, 0.0, 0.0, 0.0]);
         }
@@ -687,6 +708,89 @@ mod tests {
             assert!((interleaved[n * 2] - planar[0][n]).abs() <= 1e-6, "left {n}");
             assert!((interleaved[n * 2 + 1] - planar[1][n]).abs() <= 1e-6, "right {n}");
         }
+    }
+
+    #[test]
+    fn a_kernel_born_with_a_song_has_the_curve_in_force_from_its_first_sample() {
+        let mut kernel = EqualizerKernel::new(1, RATE);
+        kernel.configure_starting(&[], -6.0, true, true, true);
+
+        let output = run(&mut kernel, &[vec![0.5f32; 64]]).remove(0);
+
+        let expected = (0.5 * 10f64.powf(-6.0 / 20.0)) as f32;
+        assert!((output[0] - expected).abs() <= 1e-6, "{}", output[0]);
+        assert!((output[63] - expected).abs() <= 1e-6, "{}", output[63]);
+    }
+
+    #[test]
+    fn a_kernel_that_appears_under_a_playing_song_still_fades_in() {
+        let mut kernel = EqualizerKernel::new(1, RATE);
+        kernel.configure(&[], -6.0, true, true);
+
+        let output = run(&mut kernel, &[vec![0.5f32; 64]]).remove(0);
+
+        assert!((output[0] - 0.5).abs() <= 1e-3, "{}", output[0]);
+        assert!(output[63] < 0.5, "{}", output[63]);
+    }
+
+    #[test]
+    fn the_guard_leaves_a_hot_master_alone_when_nothing_is_boosted() {
+        let mut kernel = EqualizerKernel::new(1, RATE);
+        kernel.configure_starting(
+            &[EqualizerBand::new(FilterType::Bell, 60.0, -2.0, Some(1.41), true)],
+            0.0,
+            true,
+            true,
+            true,
+        );
+        let tone = sine(3_000.0, 0.99, 8_192);
+
+        let output = run(&mut kernel, &[tone]).remove(0);
+
+        assert!(!kernel.guard_reduced());
+        let peak = output.iter().map(|sample| sample.abs()).fold(0.0f32, f32::max);
+        assert!((peak - 0.99).abs() <= 0.01, "{peak}");
+    }
+
+    #[test]
+    fn disengaging_while_the_guard_is_acting_leaves_no_step_when_it_hands_over() {
+        let mut kernel = EqualizerKernel::new(1, RATE);
+        kernel.configure_starting(&[], 6.0, true, true, true);
+        run(&mut kernel, &[vec![0.8f32; 4_096]]);
+        kernel.configure(&[], 6.0, false, true);
+
+        let mut gains = Vec::new();
+        for _ in 0..(12_000 / 256 + 1) {
+            let chunk = run(&mut kernel, &[vec![0.8f32; 256]]).remove(0);
+            gains.extend(chunk.iter().map(|sample| f64::from(*sample) / 0.8));
+        }
+
+        let largest_step = gains
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).abs())
+            .fold(0.0f64, f64::max);
+        assert!(largest_step < 0.002, "{largest_step}");
+        assert!((gains[gains.len() - 1] - 1.0).abs() <= 1e-6);
+        assert!(kernel.is_bypassed());
+    }
+
+    #[test]
+    fn a_band_that_is_not_a_number_cannot_poison_the_audio() {
+        let mut kernel = EqualizerKernel::new(1, RATE);
+        kernel.configure_starting(
+            &[
+                EqualizerBand::new(FilterType::Bell, f64::NAN, 3.0, Some(1.0), true),
+                EqualizerBand::new(FilterType::Bell, 1_000.0, f64::NAN, Some(1.0), true),
+            ],
+            0.0,
+            true,
+            true,
+            true,
+        );
+
+        let output = run(&mut kernel, &[sine(440.0, 0.5, 2_048)]).remove(0);
+
+        assert!(output.iter().all(|sample| sample.is_finite()));
     }
 
     #[test]

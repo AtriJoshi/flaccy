@@ -89,6 +89,19 @@ final class EqualizerProfileTextTests: XCTestCase {
         XCTAssertNil(EqualizerProfileText.parse("Preamp: -3 dB", fallbackName: "x"))
     }
 
+    func testNumbersThatAreNotNumbersAreNotRead() {
+        XCTAssertNil(EqualizerProfileText.parse("Filter 1: ON PK Fc nan Hz Gain 3 dB Q 1", fallbackName: "x"))
+        let parsed = EqualizerProfileText.parse("Filter 1: ON PK Fc 1000 Hz Gain inf dB Q 1", fallbackName: "x")
+        XCTAssertEqual(parsed?.profile.bands.first?.gain, 0)
+        XCTAssertNil(EqualizerProfileText.parse("Preamp: nan dB", fallbackName: "x"))
+    }
+
+    func testClampingTurnsANaNBandIntoAUsableOne() {
+        let band = EqualizerBand(type: .bell, frequency: .nan, gain: .infinity, q: .nan).clamped()
+        XCTAssertTrue(band.frequency.isFinite && band.gain.isFinite && band.q.isFinite)
+        XCTAssertEqual(band.gain, 0)
+    }
+
     func testAGraphicProfileRoundTripsExactly() throws {
         let original = EqualizerPresets.profile(forKey: "rock")!
 
