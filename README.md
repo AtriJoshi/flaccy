@@ -23,10 +23,10 @@ Point flaccy at your music files. It scans the directory structure, sends file p
 
 | Platform | What it is | Get it |
 |---|---|---|
-| **iPhone** | The full app: gapless playback, AI organization, scrobbling, charts, Year in Music, wantlist, lyrics, stations | [App Store](https://apps.apple.com/app/id6787493695) |
+| **iPhone** | The full app: gapless playback, a real equalizer, AI organization, scrobbling, charts, Year in Music, wantlist, lyrics, stations | [App Store](https://apps.apple.com/app/id6787493695) |
 | **Apple Watch** | Standalone phone-free player — sync tracks, play offline through AirPods | Bundled with the iOS app |
-| **Mac** | Native AppKit app with Liquid Glass and an adaptive artwork palette that tints the whole window to what's playing: full feature parity plus folder watching, menu bar player, media keys, multi-column sorting, keyboard-first browsing | [Mac App Store](https://apps.apple.com/app/id6789594504) |
-| **Linux** | Native GTK4/libadwaita player with an adaptive theme engine, gapless GStreamer playback, MPRIS media keys, scrobbling, synced lyrics, listening stats | `curl -fsSL https://raw.githubusercontent.com/guitaripod/flaccy/master/linux/get-flaccy.sh \| sh` or `yay -S flaccy-bin` |
+| **Mac** | Native AppKit app with Liquid Glass and an adaptive artwork palette that tints the whole window to what's playing: full feature parity plus the equalizer in its own window, folder watching, menu bar player, media keys, multi-column sorting, keyboard-first browsing | [Mac App Store](https://apps.apple.com/app/id6789594504) |
+| **Linux** | Native GTK4/libadwaita player with an adaptive theme engine, gapless GStreamer playback, a built-in equalizer, MPRIS media keys, scrobbling, synced lyrics, listening stats | `curl -fsSL https://raw.githubusercontent.com/guitaripod/flaccy/master/linux/get-flaccy.sh \| sh` or `yay -S flaccy-bin` |
 
 ## Features
 
@@ -37,6 +37,13 @@ Point flaccy at your music files. It scans the directory structure, sends file p
 - **Autoplay continuation** — the queue never ends; flaccy extends it from your own library
 - **Sleep timer**, **AirPlay**, and **queue persistence** across launches
 - Media keys, Control Center, and lock-screen controls (MPRIS on Linux)
+
+### Equalizer
+- **Drag the curve** and hear it change (Simple: ten ISO bands, the curve passes through every point you place), or switch to **Advanced** for up to ten bells, shelves, high-pass, low-pass and notch filters with adjustable Q and a live spectrum behind the curve
+- **16 presets**, your own saved profiles, and **import and export of Equalizer APO and AutoEq text** to tune for your headphones
+- **A profile per output** — AirPods, a wired DAC and the speakers each keep their own setting and switch when the route does
+- **Automatic headroom** so boosts never clip, a **level-matched Hold to compare**, undo for every gesture, and no processing at all while it is off or flat (bit-perfect)
+- iPhone, Mac (⌥⌘E) and Linux (Ctrl+E); not on Apple Watch
 
 ### Library
 - **Albums, Songs, Artists, Playlists** with search, sorting, and filter chips (Lossless / Hi-Res / Loved)

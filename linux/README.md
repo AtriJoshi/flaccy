@@ -1,6 +1,10 @@
 # Flaccy for Linux
 
-Lossless music player. GTK4/libadwaita, gapless GStreamer playback, MPRIS, Last.fm scrobbling.
+Lossless music player. GTK4/libadwaita, gapless GStreamer playback, a built-in equalizer, MPRIS, Last.fm scrobbling.
+
+Equalizer (Ctrl+E): drag the curve or switch to Advanced for up to ten bands, 16 presets,
+Equalizer APO / AutoEq import, a profile per output (it follows your default sink) and a
+level-matched Hold to compare. With it off or flat the audio passes through untouched.
 
 An adaptive theme engine retints the whole app with the dominant color of whatever's
 playing — ambient gradient backdrops, glass surfaces, a glowing now-playing pulse — or
