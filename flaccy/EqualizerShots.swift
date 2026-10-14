@@ -36,6 +36,7 @@ enum EqualizerShots {
         try? await Task.sleep(for: .seconds(2.5))
         let engine = EqualizerEngine.shared
         engine.start()
+        engine.isDemoSignal = true
         let airPods = EqualizerOutput(id: "bluetooth.demo", name: "AirPods Pro", kind: .bluetooth)
         let headphones = EqualizerOutput(id: "wired.headphones", name: "Headphones", kind: .headphones)
         let isSimple = scene == "simple"

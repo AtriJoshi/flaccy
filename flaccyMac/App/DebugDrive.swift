@@ -211,6 +211,7 @@ enum DebugDrive {
         case .equalizer(let scene):
             let engine = EqualizerEngine.shared
             engine.start()
+            engine.isDemoSignal = true
             let isSimple = scene == "simple"
             engine.seedDemo(
                 activeProfileID: isSimple ? EqualizerPresets.id(forKey: "rock") : "demo.warm",
@@ -222,7 +223,9 @@ enum DebugDrive {
             )
             let controller = MacEqualizerWindowController.shared
             controller.show()
-            controller.window?.setContentSize(NSSize(width: 1080, height: 700))
+            controller.window?.setContentSize(NSSize(width: 1080 * MacInterfaceScale.current, height: 700 * MacInterfaceScale.current))
+            reassertWindowSizeIfRequested(controller.window)
+            controller.window?.center()
             try? await Task.sleep(for: .seconds(3))
             capture(window: controller.window, name: "flaccy-shot-equalizer-\(scene)")
             return

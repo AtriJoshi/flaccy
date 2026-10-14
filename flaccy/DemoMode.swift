@@ -379,6 +379,14 @@ enum DemoRouter {
         Task {
             await waitForLibrary()
             try? await Task.sleep(for: .seconds(0.4))
+            if DemoMode.environment["FLACCY_EQ"] == "1" {
+                let engine = EqualizerEngine.shared
+                engine.isDemoSignal = true
+                engine.seedDemo(
+                    activeProfileID: EqualizerPresets.id(forKey: "bassBoost"),
+                    pretendOutput: EqualizerOutput(id: "wired.headphones", name: "Headphones", kind: .headphones)
+                )
+            }
             perform(route, window: window, nav: nav, player: player)
             if DemoMode.environment["FLACCY_PLAYING"] == "1" {
                 try? await Task.sleep(for: .seconds(0.6))
@@ -437,10 +445,39 @@ enum DemoRouter {
         case "queue": player.expandShowingQueue()
         case "lyrics": player.expandShowingLyrics()
         case "paywall": PaywallViewController.presentSheet(from: nav)
+        case "equalizer", "equalizer-advanced", "equalizer-presets", "equalizer-outputs", "equalizer-import":
+            player.expand()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { presentEqualizer(route, from: nav) }
         case "streaming":
             presentSheet(UINavigationController(rootViewController: StreamingLinksViewController(result: DemoMode.fakeSonglink)), from: nav)
         case "computer-guide":
             presentSheet(UINavigationController(rootViewController: ComputerTransferGuideViewController()), from: nav)
+        default: break
+        }
+    }
+
+    /// Seeds a fictional listening history for the equalizer and shows one of its screens
+    /// over whatever is on top, the way a person would open it from Now Playing.
+    private static func presentEqualizer(_ route: String, from nav: UINavigationController) {
+        let engine = EqualizerEngine.shared
+        engine.start()
+        engine.isDemoSignal = true
+        let isSimple = route == "equalizer"
+        engine.seedDemo(
+            activeProfileID: isSimple ? EqualizerPresets.id(forKey: "bassBoost") : "demo.warm",
+            pretendOutput: isSimple
+                ? EqualizerOutput(id: "wired.headphones", name: "Headphones", kind: .headphones)
+                : EqualizerOutput(id: "bluetooth.demo", name: "AirPods Pro", kind: .bluetooth)
+        )
+        let controller = EqualizerViewController.makePresented()
+        var top: UIViewController = nav
+        while let presented = top.presentedViewController { top = presented }
+        top.present(controller, animated: false)
+        let accent = EqualizerTheme.fallbackAccent
+        switch route {
+        case "equalizer-presets": controller.pushViewController(EqualizerPresetsViewController(startingOn: .presets, accent: accent), animated: false)
+        case "equalizer-outputs": controller.pushViewController(EqualizerPresetsViewController(startingOn: .outputs, accent: accent), animated: false)
+        case "equalizer-import": controller.pushViewController(EqualizerImportViewController(accent: accent, initialText: EqualizerShots.importSample), animated: false)
         default: break
         }
     }

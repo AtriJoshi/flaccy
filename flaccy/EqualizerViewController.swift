@@ -33,6 +33,10 @@ final class EqualizerViewController: UIViewController {
     private let curveCard = UIView()
     private let curveView = EqualizerCurveView()
     private let hintLabel = UILabel()
+    private lazy var curveHeight = curveView.heightAnchor.constraint(equalToConstant: Self.minimumCurveHeight)
+
+    private static let minimumCurveHeight: CGFloat = 262
+    private static let maximumCurveHeight: CGFloat = 400
 
     private let preampValueLabel = UILabel()
     private let autoChip = EqualizerChip(title: "")
@@ -90,6 +94,13 @@ final class EqualizerViewController: UIViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(trackChanged), name: AudioPlayer.trackDidChange, object: nil)
         updatePalette()
         refresh(animated: false)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let share: CGFloat = mode == .simple ? 0.38 : 0.34
+        let target = min(max(view.bounds.height * share, Self.minimumCurveHeight), Self.maximumCurveHeight).rounded()
+        if abs(curveHeight.constant - target) >= 1 { curveHeight.constant = target }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -244,7 +255,7 @@ final class EqualizerViewController: UIViewController {
             curveView.topAnchor.constraint(equalTo: curveCard.topAnchor),
             curveView.leadingAnchor.constraint(equalTo: curveCard.leadingAnchor),
             curveView.trailingAnchor.constraint(equalTo: curveCard.trailingAnchor),
-            curveView.heightAnchor.constraint(equalToConstant: 262),
+            curveHeight,
             hintLabel.topAnchor.constraint(equalTo: curveView.bottomAnchor, constant: -4),
             hintLabel.leadingAnchor.constraint(equalTo: curveCard.leadingAnchor, constant: 12),
             hintLabel.trailingAnchor.constraint(equalTo: curveCard.trailingAnchor, constant: -12),

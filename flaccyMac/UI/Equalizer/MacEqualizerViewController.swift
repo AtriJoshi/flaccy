@@ -49,10 +49,14 @@ final class MacEqualizerViewController: NSViewController {
     private var profile: EqualizerProfile { engine.profileInForce }
     private var mode: EqualizerPlotMode { profile.kind == .graphic ? .simple : .advanced }
 
+    private let zoomHost = InterfaceZoomHostView(frame: .zero)
+    private var topInset: NSLayoutConstraint?
+
+    private var container: NSView { zoomHost.content }
+
     override func loadView() {
-        let root = NSView()
-        root.wantsLayer = true
-        view = root
+        zoomHost.wantsLayer = true
+        view = zoomHost
         buildLayout()
     }
 
@@ -85,6 +89,10 @@ final class MacEqualizerViewController: NSViewController {
         engine.endCompare()
     }
 
+    @objc private func zoomChanged() {
+        topInset?.constant = 40 / MacInterfaceScale.current
+    }
+
     @objc private func stateChanged() {
         refresh(animated: true)
     }
@@ -103,7 +111,7 @@ final class MacEqualizerViewController: NSViewController {
 
     private func buildLayout() {
         backdrop.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(backdrop)
+        container.addSubview(backdrop)
 
         let top = makeTopBar()
         let rail = makePreampRail()
@@ -111,45 +119,49 @@ final class MacEqualizerViewController: NSViewController {
         let lower = makeLowerCard()
         let status = makeStatusBar()
 
-        let middle = NSStackView(views: [rail, curveCard])
-        middle.orientation = .horizontal
-        middle.spacing = 16
-        middle.alignment = .top
-        middle.distribution = .fill
+        let middle = NSView()
+        middle.translatesAutoresizingMaskIntoConstraints = false
+        for card in [rail, curveCard] {
+            card.translatesAutoresizingMaskIntoConstraints = false
+            middle.addSubview(card)
+            card.topAnchor.constraint(equalTo: middle.topAnchor).isActive = true
+            card.bottomAnchor.constraint(equalTo: middle.bottomAnchor).isActive = true
+        }
+        NSLayoutConstraint.activate([
+            rail.leadingAnchor.constraint(equalTo: middle.leadingAnchor),
+            curveCard.leadingAnchor.constraint(equalTo: rail.trailingAnchor, constant: 16),
+            curveCard.trailingAnchor.constraint(equalTo: middle.trailingAnchor),
+        ])
         rail.setContentHuggingPriority(.required, for: .horizontal)
         curveCard.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let column = NSStackView(views: [top, middle, lower, status])
-        column.orientation = .vertical
-        column.spacing = 14
-        column.alignment = .leading
-        column.distribution = .fill
-        column.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(column)
-        for fixed in [top, lower, status] {
-            fixed.setContentHuggingPriority(.required, for: .vertical)
-            fixed.setContentCompressionResistancePriority(.required, for: .vertical)
+        for view in [top, middle, lower, status] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24).isActive = true
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24).isActive = true
         }
+        let topAnchorInset = top.topAnchor.constraint(equalTo: container.topAnchor, constant: 36)
+        topInset = topAnchorInset
+        NotificationCenter.default.addObserver(self, selector: #selector(zoomChanged), name: .flaccyInterfaceScaleChanged, object: nil)
+        zoomChanged()
 
         NSLayoutConstraint.activate([
-            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
-            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            column.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            column.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            column.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            column.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
-            top.widthAnchor.constraint(equalTo: column.widthAnchor),
-            middle.widthAnchor.constraint(equalTo: column.widthAnchor),
-            lower.widthAnchor.constraint(equalTo: column.widthAnchor),
-            status.widthAnchor.constraint(equalTo: column.widthAnchor),
+            backdrop.topAnchor.constraint(equalTo: container.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            topAnchorInset,
+            middle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 14),
+            lower.topAnchor.constraint(equalTo: middle.bottomAnchor, constant: 14),
+            status.topAnchor.constraint(equalTo: lower.bottomAnchor, constant: 14),
+            status.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            top.heightAnchor.constraint(equalToConstant: 30),
+            status.heightAnchor.constraint(equalToConstant: 16),
             curveCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
         ])
         lowerHeight = lower.heightAnchor.constraint(equalToConstant: 168)
         lowerHeight?.isActive = true
-        middle.setContentHuggingPriority(.defaultLow, for: .vertical)
-        middle.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     }
 
     private func makeTopBar() -> NSView {
@@ -1004,12 +1016,12 @@ extension MacEqualizerViewController: NSTableViewDataSource, NSTableViewDelegate
             let label = NSTextField(labelWithString: "  \(row + 1)")
             label.font = .monospacedDigitSystemFont(ofSize: 12.5, weight: .bold)
             label.textColor = EqualizerTheme.bandColor(row)
-            return label
+            return verticallyCentered(label)
         case "enabled":
             let check = NSButton(checkboxWithTitle: "", target: self, action: #selector(enabledToggled(_:)))
             check.state = band.isEnabled ? .on : .off
             check.tag = row
-            return check
+            return verticallyCentered(check)
         case "type":
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             popup.controlSize = .small
@@ -1019,16 +1031,33 @@ extension MacEqualizerViewController: NSTableViewDataSource, NSTableViewDelegate
             popup.tag = row
             popup.target = self
             popup.action = #selector(typeChosen(_:))
-            return popup
+            return verticallyCentered(popup)
         case "frequency":
-            return field(text: EqualizerCopy.hertz(band.frequency), row: row, kind: .frequency, enabled: true)
+            return verticallyCentered(field(text: EqualizerCopy.hertz(band.frequency), row: row, kind: .frequency, enabled: true))
         case "gain":
-            return field(text: band.type.hasGain ? "\(EqualizerCopy.decibels(band.gain)) dB" : "—", row: row, kind: .gain, enabled: band.type.hasGain)
+            return verticallyCentered(field(text: band.type.hasGain ? "\(EqualizerCopy.decibels(band.gain)) dB" : "—", row: row, kind: .gain, enabled: band.type.hasGain))
         case "q":
-            return field(text: EqualizerCopy.q(band.q), row: row, kind: .q, enabled: true)
+            return verticallyCentered(field(text: EqualizerCopy.q(band.q), row: row, kind: .q, enabled: true))
         default:
             return nil
         }
+    }
+
+    /// A table cell that holds `control` on the row's vertical centre: row views
+    /// otherwise pin a cell's content to its top edge, so text sat above the
+    /// pop-ups beside it.
+    private func verticallyCentered(_ control: NSView) -> NSView {
+        let cell = NSView()
+        control.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            control is NSTextField
+                ? control.trailingAnchor.constraint(equalTo: cell.trailingAnchor)
+                : control.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor),
+            control.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        return cell
     }
 
     private enum FieldKind: Int {

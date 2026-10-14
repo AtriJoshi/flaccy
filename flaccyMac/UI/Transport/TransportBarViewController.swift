@@ -21,6 +21,8 @@ final class TransportBarViewController: NSViewController {
     private var lyricsButton: TransportButton!
     private var nowPlayingButton: TransportButton!
     private var sleepTimerButton: TransportButton!
+    private var equalizerButton: TransportButton!
+    private var equalizerPopover: NSPopover?
     private let sleepCountdownLabel = NSTextField(labelWithString: "")
 
     private let artworkView = NSImageView()
@@ -85,7 +87,7 @@ final class TransportBarViewController: NSViewController {
         sleepCountdownLabel.isHidden = true
 
         let rightCluster = NSStackView(views: [
-            volumeIcon, volumeSlider, routePicker, sleepTimerButton, sleepCountdownLabel,
+            volumeIcon, volumeSlider, routePicker, equalizerButton, sleepTimerButton, sleepCountdownLabel,
             queueButton, lyricsButton, nowPlayingButton,
         ])
         rightCluster.orientation = .horizontal
@@ -173,6 +175,11 @@ final class TransportBarViewController: NSViewController {
             symbolName: "moon.zzz", pointSize: 13, accessibilityLabel: String(localized: "Sleep timer"),
             target: self, action: #selector(showSleepTimerMenu)
         )
+        equalizerButton = TransportButton(
+            symbolName: "slider.vertical.3", pointSize: 13, accessibilityLabel: EqualizerCopy.title,
+            target: self, action: #selector(showEqualizerPanel)
+        )
+        equalizerButton.isActiveToggle = EqualizerEngine.shared.isRunning
     }
 
     private func configureArtwork() {
@@ -264,6 +271,8 @@ final class TransportBarViewController: NSViewController {
         center.addObserver(self, selector: #selector(lovedChanged), name: LovedTracksService.didChange, object: nil)
         center.addObserver(self, selector: #selector(volumeDidChangeExternally), name: AudioPlayer.volumeDidChange, object: nil)
         center.addObserver(self, selector: #selector(sleepTimerChanged), name: AudioPlayer.sleepTimerDidUpdate, object: nil)
+        center.addObserver(self, selector: #selector(equalizerChanged), name: EqualizerEngine.stateDidChange, object: nil)
+        center.addObserver(self, selector: #selector(equalizerOutputChanged(_:)), name: EqualizerEngine.outputDidChange, object: nil)
     }
 
     private func refreshEverything() {
@@ -291,6 +300,28 @@ final class TransportBarViewController: NSViewController {
             sleepTimerButton.isActiveToggle = false
             sleepTimerButton.setSymbol("moon.zzz", pointSize: 13)
         }
+    }
+
+    @objc private func equalizerChanged() {
+        equalizerButton.isActiveToggle = EqualizerEngine.shared.isRunning
+    }
+
+    @objc private func equalizerOutputChanged(_ notification: Notification) {
+        guard let profile = notification.userInfo?[EqualizerEngine.outputProfileKey] as? String,
+              let output = EqualizerEngine.shared.output, let window = view.window else { return }
+        MacToast.show(EqualizerCopy.outputChanged(name: output.name, profile: profile), in: window)
+    }
+
+    @objc private func showEqualizerPanel() {
+        if let popover = equalizerPopover, popover.isShown {
+            popover.close()
+            return
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = MacEqualizerQuickPanel()
+        popover.show(relativeTo: equalizerButton.bounds, of: equalizerButton, preferredEdge: .maxY)
+        equalizerPopover = popover
     }
 
     @objc private func showSleepTimerMenu() {

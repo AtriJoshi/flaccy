@@ -250,11 +250,21 @@ final class EqualizerEngine {
 
     /// The level of whatever tap is making sound right now, or nil when none is.
     func meter() -> EqualizerMeter? {
-        EqualizerTapRegistry.shared.playingContext()?.meter()
+        #if DEBUG
+        if isDemoSignal { return EqualizerDemoSignal.meter(time: Date.timeIntervalSinceReferenceDate) }
+        #endif
+        return EqualizerTapRegistry.shared.playingContext()?.meter()
     }
 
     /// The last window of audio as 110 log-spaced decibel bins, or nil when no tap is attached.
     func spectrum() -> [Float]? {
+        #if DEBUG
+        if isDemoSignal {
+            let profile = profileInForce
+            let bands = isComparing ? [] : profile.resolvedBands()
+            return EqualizerDemoSignal.spectrum(time: Date.timeIntervalSinceReferenceDate, bands: bands, preampDecibels: isComparing ? 0 : profile.preamp())
+        }
+        #endif
         guard let context = EqualizerTapRegistry.shared.playingContext() else { return nil }
         if spectrumAnalyzer == nil || spectrumAnalyzer?.sampleRate != context.sampleRate {
             spectrumAnalyzer = SpectrumAnalyzer(sampleRate: context.sampleRate)
@@ -395,6 +405,8 @@ final class EqualizerEngine {
     }
 
     #if DEBUG
+    var isDemoSignal = false
+
     /// Fills the saved state with a fictional listening history for screenshots and the debug drive.
     func seedDemo(activeProfileID: String = "demo.warm", pretendOutput: EqualizerOutput? = nil) {
         let warm = EqualizerProfile.parametric(

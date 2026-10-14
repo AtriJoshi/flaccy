@@ -32,7 +32,7 @@ final class MacEqualizerCurveView: NSView {
     private let model = EqualizerPlotModel()
     private lazy var interaction = EqualizerPlotInteraction(model: model)
     private let plotInsets = NSEdgeInsets(top: 20, left: 48, bottom: 40, right: 18)
-    private var displayLink: CADisplayLink?
+    private var ticker: Timer?
     private var accessibilityBands: [MacEqualizerBandElement] = []
     private var isComparingWithKey = false
 
@@ -51,18 +51,17 @@ final class MacEqualizerCurveView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     deinit {
-        displayLink?.invalidate()
+        ticker?.invalidate()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        displayLink?.invalidate()
-        displayLink = nil
+        ticker?.invalidate()
+        ticker = nil
         guard window != nil else { return }
-        let link = displayLink(target: self, selector: #selector(tick))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 24, maximum: 45, preferred: 30)
-        link.add(to: .main, forMode: .common)
-        displayLink = link
+        let timer = Timer(timeInterval: 1.0 / 30.0, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        ticker = timer
     }
 
     func update(_ newContent: Content, animated: Bool) {

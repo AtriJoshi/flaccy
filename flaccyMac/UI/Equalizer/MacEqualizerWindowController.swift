@@ -24,12 +24,30 @@ final class MacEqualizerWindowController: NSWindowController, NSWindowDelegate {
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = .black
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 940, height: 640)
+        window.minSize = Self.minimumSize(at: MacInterfaceScale.current)
         window.center()
         window.setFrameAutosaveName("FlaccyEqualizerWindow")
         self.init(window: window)
         window.delegate = self
         contentViewController = MacEqualizerViewController()
+        NotificationCenter.default.addObserver(self, selector: #selector(interfaceScaleChanged), name: .flaccyInterfaceScaleChanged, object: nil)
+    }
+
+    private static let baseMinimumSize = NSSize(width: 940, height: 640)
+
+    private static func minimumSize(at scale: CGFloat) -> NSSize {
+        let grown = NSSize(width: baseMinimumSize.width * scale, height: baseMinimumSize.height * scale)
+        let visible = NSScreen.main?.visibleFrame.size ?? grown
+        return NSSize(width: min(grown.width, visible.width), height: min(grown.height, visible.height))
+    }
+
+    @objc private func interfaceScaleChanged() {
+        guard let window else { return }
+        window.minSize = Self.minimumSize(at: MacInterfaceScale.current)
+        var frame = window.frame
+        frame.size.width = max(frame.width, window.minSize.width)
+        frame.size.height = max(frame.height, window.minSize.height)
+        if frame.size != window.frame.size { window.setFrame(frame, display: true, animate: true) }
     }
 
     var isVisible: Bool {
