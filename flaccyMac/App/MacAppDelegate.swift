@@ -32,6 +32,10 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.mainMenu = MainMenu.build()
         PurchaseManager.shared.start()
+        EqualizerEngine.shared.start()
+        #if DEBUG
+        EqualizerExercise.runIfRequested()
+        #endif
         MacLibrarySurfaceModel.shared.start()
 
         let windowController = MainWindowController()
@@ -326,6 +330,10 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func previousTrack(_ sender: Any?) {
         AudioPlayer.shared.previousTrack()
+    }
+
+    @objc func toggleEqualizer(_ sender: Any?) {
+        MacEqualizerWindowController.shared.toggle()
     }
 
     @objc func toggleShuffle(_ sender: Any?) {

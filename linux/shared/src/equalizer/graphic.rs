@@ -7,6 +7,7 @@
 //! Newton passes against the exact response.
 
 use super::biquad::{BiquadMath, FilterType};
+use super::plot::EqualizerPlot;
 use super::profile::EqualizerBand;
 use std::sync::OnceLock;
 
@@ -67,6 +68,21 @@ impl GraphicSolver {
             .zip(gains)
             .map(|(&centre, gain)| {
                 EqualizerBand::new(FilterType::Bell, centre, gain, Some(Self::Q), true)
+            })
+            .collect()
+    }
+
+    /// The ten targets that best stand in for an arbitrary curve: its response
+    /// at each centre, settled onto half decibels and held inside the slider range.
+    pub fn targets_approximating(bands: &[EqualizerBand]) -> Vec<f64> {
+        Self::CENTRES
+            .iter()
+            .map(|&centre| {
+                let heard = BiquadMath::response_decibels(bands, centre);
+                let stepped = (heard / EqualizerPlot::GAIN_STEP).round() * EqualizerPlot::GAIN_STEP;
+                stepped
+                    .max(EqualizerBand::GAIN_MIN)
+                    .min(EqualizerBand::GAIN_MAX)
             })
             .collect()
     }
@@ -186,5 +202,22 @@ mod tests {
             .iter()
             .all(|value| value.abs() < 1e-9));
         assert!(EqualizerPresets::flat().is_flat());
+    }
+
+    #[test]
+    fn approximating_a_solved_preset_returns_its_targets() {
+        let rock = EqualizerPresets::profile_for_key("rock").unwrap();
+        let approximated = GraphicSolver::targets_approximating(&rock.resolved_bands());
+        assert_eq!(approximated, rock.targets);
+    }
+
+    #[test]
+    fn approximating_a_bell_past_the_slider_range_clamps_to_twelve() {
+        let bell = EqualizerBand::new(FilterType::Bell, 1_000.0, 20.0, None, true);
+        let approximated = GraphicSolver::targets_approximating(&[bell]);
+        assert_eq!(approximated[5], 12.0);
+        assert!(approximated
+            .iter()
+            .all(|&target| (-12.0..=12.0).contains(&target)));
     }
 }

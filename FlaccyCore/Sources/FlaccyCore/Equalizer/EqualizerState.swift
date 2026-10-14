@@ -15,13 +15,15 @@ public struct EqualizerState: Codable, Equatable, Sendable {
     public var isPeakGuardOn: Bool
     public var userProfiles: [EqualizerProfile]
     public var outputBindings: [String: String]
+    public var outputNames: [String: String]
 
     public init(
         isEnabled: Bool = false,
         activeProfileID: String = EqualizerProfile.flatID,
         isPeakGuardOn: Bool = true,
         userProfiles: [EqualizerProfile] = [],
-        outputBindings: [String: String] = [:]
+        outputBindings: [String: String] = [:],
+        outputNames: [String: String] = [:]
     ) {
         self.schemaVersion = Self.schemaVersion
         self.isEnabled = isEnabled
@@ -29,6 +31,18 @@ public struct EqualizerState: Codable, Equatable, Sendable {
         self.isPeakGuardOn = isPeakGuardOn
         self.userProfiles = userProfiles
         self.outputBindings = outputBindings
+        self.outputNames = outputNames
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? Self.schemaVersion
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
+        activeProfileID = try container.decodeIfPresent(String.self, forKey: .activeProfileID) ?? EqualizerProfile.flatID
+        isPeakGuardOn = try container.decodeIfPresent(Bool.self, forKey: .isPeakGuardOn) ?? true
+        userProfiles = try container.decodeIfPresent([EqualizerProfile].self, forKey: .userProfiles) ?? []
+        outputBindings = try container.decodeIfPresent([String: String].self, forKey: .outputBindings) ?? [:]
+        outputNames = try container.decodeIfPresent([String: String].self, forKey: .outputNames) ?? [:]
     }
 
     public func profile(withID id: String) -> EqualizerProfile? {

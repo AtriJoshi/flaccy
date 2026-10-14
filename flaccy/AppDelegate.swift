@@ -16,6 +16,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         UNUserNotificationCenter.current().delegate = self
+        EqualizerEngine.shared.start()
         WatchSyncService.shared.activate()
         PurchaseManager.shared.start()
 

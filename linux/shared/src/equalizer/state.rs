@@ -13,13 +13,50 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EqualizerState {
+    #[serde(default = "default_schema_version")]
     pub schema_version: u32,
+    #[serde(default = "default_is_enabled")]
     pub is_enabled: bool,
-    #[serde(rename = "activeProfileID")]
+    #[serde(rename = "activeProfileID", default = "default_active_profile_id")]
     pub active_profile_id: String,
+    #[serde(default = "default_is_peak_guard_on")]
     pub is_peak_guard_on: bool,
+    #[serde(default = "default_user_profiles")]
     pub user_profiles: Vec<EqualizerProfile>,
+    #[serde(default = "default_output_bindings")]
     pub output_bindings: HashMap<String, String>,
+    #[serde(default = "default_output_names")]
+    pub output_names: HashMap<String, String>,
+}
+
+/// The lenient decoder's defaults mirror `EqualizerState.init(from:)`, so a
+/// document missing any key still loads the way the Apple clients load it.
+fn default_schema_version() -> u32 {
+    EqualizerState::SCHEMA_VERSION
+}
+
+fn default_is_enabled() -> bool {
+    false
+}
+
+fn default_active_profile_id() -> String {
+    EqualizerProfile::FLAT_ID.to_string()
+}
+
+fn default_is_peak_guard_on() -> bool {
+    true
+}
+
+fn default_user_profiles() -> Vec<EqualizerProfile> {
+    Vec::new()
+}
+
+fn default_output_bindings() -> HashMap<String, String> {
+    HashMap::new()
+}
+
+fn default_output_names() -> HashMap<String, String> {
+    HashMap::new()
 }
 
 impl EqualizerState {
@@ -167,6 +204,7 @@ impl Default for EqualizerState {
             is_peak_guard_on: true,
             user_profiles: Vec::new(),
             output_bindings: HashMap::new(),
+            output_names: HashMap::new(),
         }
     }
 }
@@ -347,6 +385,43 @@ mod tests {
         assert_eq!(value["isPeakGuardOn"], true);
         assert_eq!(value["userProfiles"], serde_json::json!([]));
         assert_eq!(value["outputBindings"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn json_without_output_names_loads_with_an_empty_map() {
+        let text = r#"{"schemaVersion":1,"isEnabled":true,"activeProfileID":"builtin.flat","isPeakGuardOn":true,"userProfiles":[],"outputBindings":{"pods":"builtin.flat"}}"#;
+
+        let state: EqualizerState = serde_json::from_str(text).unwrap();
+
+        assert!(state.is_enabled);
+        assert!(state.output_names.is_empty());
+        assert_eq!(state.output_bindings.get("pods").map(String::as_str), Some(EqualizerProfile::FLAT_ID));
+    }
+
+    #[test]
+    fn an_empty_object_loads_as_the_default_state() {
+        let state: EqualizerState = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(state, EqualizerState::default());
+        assert!(!state.is_enabled);
+        assert!(state.is_peak_guard_on);
+    }
+
+    #[test]
+    fn output_names_survive_a_json_round_trip() {
+        let mut state = enabled_with(EqualizerProfile::FLAT_ID);
+        state.bind_off("dac");
+        state
+            .output_names
+            .insert("dac".to_string(), "USB DAC".to_string());
+
+        let text = serde_json::to_string(&state).unwrap();
+        let decoded: EqualizerState = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(decoded, state);
+        assert_eq!(decoded.output_names.get("dac").map(String::as_str), Some("USB DAC"));
+        let value: serde_json::Value = serde_json::to_value(&state).unwrap();
+        assert_eq!(value["outputNames"]["dac"], "USB DAC");
     }
 
     #[test]

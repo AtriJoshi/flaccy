@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import FlaccyCore
 
 /// Headless verification harness for development builds: launched with
 /// `--exercise-transport`, it waits for the library, then drives the exact
@@ -64,6 +65,7 @@ enum DebugDrive {
         case queuePanel(deep: Bool)
         case settings(paneIndex: Int)
         case paywall
+        case equalizer(String)
     }
 
     private static func plannedShot() -> Shot? {
@@ -75,6 +77,7 @@ enum DebugDrive {
         if CommandLine.arguments.contains("--shot-nowplaying") { return .nowPlaying }
         if CommandLine.arguments.contains("--shot-queue-deep") { return .queuePanel(deep: true) }
         if CommandLine.arguments.contains("--shot-queue") { return .queuePanel(deep: false) }
+        if let scene = value(after: "--shot-equalizer") { return .equalizer(scene) }
         if let pane = value(after: "--shot-settings") { return .settings(paneIndex: Int(pane) ?? 0) }
         if let name = value(after: "--shot-section") {
             let section: SidebarSection? = switch name {
@@ -204,6 +207,24 @@ enum DebugDrive {
             }
             try? await Task.sleep(for: .seconds(3))
             capture(window: settingsWindow, name: "flaccy-shot-settings-\(paneIndex)")
+            return
+        case .equalizer(let scene):
+            let engine = EqualizerEngine.shared
+            engine.start()
+            let isSimple = scene == "simple"
+            engine.seedDemo(
+                activeProfileID: isSimple ? EqualizerPresets.id(forKey: "rock") : "demo.warm",
+                pretendOutput: EqualizerOutput(
+                    id: isSimple ? "builtin.speaker.demo" : "bluetooth.demo",
+                    name: isSimple ? "MacBook Pro Speakers" : "AirPods Pro",
+                    kind: isSimple ? .speaker : .bluetooth
+                )
+            )
+            let controller = MacEqualizerWindowController.shared
+            controller.show()
+            controller.window?.setContentSize(NSSize(width: 1080, height: 700))
+            try? await Task.sleep(for: .seconds(3))
+            capture(window: controller.window, name: "flaccy-shot-equalizer-\(scene)")
             return
         case .paywall:
             (NSApp.delegate as? MacAppDelegate)?.presentPaywall()

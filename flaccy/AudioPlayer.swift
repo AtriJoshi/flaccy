@@ -726,6 +726,13 @@ final class AudioPlayer: AudioPlaying {
         }
     }
 
+    /// The single place an item is built, so the equalizer can attach its tap to every one.
+    private func makePlayerItem(for track: Track) -> AVPlayerItem {
+        let item = AVPlayerItem(url: track.fileURL)
+        EqualizerEngine.shared.attach(to: item)
+        return item
+    }
+
     private func makeConfiguredPlayer(with item: AVPlayerItem) -> AVQueuePlayer {
         let player = AVQueuePlayer(items: [item])
         player.automaticallyWaitsToMinimizeStalling = false
@@ -910,7 +917,7 @@ final class AudioPlayer: AudioPlaying {
         removePlayerObservers()
 
         let track = queue[index]
-        let item = AVPlayerItem(url: track.fileURL)
+        let item = makePlayerItem(for: track)
 
         playingItem = item
         preloadedItem = nil
@@ -965,7 +972,7 @@ final class AudioPlayer: AudioPlaying {
 
     private func preloadNextItem(after index: Int) {
         guard let nextIndex = preloadTargetIndex(after: index) else { return }
-        let nextItem = AVPlayerItem(url: queue[nextIndex].fileURL)
+        let nextItem = makePlayerItem(for: queue[nextIndex])
         if player?.canInsert(nextItem, after: player?.items().last) == true {
             player?.insert(nextItem, after: player?.items().last)
             preloadedItem = nextItem
@@ -1524,7 +1531,7 @@ final class AudioPlayer: AudioPlaying {
 
         removePlayerObservers()
 
-        let item = AVPlayerItem(url: track.fileURL)
+        let item = makePlayerItem(for: track)
         playingItem = item
         preloadedItem = nil
         preloadedIndex = nil

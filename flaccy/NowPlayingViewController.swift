@@ -39,6 +39,9 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
     private let shareButton = UIButton(type: .system)
     private let lyricsButton = UIButton(type: .system)
     private let queueButton = UIButton(type: .system)
+    private let equalizerButton = UIButton(type: .system)
+    private let equalizerBadge = EqualizerBadgeView()
+    private var equalizerCapsule: GlassCapsule?
 
     private var shuffleCapsule: GlassCapsule?
     private var repeatCapsule: GlassCapsule?
@@ -164,6 +167,12 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
         )
         NotificationCenter.default.addObserver(
             self, selector: #selector(lovedTracksDidChange), name: LovedTracksService.didChange, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(equalizerStateDidChange), name: EqualizerEngine.stateDidChange, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(equalizerOutputDidChange(_:)), name: EqualizerEngine.outputDidChange, object: nil
         )
     }
 
@@ -777,7 +786,7 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
     private func makeTitleRow() -> UIStackView {
         loveButton.onToggle = { [weak self] in self?.toggleLove() }
 
-        let row = UIStackView(arrangedSubviews: [titleMarquee, qualityBadge, loveButton])
+        let row = UIStackView(arrangedSubviews: [titleMarquee, qualityBadge, equalizerBadge, loveButton])
         row.spacing = 8
         row.alignment = .center
         return row
@@ -901,16 +910,54 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
     private func makeVolumeRow() -> UIStackView {
         let glyphConfig = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
         let minGlyph = UIImageView(image: UIImage(systemName: "speaker.fill", withConfiguration: glyphConfig))
-        let maxGlyph = UIImageView(image: UIImage(systemName: "speaker.wave.3.fill", withConfiguration: glyphConfig))
-        for glyph in [minGlyph, maxGlyph] {
-            glyph.tintColor = .white.withAlphaComponent(0.5)
-            glyph.setContentHuggingPriority(.required, for: .horizontal)
-        }
+        minGlyph.tintColor = .white.withAlphaComponent(0.5)
+        minGlyph.setContentHuggingPriority(.required, for: .horizontal)
         volumeSlider.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = UIStackView(arrangedSubviews: [minGlyph, volumeSlider, maxGlyph])
+
+        configureEqualizerButton()
+        let capsule = GlassCapsule(hosting: equalizerButton)
+        capsule.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        capsule.setContentHuggingPriority(.required, for: .horizontal)
+        equalizerCapsule = capsule
+
+        let row = UIStackView(arrangedSubviews: [minGlyph, volumeSlider, capsule])
         row.spacing = 12
         row.alignment = .center
         return row
+    }
+
+    private func configureEqualizerButton() {
+        let iconConfig = UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        equalizerButton.setImage(UIImage(systemName: "slider.vertical.3", withConfiguration: iconConfig), for: .normal)
+        equalizerButton.accessibilityLabel = EqualizerCopy.title
+        equalizerButton.accessibilityIdentifier = "nowplaying.equalizer"
+        equalizerButton.accessibilityHint = String(localized: "Shapes the sound with a response curve and presets")
+        equalizerButton.addAction(UIAction { [weak self] _ in self?.presentEqualizer() }, for: .touchUpInside)
+        equalizerBadge.addAction(UIAction { [weak self] _ in self?.presentEqualizer() }, for: .touchUpInside)
+        updateEqualizerState()
+    }
+
+    private func presentEqualizer() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        present(EqualizerViewController.makePresented(), animated: true)
+    }
+
+    private func updateEqualizerState() {
+        let isRunning = EqualizerEngine.shared.isRunning
+        equalizerButton.tintColor = isRunning ? .white : .white.withAlphaComponent(0.7)
+        equalizerButton.accessibilityValue = isRunning ? String(localized: "On") : String(localized: "Off")
+        equalizerCapsule?.setActive(isRunning, animated: hasAppliedInitialState)
+        equalizerBadge.isHidden = !isRunning
+    }
+
+    @objc private func equalizerStateDidChange() {
+        updateEqualizerState()
+    }
+
+    @objc private func equalizerOutputDidChange(_ notification: Notification) {
+        guard let profile = notification.userInfo?[EqualizerEngine.outputProfileKey] as? String,
+              let output = EqualizerEngine.shared.output else { return }
+        ToastView.show(EqualizerCopy.outputChanged(name: output.name, profile: profile), in: view)
     }
 
     private func makeActionRow() -> UIStackView {
@@ -1139,7 +1186,7 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
         view.accessibilityElements = centerElements + [
             scrubber, currentTimeLabel, remainingTimeLabel,
             skipBackButton, previousButton, playPauseButton, nextButton, skipForwardButton,
-            volumeSlider,
+            volumeSlider, equalizerButton,
             shuffleButton, repeatButton, airplayButton, sleepTimerButton, shareButton, lyricsButton, queueButton,
         ] + trailing
     }
@@ -1321,6 +1368,7 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
         let animated = hasAppliedInitialState
         ArtworkPaletteExtractor.palette(for: artwork, cacheKey: cacheKey, fallbackSeed: seed) { [weak self] palette in
             self?.backdropView.apply(palette, animated: animated)
+            self?.equalizerBadge.accent = EqualizerTheme.accent(from: palette)
         }
     }
 
@@ -2094,7 +2142,7 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
     private func appearanceGroups() -> [[UIView]] {
         [
             [artworkContainer],
-            [titleMarquee, qualityBadge, loveButton, artistAvatarButton, artistButton, dashLabel, albumLabel, playingFromLabel],
+            [titleMarquee, qualityBadge, equalizerBadge, loveButton, artistAvatarButton, artistButton, dashLabel, albumLabel, playingFromLabel],
             [scrubber, currentTimeLabel, remainingTimeLabel, skipBackButton, previousButton,
              playPauseButton, nextButton, skipForwardButton],
         ]

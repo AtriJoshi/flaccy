@@ -34,6 +34,16 @@ public enum GraphicSolver {
         }
     }()
 
+    /// The ten targets that best stand in for an arbitrary curve: its response
+    /// at each centre, settled onto half decibels and held inside the slider range.
+    public static func targets(approximating bands: [EqualizerBand]) -> [Double] {
+        centres.map { centre in
+            let heard = BiquadMath.responseDecibels(bands, frequency: centre)
+            let stepped = (heard / EqualizerPlot.gainStep).rounded() * EqualizerPlot.gainStep
+            return min(max(stepped, EqualizerBand.gainRange.lowerBound), EqualizerBand.gainRange.upperBound)
+        }
+    }
+
     /// The ten bells, at their centres, whose summed response meets `targets`.
     public static func bands(forTargets targets: [Double]) -> [EqualizerBand] {
         let padded = (0..<centres.count).map { $0 < targets.count ? targets[$0] : 0 }

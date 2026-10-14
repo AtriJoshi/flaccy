@@ -39,6 +39,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #if DEBUG
         PaywallShot.runIfRequested(in: window)
         SampleExercise.runIfRequested()
+        EqualizerExercise.runIfRequested()
+        EqualizerShots.runIfRequested(in: window)
         #endif
         #if DEBUG && targetEnvironment(simulator)
         DemoRouter.runIfRequested(window: window, nav: nav, player: playerContainer)

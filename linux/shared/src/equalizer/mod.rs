@@ -9,7 +9,10 @@
 pub mod biquad;
 pub mod graphic;
 pub mod headroom;
+pub mod interaction;
 pub mod kernel;
+pub mod plot;
+pub mod plot_model;
 pub mod presets;
 pub mod profile;
 pub mod profile_text;

@@ -80,6 +80,9 @@ enum MainMenu {
         menu.addItem(withTitle: String(localized: "Toggle Shuffle"), action: #selector(MacAppDelegate.toggleShuffle(_:)), keyEquivalent: "")
         menu.addItem(withTitle: String(localized: "Cycle Repeat Mode"), action: #selector(MacAppDelegate.cycleRepeatMode(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+        let equalizer = menu.addItem(withTitle: String(localized: "Equalizer"), action: #selector(MacAppDelegate.toggleEqualizer(_:)), keyEquivalent: "e")
+        equalizer.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(.separator())
         menu.addItem(withTitle: String(localized: "Love Track"), action: #selector(MacAppDelegate.toggleLove(_:)), keyEquivalent: "l")
         menu.addItem(.separator())
         let volumeUp = menu.addItem(withTitle: String(localized: "Increase Volume"), action: #selector(MacAppDelegate.increaseVolume(_:)), keyEquivalent: upArrowKey)

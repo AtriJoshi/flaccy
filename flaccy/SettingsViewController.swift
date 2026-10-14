@@ -78,6 +78,7 @@ final class SettingsViewController: UITableViewController {
         case importLastFM
         case yearInMusic
         case recapNotifications(frequency: String)
+        case equalizer(summary: String)
         case gaplessPlayback
         case autoplaySimilar
         case libraryRadio
@@ -359,7 +360,7 @@ final class SettingsViewController: UITableViewController {
             ],
             toSection: .recap
         )
-        snapshot.appendItems([.gaplessPlayback, .autoplaySimilar, .libraryRadio, .crateDig], toSection: .playback)
+        snapshot.appendItems([.equalizer(summary: EqualizerCopy.settingsSummary), .gaplessPlayback, .autoplaySimilar, .libraryRadio, .crateDig], toSection: .playback)
         snapshot.appendItems([.listeningGuide], toSection: .guide)
         snapshot.appendItems([.watchSync(syncedCount: WatchSyncService.shared.syncedPaths.count)], toSection: .watch)
         snapshot.appendItems(libraryRows(), toSection: .library)
@@ -480,6 +481,16 @@ final class SettingsViewController: UITableViewController {
             cell.accessibilityLabel = String(localized: "Recap Notifications")
             cell.accessibilityValue = frequency
             cell.accessibilityHint = String(localized: "Chooses how often flaccy reminds you about your recap")
+
+        case .equalizer(let summary):
+            content.image = RowIcon.image(systemName: "slider.vertical.3", tint: .systemPink)
+            content.text = EqualizerCopy.title
+            content.secondaryText = summary
+            cell.accessoryType = .disclosureIndicator
+            cell.accessibilityLabel = EqualizerCopy.title
+            cell.accessibilityValue = summary
+            cell.accessibilityHint = String(localized: "Shapes the sound with a response curve and presets")
+            cell.accessibilityIdentifier = "settings.row.equalizer"
 
         case .gaplessPlayback:
             content.image = RowIcon.image(systemName: "infinity", tint: .systemPurple)
@@ -862,6 +873,7 @@ final class SettingsViewController: UITableViewController {
         case .libraryRadio: handleLibraryRadio()
         case .crateDig: handleCrateDig()
         case .listeningGuide: handleListeningGuideTap()
+        case .equalizer: present(EqualizerViewController.makePresented(), animated: true)
         case .watchSync: handleWatchTap()
         case .importFiles: handleImportTap()
         case .rescanLibrary: handleRescanTap()
