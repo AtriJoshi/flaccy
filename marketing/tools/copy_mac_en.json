@@ -4,6 +4,11 @@
     "headline": "Your collection, in *full quality.*",
     "maxLines": 1
   },
+  "eq": {
+    "kicker": "Equalizer",
+    "headline": "Drag the curve. *Hear it change.*",
+    "maxLines": 1
+  },
   "lyrics": {
     "kicker": "Now Playing",
     "headline": "Art, lyrics and queue, *side by side.*",
@@ -32,6 +37,11 @@
   "themes": {
     "kicker": "Appearance",
     "headline": "Light or dark. *Your call.*",
+    "maxLines": 1
+  },
+  "eqpro": {
+    "kicker": "Precision EQ",
+    "headline": "Every output gets *its own curve.*",
     "maxLines": 1
   }
 }

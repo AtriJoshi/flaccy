@@ -47,7 +47,8 @@ def main():
     if not args.skip_text:
         for locale, t in texts.items():
             run(["asc", "localizations", "update", "--version", args.version_id, "--locale", locale,
-                 "--description", t["description"], "--keywords", t["keywords"], "--promotional-text", t["promo"]],
+                 "--description", t["description"], "--keywords", t["keywords"], "--promotional-text", t["promo"]]
+                + (["--whats-new", t["whatsNew"]] if t.get("whatsNew") else []),
                 args.dry_run)
             run(["asc", "localizations", "update", "--app", args.app, "--type", "app-info", "--app-info", args.app_info,
                  "--locale", locale, "--subtitle", t["subtitle"]], args.dry_run)

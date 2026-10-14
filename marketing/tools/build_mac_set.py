@@ -18,10 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 SLIDES = [
     dict(id="library", raw="library-albums", accent=c.CORAL, secondary=c.VIOLET),
+    dict(id="eq", raw="equalizer-simple", accent=c.TEAL, secondary=c.VIOLET),
     dict(id="lyrics", raw="nowplaying-lyrics", accent=c.VIOLET, secondary=c.CORAL),
     dict(id="queue", raw="queue", accent=c.TEAL, secondary=c.BLUE),
     dict(id="songs", raw="songs-table", accent=c.AMBER, secondary=c.CORAL),
     dict(id="scrobble", raw="charts", accent=c.ROSE, secondary=c.AMBER),
+    dict(id="eqpro", raw="equalizer-advanced", accent=c.AMBER, secondary=c.TEAL),
     dict(id="year", raw="year-in-music", accent=c.CORAL, secondary=c.AMBER),
     dict(id="themes", raw="library-light", accent=c.BLUE, secondary=c.VIOLET, mac_color="Space Black"),
 ]

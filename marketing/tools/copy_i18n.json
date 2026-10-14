@@ -4,6 +4,11 @@
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "Deine Sammlung,\nin *voller Qualität.*"
     },
+    "eq": {
+      "kicker": "Equalizer",
+      "headline": "Dein Klang,\n*deine Regeln.*",
+      "sub": "Zieh die Kurve. Hör, wie sie klingt."
+    },
     "nowplaying": {
       "kicker": "Gerade läuft",
       "headline": "Hi-Res, bis ins\n*kleinste Detail.*",
@@ -48,12 +53,22 @@
       "kicker": "Darstellung",
       "headline": "Hell oder dunkel.\n*Du entscheidest.*",
       "sub": "Folgt dem System oder wähle selbst."
+    },
+    "eqpro": {
+      "kicker": "Präziser EQ",
+      "headline": "Angepasst an\n*deine Kopfhörer.*",
+      "sub": "AutoEq-Profile importieren. Pro Ausgang gespeichert."
     }
   },
   "es": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "Tu colección,\nen *calidad total.*"
+    },
+    "eq": {
+      "kicker": "Ecualizador",
+      "headline": "Suena como\n*tú lo quieres.*",
+      "sub": "Arrastra la curva. Escucha cómo cambia."
     },
     "nowplaying": {
       "kicker": "Reproduciendo",
@@ -99,12 +114,22 @@
       "kicker": "Apariencia",
       "headline": "Claro u oscuro.\n*Tú decides.*",
       "sub": "Sigue al sistema o elige uno."
+    },
+    "eqpro": {
+      "kicker": "EQ de precisión",
+      "headline": "Ajustado a tus\n*auriculares.*",
+      "sub": "Importa perfiles AutoEq. Guardados por salida."
     }
   },
   "fr": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "Votre collection,\nen *qualité totale.*"
+    },
+    "eq": {
+      "kicker": "Égaliseur",
+      "headline": "Un son\n*à votre image.*",
+      "sub": "Glissez la courbe. Écoutez-la changer."
     },
     "nowplaying": {
       "kicker": "En cours de lecture",
@@ -150,12 +175,22 @@
       "kicker": "Apparence",
       "headline": "Clair ou sombre.\n*À vous de choisir.*",
       "sub": "Suit votre système, ou choisissez."
+    },
+    "eqpro": {
+      "kicker": "Égaliseur précis",
+      "headline": "Réglé pour vos\n*casques.*",
+      "sub": "Importez des profils AutoEq. Enregistrés par sortie."
     }
   },
   "it": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "La tua collezione,\nin *piena qualità.*"
+    },
+    "eq": {
+      "kicker": "Equalizzatore",
+      "headline": "Suona come\n*piace a te.*",
+      "sub": "Trascina la curva. Ascolta come cambia."
     },
     "nowplaying": {
       "kicker": "In riproduzione",
@@ -201,12 +236,22 @@
       "kicker": "Aspetto",
       "headline": "Chiaro o scuro.\n*Decidi tu.*",
       "sub": "Segue il sistema o scegline uno."
+    },
+    "eqpro": {
+      "kicker": "EQ di precisione",
+      "headline": "Calibrato per le\n*tue cuffie.*",
+      "sub": "Importa profili AutoEq. Salvati per ogni uscita."
     }
   },
   "ja": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "コレクションを、\n*フル品質で。*"
+    },
+    "eq": {
+      "kicker": "イコライザー",
+      "headline": "あなた好みの音に\n*整える。*",
+      "sub": "カーブを動かすと、音がすぐ変わる。"
     },
     "nowplaying": {
       "kicker": "再生中",
@@ -252,12 +297,22 @@
       "kicker": "外観",
       "headline": "ライトも、ダークも。\n*お好みで。*",
       "sub": "システムに従うか、好みで選択。"
+    },
+    "eqpro": {
+      "kicker": "精密EQ",
+      "headline": "ヘッドホンに\n*合わせて調整。*",
+      "sub": "AutoEqプロファイルを読み込み、出力ごとに保存。"
     }
   },
   "ko": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "나만의 컬렉션을,\n*최고 음질로.*"
+    },
+    "eq": {
+      "kicker": "이퀄라이저",
+      "headline": "내 취향대로\n*들리게 하세요.*",
+      "sub": "커브를 드래그하면 소리가 바로 바뀝니다."
     },
     "nowplaying": {
       "kicker": "지금 재생 중",
@@ -303,12 +358,22 @@
       "kicker": "화면 모드",
       "headline": "라이트든 다크든.\n*선택은 당신에게.*",
       "sub": "시스템을 따르거나 직접 고르세요."
+    },
+    "eqpro": {
+      "kicker": "정밀 EQ",
+      "headline": "내 헤드폰에\n*맞춰 튜닝.*",
+      "sub": "AutoEq 프로필 가져오기. 출력마다 따로 저장."
     }
   },
   "pl": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "Twoja kolekcja,\nw *pełnej jakości.*"
+    },
+    "eq": {
+      "kicker": "Equalizer",
+      "headline": "Brzmi\n*jak ty chcesz.*",
+      "sub": "Przeciągnij krzywą. Słuchaj, jak się zmienia."
     },
     "nowplaying": {
       "kicker": "Teraz odtwarzane",
@@ -354,12 +419,22 @@
       "kicker": "Wygląd",
       "headline": "Jasny czy ciemny?\n*Ty decydujesz.*",
       "sub": "Podąża za systemem albo wybierz sam."
+    },
+    "eqpro": {
+      "kicker": "Precyzyjny EQ",
+      "headline": "Dostrojony do\n*słuchawek.*",
+      "sub": "Importuj profile AutoEq. Zapisywane dla każdego wyjścia."
     }
   },
   "pt-BR": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "Sua coleção,\nem *qualidade total.*"
+    },
+    "eq": {
+      "kicker": "Equalizador",
+      "headline": "Faça soar\n*como você quer.*",
+      "sub": "Arraste a curva. Ouça a mudança."
     },
     "nowplaying": {
       "kicker": "Tocando agora",
@@ -405,12 +480,22 @@
       "kicker": "Aparência",
       "headline": "Claro ou escuro.\n*Você decide.*",
       "sub": "Segue o sistema ou escolha um."
+    },
+    "eqpro": {
+      "kicker": "EQ de precisão",
+      "headline": "Ajustado ao seu\n*fone de ouvido.*",
+      "sub": "Importe perfis AutoEq. Salvo por saída."
     }
   },
   "zh-Hans": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "你的音乐收藏，\n*全音质呈现。*"
+    },
+    "eq": {
+      "kicker": "均衡器",
+      "headline": "让声音\n*像你所想。*",
+      "sub": "拖动曲线，立即听到变化。"
     },
     "nowplaying": {
       "kicker": "正在播放",
@@ -456,12 +541,22 @@
       "kicker": "外观",
       "headline": "浅色或深色，\n*由你决定。*",
       "sub": "跟随系统，或自行选择。"
+    },
+    "eqpro": {
+      "kicker": "精准 EQ",
+      "headline": "为你的耳机\n*精心调校。*",
+      "sub": "导入 AutoEq 配置，按输出分别保存。"
     }
   },
   "zh-Hant": {
     "hero": {
       "kicker": "FLAC · ALAC · WAV · AIFF · MP3 · AAC",
       "headline": "你的音樂收藏，\n*全音質呈現。*"
+    },
+    "eq": {
+      "kicker": "等化器",
+      "headline": "讓聲音\n*如你所想。*",
+      "sub": "拖曳曲線，立即聽見變化。"
     },
     "nowplaying": {
       "kicker": "正在播放",
@@ -507,6 +602,11 @@
       "kicker": "外觀",
       "headline": "淺色或深色，\n*由你決定。*",
       "sub": "跟隨系統，或自行選擇。"
+    },
+    "eqpro": {
+      "kicker": "精準 EQ",
+      "headline": "為你的耳機\n*精心調校。*",
+      "sub": "匯入 AutoEq 設定檔，依輸出分別儲存。"
     }
   }
 }
