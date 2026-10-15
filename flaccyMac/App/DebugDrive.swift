@@ -42,6 +42,11 @@ enum DebugDrive {
                 await exerciseZoom(window: window)
             }
         }
+        if CommandLine.arguments.contains("--exercise-onboarding") {
+            Task {
+                await exerciseOnboarding(window: window)
+            }
+        }
         if CommandLine.arguments.contains("--exercise-stack") {
             Task {
                 await exerciseStack(window: window)
@@ -338,6 +343,78 @@ enum DebugDrive {
 
     /// Steps the interface scale through its whole range and back while a song
     /// plays, the way a held ⌘= does, and logs PASS if the window survives it.
+    /// Clicks the welcome panel's two buttons the way a reviewer would and logs
+    /// whether each click lands on its button and reaches its action. Run it on
+    /// an empty library: an invisible view above the panel once took every click.
+    private static func exerciseOnboarding(window: NSWindow?) async {
+        guard let window, let content = window.contentView, let frameView = content.superview else { return }
+        func buttons(in view: NSView) -> [GlassCapsuleButton] {
+            (view as? GlassCapsuleButton).map { [$0] } ?? view.subviews.flatMap(buttons(in:))
+        }
+        func report(_ expectation: String, _ passed: Bool) {
+            AppLogger.info("OnboardingExercise \(passed ? "PASS" : "FAIL"): \(expectation)", category: .general)
+        }
+        func chain(of view: NSView?) -> String {
+            var names: [String] = []
+            var current = view
+            while let node = current, names.count < 8 {
+                names.append(String(describing: type(of: node)))
+                current = node.superview
+            }
+            return names.joined(separator: " < ")
+        }
+        func center(of button: GlassCapsuleButton) -> NSPoint {
+            button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        }
+        func click(_ button: GlassCapsuleButton) {
+            window.makeKeyAndOrderFront(nil)
+            let point = center(of: button)
+            guard let target = frameView.hitTest(point) else { return }
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1
+                ) else { continue }
+                if type == .leftMouseDown { target.mouseDown(with: event) } else { target.mouseUp(with: event) }
+            }
+        }
+        func clickAndWatch(_ button: GlassCapsuleButton) async -> Bool {
+            var fired = false
+            let original = button.onClick
+            button.onClick = {
+                fired = true
+                original?()
+            }
+            click(button)
+            try? await Task.sleep(for: .milliseconds(800))
+            button.onClick = original
+            return fired
+        }
+
+        let titles = [String(localized: "Choose Music Folder…"), String(localized: "Download Sample Album")]
+        var found: [GlassCapsuleButton] = []
+        for _ in 0..<40 {
+            found = buttons(in: content).filter { titles.contains($0.title) }
+            if found.count == titles.count { break }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        try? await Task.sleep(for: .seconds(2))
+        report("the welcome panel shows its two buttons (\(found.map(\.title)))", found.count == titles.count)
+        for button in found {
+            let hit = frameView.hitTest(center(of: button))
+            let reachable = hit.map { $0 === button || $0.isDescendant(of: button) } ?? false
+            report("a click on “\(button.title)” lands on the button: \(chain(of: hit))", reachable)
+        }
+        guard let choose = found.first(where: { $0.title == titles[0] }),
+              let sample = found.first(where: { $0.title == titles[1] }) else { return }
+
+        report("a click on Choose Music Folder… reaches its action", await clickAndWatch(choose))
+        try? await Task.sleep(for: .seconds(1))
+        if let sheet = window.attachedSheet { window.endSheet(sheet, returnCode: .cancel) }
+        try? await Task.sleep(for: .seconds(1))
+        report("a click on Download Sample Album reaches its action", await clickAndWatch(sample))
+    }
+
     private static func exerciseZoom(window: NSWindow?) async {
         try? await Task.sleep(for: .seconds(6))
         let original = MacInterfaceScale.current

@@ -21,6 +21,13 @@ final class MacLibraryDebutView: NSView {
 
     var onTurnOnAI: (() -> Void)?
 
+    /// A faded-out view still sits on top of whatever is under it and, on current
+    /// macOS, still answers hit tests, so the welcome panel's buttons — which are
+    /// beneath this view — never received a click.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        alphaValue < 0.01 ? nil : super.hitTest(point)
+    }
+
     private let headline = NSTextField(labelWithString: "")
     private let chip = NSView()
     private let chipLabel = NSTextField(labelWithString: LibraryDebutCopy.trialChip)

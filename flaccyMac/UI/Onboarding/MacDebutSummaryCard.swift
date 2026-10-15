@@ -11,6 +11,13 @@ final class MacDebutSummaryCard: NSView {
     var onDismiss: (() -> Void)?
     var onSeeWhatsIncluded: (() -> Void)?
 
+    /// A faded-out view still sits on top of whatever is under it and, on current
+    /// macOS, still answers hit tests, so the welcome panel's buttons — which are
+    /// beneath this view — never received a click.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        alphaValue < 0.01 ? nil : super.hitTest(point)
+    }
+
     private let summary: LibraryDebutSummary
 
     /// `aiSkippedForEntitlement` turns the card's grey paywall footnote into the

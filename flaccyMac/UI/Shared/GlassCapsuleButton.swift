@@ -81,6 +81,10 @@ final class GlassCapsuleButton: NSControl {
         ))
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     override func mouseEntered(with event: NSEvent) {
         animateHighlight(to: 0.6)
     }

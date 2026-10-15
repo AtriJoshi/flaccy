@@ -91,6 +91,7 @@ final class ContentRouter: NSViewController {
             next.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         currentChild = next
+        keepOnboardingInFront()
         AppLogger.info("Content router showing \(section.title)", category: .ui)
     }
 
@@ -238,8 +239,18 @@ final class ContentRouter: NSViewController {
             panel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         onboardingView = panel
+        keepOnboardingInFront()
         panel.render(MacLibrarySurfaceModel.shared.state.value)
         AppLogger.info("Onboarding panel shown", category: .ui)
+    }
+
+    /// The welcome panel has to stay in front of whichever section is showing.
+    /// Loading a section's view can install the panel in the middle of `show`,
+    /// before AppKit has inserted that view, which left the panel behind an
+    /// empty grid that took every click: neither of its buttons answered.
+    private func keepOnboardingInFront() {
+        guard let onboardingView, view.subviews.last !== onboardingView else { return }
+        view.addSubview(onboardingView, positioned: .above, relativeTo: nil)
     }
 
     /// The close of Act III: the panel falls away while the grid it was standing
