@@ -4,6 +4,7 @@ extension Notification.Name {
     static let flaccyRevealAlbum = Notification.Name("flaccy.mac.revealAlbum")
     static let flaccyRevealArtist = Notification.Name("flaccy.mac.revealArtist")
     static let flaccySearchQueryChanged = Notification.Name("flaccy.mac.searchQueryChanged")
+    static let flaccyClearSearch = Notification.Name("flaccy.mac.clearSearch")
 }
 
 /// Notification-based navigation to detail surfaces so any component — menus,
@@ -48,6 +49,12 @@ enum LibrarySearchState {
             object: nil,
             userInfo: [LibraryNavigator.Key.query: newQuery]
         )
+    }
+
+    /// Asks the window to empty its search field, which then reports the empty
+    /// query like any other edit, so the field and the state cannot disagree.
+    static func requestClear() {
+        NotificationCenter.default.post(name: .flaccyClearSearch, object: nil)
     }
 }
 

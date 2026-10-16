@@ -11,12 +11,18 @@ final class GlassCapsuleButton: NSControl {
     private let highlightView = NSView()
     private var host: NSView?
 
+    override var isEnabled: Bool {
+        didSet { alphaValue = isEnabled ? 1 : 0.4 }
+    }
+
     var title: String {
         get { label.stringValue }
         set { label.stringValue = newValue }
     }
 
-    init(title: String, symbolName: String?, prominent: Bool = false) {
+    /// `iconOnly` drops the words and keeps the glyph, with the title still
+    /// serving as the tooltip and the accessibility label.
+    init(title: String, symbolName: String?, prominent: Bool = false, iconOnly: Bool = false) {
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -31,12 +37,14 @@ final class GlassCapsuleButton: NSControl {
             iconView.contentTintColor = .labelColor
             views.append(iconView)
         }
-        views.append(label)
+        if !(iconOnly && symbolName != nil) {
+            views.append(label)
+        }
 
         let stack = NSStackView(views: views)
         stack.orientation = .horizontal
         stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: iconOnly ? 12 : 16, bottom: 8, right: iconOnly ? 12 : 16)
 
         let tint: NSColor? = prominent ? MacColors.fill(0.12) : nil
         let surface = MacLiquidGlass.surface(hosting: stack, cornerRadius: 16, tint: tint)
@@ -66,6 +74,9 @@ final class GlassCapsuleButton: NSControl {
 
         setAccessibilityRole(.button)
         setAccessibilityLabel(title)
+        if iconOnly {
+            toolTip = title
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -99,7 +110,7 @@ final class GlassCapsuleButton: NSControl {
 
     override func mouseUp(with event: NSEvent) {
         animateHighlight(to: bounds.contains(convert(event.locationInWindow, from: nil)) ? 0.6 : 0)
-        if bounds.contains(convert(event.locationInWindow, from: nil)) {
+        if isEnabled, bounds.contains(convert(event.locationInWindow, from: nil)) {
             onClick?()
         }
     }

@@ -84,6 +84,7 @@ enum MainMenu {
         equalizer.keyEquivalentModifierMask = [.command, .option]
         menu.addItem(.separator())
         menu.addItem(withTitle: String(localized: "Love Track"), action: #selector(MacAppDelegate.toggleLove(_:)), keyEquivalent: "l")
+        menu.addItem(withTitle: String(localized: "Jump to Current Song"), action: #selector(MacAppDelegate.jumpToCurrentSong(_:)), keyEquivalent: "j")
         menu.addItem(.separator())
         let volumeUp = menu.addItem(withTitle: String(localized: "Increase Volume"), action: #selector(MacAppDelegate.increaseVolume(_:)), keyEquivalent: upArrowKey)
         volumeUp.keyEquivalentModifierMask = [.command]

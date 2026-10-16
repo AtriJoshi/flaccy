@@ -353,6 +353,22 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         Task { _ = await LovedTracksService.shared.toggleLove(track: track) }
     }
 
+    @objc func jumpToCurrentSong(_ sender: Any?) {
+        guard AudioPlayer.shared.currentTrack != nil else {
+            AppLogger.info("Jump to current song: nothing is playing", category: .ui)
+            MacToast.show(String(localized: "Nothing playing"), style: .info, in: mainWindowController?.window)
+            return
+        }
+        NotificationCenter.default.post(
+            name: .flaccyShowSection,
+            object: nil,
+            userInfo: [SectionNotificationKey.section: SidebarSection.songs.rawValue]
+        )
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .flaccyJumpToCurrentSong, object: nil)
+        }
+    }
+
     @objc func increaseVolume(_ sender: Any?) {
         AudioPlayer.shared.volume = min(1, AudioPlayer.shared.volume + 0.0625)
     }
