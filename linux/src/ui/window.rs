@@ -458,6 +458,19 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
         app.add_action(&downloads_action);
         app.set_accels_for_action("app.downloads", &["<Control>d"]);
     }
+    {
+        let locate_action = gio::SimpleAction::new("locate-current", None);
+        let sidebar_for_action = sidebar.clone();
+        let hub_core = Rc::clone(core);
+        locate_action.connect_activate(move |_, _| {
+            if let Some(row) = sidebar_for_action.row_at_index(1) {
+                sidebar_for_action.select_row(Some(&row));
+            }
+            hub_core.hub.emit(&AppEvent::LocateCurrent);
+        });
+        app.add_action(&locate_action);
+        app.set_accels_for_action("app.locate-current", &["<Control>j"]);
+    }
     attach_space_handler(&ui);
     attach_playback_keys(&ui);
     attach_list_navigation(&ui);
@@ -1352,6 +1365,7 @@ fn present_shortcuts(window: &adw::ApplicationWindow) {
                 ("Ctrl+↑", "Volume up"),
                 ("Ctrl+↓", "Volume down"),
                 ("Ctrl+L", "Love current track"),
+                ("Ctrl+J", "Show the playing song in Songs"),
             ],
         ),
         (

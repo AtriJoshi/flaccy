@@ -1,11 +1,13 @@
 use crate::events::AppEvent;
+use crate::filters::{self, LibraryFilter};
 use crate::library::{format_time, Album, Track};
+use crate::ui::filter_chips::ChipBar;
 use crate::ui::{context, debut, Ui};
 use adw::prelude::*;
 use gtk::glib::BoxedAnyObject;
 use gtk::{gdk, gio, glib, pango};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// Mirrors LibraryViewModel.AlbumSort on the Apple clients — same options,
@@ -93,18 +95,31 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         &ui.core.config.borrow().album_sort,
     )));
 
+    let chip_filter = Rc::new(Cell::new(LibraryFilter::from_id(
+        &ui.core.config.borrow().albums_filter,
+    )));
+    let allowed: Rc<RefCell<Option<HashSet<String>>>> = Rc::new(RefCell::new(None));
+
     let filter = {
         let query = Rc::clone(&ui.query);
+        let allowed = Rc::clone(&allowed);
         gtk::CustomFilter::new(move |obj| {
             let Some(boxed) = obj.downcast_ref::<BoxedAnyObject>() else {
                 return true;
             };
+            let album = boxed.borrow::<Album>();
+            if allowed
+                .borrow()
+                .as_ref()
+                .is_some_and(|keys| !keys.contains(&album.key()))
+            {
+                return false;
+            }
             let query = query.borrow();
             if query.is_empty() {
                 return true;
             }
             let needle = query.to_lowercase();
-            let album = boxed.borrow::<Album>();
             album.title.to_lowercase().contains(&needle)
                 || album.artist.to_lowercase().contains(&needle)
         })
@@ -240,19 +255,20 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     let sort_label = gtk::Label::new(Some("Sort"));
     sort_label.add_css_class("dim");
     sort_label.add_css_class("caption");
-    let sort_header = gtk::Box::builder()
+    let sort_controls = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .spacing(8)
-        .margin_top(18)
-        .margin_start(24)
+        .margin_top(10)
         .margin_end(24)
-        .halign(gtk::Align::End)
+        .valign(gtk::Align::Center)
         .build();
-    sort_header.append(&sort_label);
-    sort_header.append(&sort_dropdown);
+    sort_controls.append(&sort_label);
+    sort_controls.append(&sort_dropdown);
 
+    let header_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    header_row.append(&sort_controls);
     let grid_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    grid_content.append(&sort_header);
+    grid_content.append(&header_row);
     grid_content.append(&crate::ui::suggested_shelf::build(ui));
     grid_content.append(&scroll);
 
@@ -317,9 +333,18 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         let ui = Rc::clone(ui);
         let sort_mode = Rc::clone(&sort_mode);
         let debut_presenting = Rc::clone(&debut_presenting);
+        let chip_filter = Rc::clone(&chip_filter);
+        let allowed = Rc::clone(&allowed);
+        let filter = filter.clone();
         let applied = Cell::new(0u64);
         Rc::new(move || {
             let library = ui.core.library.borrow().clone();
+            let now = chrono::Utc::now().timestamp();
+            let admitted = filters::albums_allowed(chip_filter.get(), &library.albums, now);
+            if *allowed.borrow() != admitted {
+                *allowed.borrow_mut() = admitted;
+                filter.changed(gtk::FilterChange::Different);
+            }
             let mut albums = library.albums.clone();
             sort_albums(&mut albums, sort_mode.get());
             let fingerprint = albums_fingerprint(&albums);
@@ -346,6 +371,50 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     };
     debut::install(ui, &stack, &debut_presenting, &rebuild);
     rebuild();
+
+    {
+        let on_filter = {
+            let ui = Rc::clone(ui);
+            let chip_filter = Rc::clone(&chip_filter);
+            let rebuild = Rc::clone(&rebuild);
+            let scroll = scroll.clone();
+            let sort_dropdown = sort_dropdown.clone();
+            move |picked: LibraryFilter| {
+                chip_filter.set(picked);
+                ui.core.config.borrow_mut().albums_filter = picked.id().to_string();
+                ui.core.save_config();
+                scroll.vadjustment().set_value(0.0);
+                let natural = match picked {
+                    LibraryFilter::RecentlyAdded => Some(AlbumSort::RecentlyAdded),
+                    LibraryFilter::RecentlyPlayed => Some(AlbumSort::RecentlyPlayed),
+                    _ => None,
+                };
+                let before = sort_dropdown.selected();
+                if let Some(sort) = natural {
+                    let index = AlbumSort::ALL.iter().position(|s| *s == sort).unwrap_or(0);
+                    sort_dropdown.set_selected(index as u32);
+                }
+                if sort_dropdown.selected() == before {
+                    rebuild();
+                }
+            }
+        };
+        let chips = ChipBar::new(
+            &LibraryFilter::ALBUMS,
+            chip_filter.get(),
+            filters::DEFAULT_RANGE,
+            on_filter,
+            |_| {},
+        );
+        let scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .hexpand(true)
+            .margin_start(12)
+            .child(&chips.widget)
+            .build();
+        header_row.prepend(&scroller);
+    }
 
     {
         let ui = Rc::clone(ui);

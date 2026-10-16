@@ -18,6 +18,15 @@ pub struct Config {
     pub import_page_cursor: u32,
     pub sidebar_index: i32,
     pub album_sort: String,
+    /// The Songs and Albums quick-pivot chips (`LibraryFilter::id`) and the
+    /// time range the Songs "Most Played" chip counts over (`Period::api_value`).
+    pub songs_filter: String,
+    pub songs_range: String,
+    pub albums_filter: String,
+    /// The Songs table's primary sort: the column's title, lowercased, and
+    /// which way it runs.
+    pub songs_sort: String,
+    pub songs_sort_descending: bool,
     pub np_swap_sides: bool,
     /// The size the equalizer window was last left at.
     pub eq_window_width: i32,
@@ -86,6 +95,11 @@ impl Default for Config {
             import_page_cursor: 1,
             sidebar_index: 0,
             album_sort: "artist".to_string(),
+            songs_filter: "all".to_string(),
+            songs_range: "1month".to_string(),
+            albums_filter: "all".to_string(),
+            songs_sort: "title".to_string(),
+            songs_sort_descending: false,
             np_swap_sides: false,
             eq_window_width: 1080,
             eq_window_height: 720,

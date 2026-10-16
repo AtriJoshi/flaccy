@@ -224,6 +224,65 @@ pub fn present_add_to_playlist(ui: &Rc<Ui>, rel_path: &str) {
     dialog.present(Some(&ui.window));
 }
 
+/// Names and saves a list of songs as a new playlist, in the order given — the
+/// Songs page uses it to keep a filtered list such as Most Played · 7D.
+pub fn prompt_save_tracks(ui: &Rc<Ui>, default_name: &str, rel_paths: Vec<String>) {
+    let dialog = adw::AlertDialog::builder()
+        .heading("Save as Playlist")
+        .body(format!(
+            "{} will be saved in the order they are listed.",
+            if rel_paths.len() == 1 {
+                "1 song".to_string()
+            } else {
+                format!("{} songs", rel_paths.len())
+            }
+        ))
+        .close_response("cancel")
+        .default_response("save")
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("save", "Save");
+    dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+
+    let entry = gtk::Entry::builder()
+        .text(default_name)
+        .activates_default(true)
+        .build();
+    dialog.set_extra_child(Some(&entry));
+
+    let window = ui.window.clone();
+    let ui = Rc::clone(ui);
+    dialog.connect_response(None, move |_, response| {
+        if response != "save" {
+            return;
+        }
+        let name = entry.text().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let saved = ui
+            .core
+            .db
+            .create_playlist(&name)
+            .and_then(|id| ui.core.db.add_tracks_to_playlist(id, &rel_paths));
+        match saved {
+            Ok(()) => {
+                crate::logger::info(
+                    "database",
+                    &format!("saved {} songs as playlist '{name}'", rel_paths.len()),
+                );
+                ui.core.toast(&format!("Saved “{name}”"));
+                ui.core.hub.emit(&AppEvent::LibraryReloaded);
+            }
+            Err(err) => {
+                crate::logger::error("database", &format!("save playlist failed: {err}"));
+                ui.core.toast("Couldn't save the playlist");
+            }
+        }
+    });
+    dialog.present(Some(&window));
+}
+
 pub fn prompt_new_playlist(ui: &Rc<Ui>, add_rel_path: Option<String>) {
     let dialog = adw::AlertDialog::builder()
         .heading("New Playlist")

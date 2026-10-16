@@ -73,6 +73,42 @@ pub fn format_time(seconds: f64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
+/// "45 min", "3 hr 12 min", "2 d 4 hr": how long a list of songs plays for, in
+/// the largest two units that matter, rounded to the nearest minute.
+pub fn format_total_duration(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return "0 min".to_string();
+    }
+    let minutes = (seconds / 60.0).round() as i64;
+    if minutes >= 24 * 60 {
+        return format!("{} d {} hr", minutes / (24 * 60), minutes % (24 * 60) / 60);
+    }
+    let (hours, rest) = (minutes / 60, minutes % 60);
+    match (hours, rest) {
+        (0, minutes) => format!("{minutes} min"),
+        (hours, 0) => format!("{hours} hr"),
+        (hours, minutes) => format!("{hours} hr {minutes} min"),
+    }
+}
+
+/// When a song was last played, the way a person says it: "Today",
+/// "Yesterday", "3 days ago" for the rest of the week, then the date.
+pub fn format_last_played(played_unix: i64, now_unix: i64) -> String {
+    use chrono::{Local, TimeZone};
+    let local = |unix: i64| Local.timestamp_opt(unix, 0).single();
+    let (Some(played), Some(now)) = (local(played_unix), local(now_unix)) else {
+        return String::new();
+    };
+    let days = (now.date_naive() - played.date_naive()).num_days();
+    match days {
+        d if d < 0 => played.format("%b %-d, %Y").to_string(),
+        0 => "Today".to_string(),
+        1 => "Yesterday".to_string(),
+        2..=6 => format!("{days} days ago"),
+        _ => played.format("%b %-d, %Y").to_string(),
+    }
+}
+
 #[derive(Clone)]
 pub struct Album {
     pub title: String,
@@ -768,5 +804,48 @@ mod sort_tests {
             track("03-third.flac", 3, "Third"),
         ];
         assert!(disc_sections(&tracks).is_none());
+    }
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::*;
+    use chrono::{Local, TimeZone};
+
+    #[test]
+    fn total_duration_names_the_two_largest_units() {
+        assert_eq!(format_total_duration(0.0), "0 min");
+        assert_eq!(format_total_duration(f64::NAN), "0 min");
+        assert_eq!(format_total_duration(29.0), "0 min");
+        assert_eq!(format_total_duration(45.0 * 60.0), "45 min");
+        assert_eq!(format_total_duration(3600.0), "1 hr");
+        assert_eq!(
+            format_total_duration(3.0 * 3600.0 + 12.0 * 60.0),
+            "3 hr 12 min"
+        );
+        assert_eq!(
+            format_total_duration(27.0 * 3600.0 + 20.0 * 60.0),
+            "1 d 3 hr"
+        );
+        assert_eq!(format_total_duration(2.0 * 86_400.0), "2 d 0 hr");
+    }
+
+    fn local_noon(year: i32, month: u32, day: u32) -> i64 {
+        Local
+            .with_ymd_and_hms(year, month, day, 12, 0, 0)
+            .single()
+            .expect("valid local time")
+            .timestamp()
+    }
+
+    #[test]
+    fn last_played_reads_like_a_person_says_it() {
+        let now = local_noon(2026, 10, 16);
+        assert_eq!(format_last_played(now - 3600, now), "Today");
+        let said = |unix: i64| format_last_played(unix, now);
+        assert_eq!(said(local_noon(2026, 10, 15)), "Yesterday");
+        assert_eq!(said(local_noon(2026, 10, 12)), "4 days ago");
+        assert_eq!(said(local_noon(2026, 10, 9)), "Oct 9, 2026");
+        assert_eq!(said(local_noon(2025, 1, 2)), "Jan 2, 2025");
     }
 }

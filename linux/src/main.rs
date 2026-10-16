@@ -6,6 +6,7 @@ mod downloads;
 mod enrichment;
 mod eq;
 mod events;
+mod filters;
 mod hygiene;
 mod importer;
 mod lastfm;

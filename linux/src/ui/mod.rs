@@ -8,6 +8,7 @@ pub mod debut;
 pub mod delete;
 pub mod downloads;
 pub mod equalizer;
+pub mod filter_chips;
 pub mod guide;
 pub mod lyrics_panel;
 pub mod lyrics_style;

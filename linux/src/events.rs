@@ -31,6 +31,8 @@ pub enum AppEvent {
     },
     LastFmChanged,
     SearchChanged(String),
+    /// Ctrl+J: bring the playing song into view in the Songs table.
+    LocateCurrent,
     LyricsToggled(bool),
     QueueChanged,
     Toast(String),
