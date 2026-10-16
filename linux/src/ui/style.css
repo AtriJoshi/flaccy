@@ -1200,3 +1200,26 @@ button.eq-capsule.running {
 textview.eq-import-text {
   font-size: 12px;
 }
+
+/* ---- stats deltas ------------------------------------------------------- */
+.delta-chip {
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 9999px;
+  padding: 0 8px;
+}
+
+.delta-up {
+  color: @accent_color;
+  background-color: alpha(@accent_bg_color, 0.16);
+}
+
+.delta-down {
+  color: @warning_color;
+  background-color: alpha(@warning_bg_color, 0.18);
+}
+
+.delta-even {
+  opacity: 0.6;
+  background-color: alpha(currentColor, 0.08);
+}

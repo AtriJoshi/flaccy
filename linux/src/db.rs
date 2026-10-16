@@ -1078,6 +1078,32 @@ impl Db {
         Ok(())
     }
 
+    /// Appends `rel_paths` to a playlist in the order given, in one transaction
+    /// so saving a few hundred songs is a single commit rather than one each.
+    pub fn add_tracks_to_playlist(
+        &self,
+        playlist_id: i64,
+        rel_paths: &[String],
+    ) -> Result<(), rusqlite::Error> {
+        let tx = self.conn.unchecked_transaction()?;
+        let next: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM playlistTracks WHERE playlistId = ?1",
+                params![playlist_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO playlistTracks (playlistId, trackFileURL, position) VALUES (?1, ?2, ?3)",
+            )?;
+            for (offset, rel_path) in rel_paths.iter().enumerate() {
+                stmt.execute(params![playlist_id, rel_path, next + offset as i64])?;
+            }
+        }
+        tx.commit()
+    }
+
     pub fn playlist_tracks(&self, playlist_id: i64) -> Vec<PlaylistTrackRow> {
         let Ok(mut stmt) = self.conn.prepare(
             "SELECT id, trackFileURL FROM playlistTracks
@@ -1296,6 +1322,104 @@ impl Db {
             Ok(rows) => rows.flatten().collect(),
             Err(_) => Vec::new(),
         }
+    }
+
+    pub fn has_scrobbles(&self) -> bool {
+        self.conn
+            .query_row("SELECT 1 FROM scrobbles LIMIT 1", [], |_| Ok(()))
+            .is_ok()
+    }
+
+    /// The scrobbles from `since_unix` onward, oldest first. The timestamp
+    /// column is indexed text in one fixed UTC format, so the range is a plain
+    /// index seek instead of a scan of the whole history.
+    pub fn fetch_scrobble_rows_since(&self, since_unix: i64) -> Vec<ScrobbleRow> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT trackTitle, artist, albumTitle, timestamp, duration
+             FROM scrobbles WHERE timestamp >= ?1 ORDER BY timestamp",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map(params![string_from_unix(since_unix)], |row| {
+            Ok(ScrobbleRow {
+                title: row.get(0)?,
+                artist: row.get(1)?,
+                album: row.get(2)?,
+                timestamp_unix: unix_from_string(&row.get::<_, String>(3)?),
+                duration: row.get(4)?,
+            })
+        });
+        match rows {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// How many plays, and how many seconds of them, fall in `[from, to)`.
+    pub fn scrobble_totals_between(&self, from_unix: i64, to_unix: i64) -> (i64, i64) {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(duration), 0) FROM scrobbles
+                 WHERE timestamp >= ?1 AND timestamp < ?2",
+                params![string_from_unix(from_unix), string_from_unix(to_unix)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap_or((0, 0))
+    }
+
+    /// The newest scrobble times strictly before `before_unix`, newest first,
+    /// at most `limit` of them: the feed for a streak, which only ever needs to
+    /// read back as far as its first gap.
+    pub fn scrobble_times_before(&self, before_unix: i64, limit: usize) -> Vec<i64> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT timestamp FROM scrobbles WHERE timestamp < ?1
+             ORDER BY timestamp DESC LIMIT ?2",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map(
+            params![string_from_unix(before_unix), limit as i64],
+            |row| Ok(unix_from_string(&row.get::<_, String>(0)?)),
+        );
+        match rows {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Plays per track since `since_unix` (all of history when `None`), keyed by
+    /// the case-folded `title\0artist` the rest of the app matches on. Grouped
+    /// by the database, so the cost is the number of distinct songs, not plays.
+    pub fn scrobble_counts_since(&self, since_unix: Option<i64>) -> HashMap<String, i64> {
+        let mut counts = HashMap::new();
+        let sql = if since_unix.is_some() {
+            "SELECT trackTitle, artist, COUNT(*) FROM scrobbles
+             WHERE timestamp >= ?1 GROUP BY trackTitle, artist"
+        } else {
+            "SELECT trackTitle, artist, COUNT(*) FROM scrobbles GROUP BY trackTitle, artist"
+        };
+        let Ok(mut stmt) = self.conn.prepare(sql) else {
+            return counts;
+        };
+        let map = |row: &rusqlite::Row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        };
+        let rows = match since_unix {
+            Some(since) => stmt.query_map(params![string_from_unix(since)], map),
+            None => stmt.query_map([], map),
+        };
+        if let Ok(rows) = rows {
+            for (title, artist, count) in rows.flatten() {
+                *counts
+                    .entry(crate::recap::track_key(&title, &artist))
+                    .or_insert(0) += count;
+            }
+        }
+        counts
     }
 
     pub fn play_counts_by_track(&self) -> Vec<(String, String, i64)> {
@@ -2674,6 +2798,149 @@ mod cleanup_tests {
 
         assert_eq!(db.insert_scrobbles_batch(&[]).expect("empty batch"), 0);
         assert_eq!(db.scrobble_count(), 5, "an empty batch is a no-op");
+    }
+
+    fn seed_scrobbles(db: &Db, plays: &[(&str, &str, i64, i64)]) {
+        let rows: Vec<(String, String, String, i64, i64, bool)> = plays
+            .iter()
+            .map(|(title, artist, at, duration)| {
+                (
+                    title.to_string(),
+                    artist.to_string(),
+                    "Album".to_string(),
+                    *at,
+                    *duration,
+                    true,
+                )
+            })
+            .collect();
+        db.insert_scrobbles_batch(&rows).expect("seed scrobbles");
+    }
+
+    #[test]
+    fn scrobble_range_queries_read_only_what_the_range_holds() {
+        let temp = TempDb::open();
+        let db = &temp.db;
+        seed_scrobbles(
+            db,
+            &[
+                ("Old", "A", 1_000_000_000, 100),
+                ("Mid", "A", 1_700_000_000, 120),
+                ("New", "B", 1_700_000_500, 180),
+            ],
+        );
+        let since: Vec<String> = db
+            .fetch_scrobble_rows_since(1_700_000_000)
+            .into_iter()
+            .map(|row| row.title)
+            .collect();
+        assert_eq!(
+            since,
+            vec!["Mid", "New"],
+            "oldest first, the bound inclusive"
+        );
+
+        assert_eq!(
+            db.scrobble_totals_between(1_700_000_000, 1_700_000_500),
+            (1, 120),
+            "the upper bound is exclusive"
+        );
+        assert_eq!(db.scrobble_totals_between(0, 2_000_000_000), (3, 400));
+
+        assert_eq!(
+            db.scrobble_times_before(1_700_000_500, 10),
+            vec![1_700_000_000, 1_000_000_000],
+            "newest first, strictly before the bound"
+        );
+        assert_eq!(
+            db.scrobble_times_before(2_000_000_000, 1),
+            vec![1_700_000_500]
+        );
+    }
+
+    #[test]
+    fn scrobble_counts_fold_case_and_honour_the_range() {
+        let temp = TempDb::open();
+        let db = &temp.db;
+        seed_scrobbles(
+            db,
+            &[
+                ("Song", "Artist", 1_000_000_000, 0),
+                ("Song", "Artist", 1_700_000_000, 0),
+                ("SONG", "ARTIST", 1_700_000_100, 0),
+                ("Other", "Artist", 1_700_000_200, 0),
+            ],
+        );
+        let key = crate::recap::track_key("Song", "Artist");
+        let all = db.scrobble_counts_since(None);
+        assert_eq!(all.get(&key), Some(&3), "different casings are one song");
+        let recent = db.scrobble_counts_since(Some(1_700_000_000));
+        assert_eq!(recent.get(&key), Some(&2));
+        assert_eq!(
+            recent.get(&crate::recap::track_key("Other", "Artist")),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn recap_load_reads_a_period_without_the_older_history() {
+        let temp = TempDb::open();
+        let db = &temp.db;
+        let now = 1_800_000_000;
+        let day = 86_400;
+        seed_scrobbles(
+            db,
+            &[
+                ("Undated", "A", 7, 60),
+                ("Ancient", "A", now - 900 * day, 60),
+                ("Prior", "A", now - 10 * day, 120),
+                ("Prior", "A", now - 9 * day, 120),
+                ("Now", "A", now - 3600, 180),
+                ("Now", "B", now - 60, 180),
+            ],
+        );
+        let week = crate::recap::load(db, crate::recap::Period::Week, now);
+        assert_eq!(week.total_plays, 2);
+        assert_eq!(week.total_minutes, 6);
+        assert_eq!(
+            week.previous,
+            Some(crate::recap::PreviousTotals {
+                plays: 2,
+                minutes: 4
+            })
+        );
+        assert_eq!(week.streak_days, 1);
+
+        let all = crate::recap::load(db, crate::recap::Period::AllTime, now);
+        assert_eq!(
+            all.total_plays, 6,
+            "All Time reads every row, undated included"
+        );
+        assert_eq!(all.previous, None);
+        assert_eq!(
+            all.heatmap.values().sum::<i64>(),
+            5,
+            "undated stays off the calendar"
+        );
+    }
+
+    #[test]
+    fn add_tracks_to_playlist_keeps_the_order_and_appends() {
+        let temp = TempDb::open();
+        let db = &temp.db;
+        let id = db.create_playlist("Mix").expect("playlist");
+        db.add_track_to_playlist(id, "first.flac").expect("first");
+        let more: Vec<String> = ["c.flac", "a.flac", "b.flac"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        db.add_tracks_to_playlist(id, &more).expect("batch");
+        let order: Vec<String> = db
+            .playlist_tracks(id)
+            .into_iter()
+            .map(|row| row.rel_path)
+            .collect();
+        assert_eq!(order, vec!["first.flac", "c.flac", "a.flac", "b.flac"]);
     }
 
     #[test]

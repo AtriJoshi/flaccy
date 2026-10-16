@@ -1,35 +1,93 @@
 use crate::chart_queue::ChartIndex;
-use crate::db::{Db, ScrobbleRow};
+use crate::db::Db;
 use crate::events::AppEvent;
 use crate::library::Track;
 use crate::recap::{self, Period, RecapData};
 use crate::ui::Ui;
 use adw::prelude::*;
 use chrono::Datelike;
+use flaccy_shared::library_filter::PeriodDelta;
+use flaccy_shared::load_progress::group_digits;
 use gtk::glib;
 use gtk::pango;
 use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 const HEATMAP_CELL: f64 = 13.0;
 const HEATMAP_GAP: f64 = 3.0;
 const HEATMAP_TOP: f64 = 18.0;
 
-struct StatsState {
+/// How strongly a calendar cell outside the selected period is drawn.
+const DIMMED_ALPHA: f64 = 0.35;
+
+/// The period Stats opens on every launch: a week answers "what have I been
+/// into", and it is the view that stays instant on any history.
+const DEFAULT_PERIOD: Period = Period::Week;
+
+/// How long Last.fm's server-side charts are reused before they are asked for
+/// again.
+const REMOTE_TTL: Duration = Duration::from_secs(600);
+
+const REMOTE_LIST_LIMIT: u32 = 10;
+
+type RankedList = Vec<(String, i64)>;
+
+/// Last.fm's own top lists for one period. Each list is optional because any of
+/// the three calls can fail or come back empty, and the local list stays in
+/// place of one that did.
+#[derive(Clone)]
+struct RemoteCharts {
+    artists: Option<RankedList>,
+    albums: Option<RankedList>,
+    tracks: Option<RankedList>,
+    fetched: Instant,
+}
+
+impl RemoteCharts {
+    fn is_fresh(&self) -> bool {
+        self.fetched.elapsed() < REMOTE_TTL
+    }
+
+    fn apply(&self, data: &mut RecapData) {
+        if let Some(artists) = &self.artists {
+            data.top_artists = artists.clone();
+        }
+        if let Some(albums) = &self.albums {
+            data.top_albums = albums.clone();
+        }
+        if let Some(tracks) = &self.tracks {
+            data.top_tracks = tracks.clone();
+        }
+    }
+}
+
+/// The Stats tab. The period bar, busy indicator and every section's slot are
+/// built once and refilled, so switching periods never blanks the page: the old
+/// content stays until the new snapshot is ready, and a period already seen is
+/// shown at once from `snapshots`.
+struct Page {
+    ui: Rc<Ui>,
     period: Cell<Period>,
-    data: RefCell<Option<Rc<RecapData>>>,
-    loading: Cell<bool>,
-    reload_wanted: Cell<bool>,
+    snapshots: RefCell<HashMap<Period, Rc<RecapData>>>,
+    remote: RefCell<HashMap<Period, RemoteCharts>>,
+    loading: RefCell<HashSet<Period>>,
+    remote_loading: RefCell<HashSet<Period>>,
+    epoch: Cell<u64>,
+    announced_local_only: Cell<bool>,
+    stack: gtk::Stack,
+    toggles: Vec<(Period, gtk::ToggleButton)>,
+    busy: gtk::Box,
+    busy_label: gtk::Label,
+    tiles: gtk::Box,
+    import: gtk::Box,
+    heatmap: gtk::Box,
+    clock: gtk::Box,
+    lists: gtk::Box,
 }
 
 pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
-    let state = Rc::new(StatsState {
-        period: Cell::new(Period::AllTime),
-        data: RefCell::new(None),
-        loading: Cell::new(false),
-        reload_wanted: Cell::new(false),
-    });
-
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(24)
@@ -69,21 +127,72 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         .build();
     ui.register_scroller(&scroll);
 
+    let loading_page = gtk::Spinner::builder()
+        .spinning(true)
+        .width_request(32)
+        .height_request(32)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+
     let stack = gtk::Stack::new();
     stack.set_hhomogeneous(false);
     stack.set_vhomogeneous(false);
+    stack.add_named(&loading_page, Some("loading"));
     stack.add_named(&empty, Some("empty"));
     stack.add_named(&scroll, Some("stats"));
+    stack.set_visible_child_name("loading");
 
-    let loader: Rc<RefCell<Option<Action>>> = Rc::new(RefCell::new(None));
-    let render = build_renderer(ui, &state, &loader, &content, &stack);
-    let reload = build_loader(ui, &state, &render);
-    *loader.borrow_mut() = Some(Rc::clone(&reload));
-    reload();
+    let slot = || {
+        gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .build()
+    };
+    let toggles: Vec<(Period, gtk::ToggleButton)> = recap::ALL_PERIODS
+        .iter()
+        .map(|period| (*period, gtk::ToggleButton::with_label(period.label())))
+        .collect();
+    let (busy, busy_label) = busy_indicator();
+    let lists = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(24)
+        .homogeneous(true)
+        .valign(gtk::Align::Start)
+        .build();
+    let page = Rc::new(Page {
+        ui: Rc::clone(ui),
+        period: Cell::new(DEFAULT_PERIOD),
+        snapshots: RefCell::new(HashMap::new()),
+        remote: RefCell::new(HashMap::new()),
+        loading: RefCell::new(HashSet::new()),
+        remote_loading: RefCell::new(HashSet::new()),
+        epoch: Cell::new(0),
+        announced_local_only: Cell::new(false),
+        stack: stack.clone(),
+        toggles,
+        busy,
+        busy_label,
+        tiles: slot(),
+        import: slot(),
+        heatmap: slot(),
+        clock: slot(),
+        lists,
+    });
 
-    let dirty = Rc::new(Cell::new(false));
+    content.append(&page.period_bar());
+    content.append(&page.tiles);
+    content.append(&actions_row(&page));
+    content.append(&page.import);
+    content.append(&section_title("STREAKS"));
+    content.append(&page.heatmap);
+    content.append(&section_title("LISTENING CLOCK"));
+    content.append(&page.clock);
+    content.append(&page.lists);
+    page.sync_toggles();
+
+    let dirty = Rc::new(Cell::new(true));
     {
-        let reload = Rc::clone(&reload);
+        let page = Rc::clone(&page);
         let dirty = Rc::clone(&dirty);
         let stack_ref = stack.clone();
         ui.core
@@ -91,14 +200,14 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
             .subscribe_widget(&stack, move |_, event| match event {
                 AppEvent::NaturalEnd(_) | AppEvent::LibraryReloaded => {
                     if stack_ref.is_mapped() {
-                        reload();
+                        page.invalidate();
                     } else {
                         dirty.set(true);
                     }
                 }
                 AppEvent::HistoryImport { done, .. } => {
                     if *done && stack_ref.is_mapped() {
-                        reload();
+                        page.invalidate();
                     } else if *done {
                         dirty.set(true);
                     }
@@ -107,10 +216,10 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
             });
     }
     {
-        let reload = Rc::clone(&reload);
+        let page = Rc::clone(&page);
         stack.connect_map(move |_| {
             if dirty.replace(false) {
-                reload();
+                page.invalidate();
             }
         });
     }
@@ -118,215 +227,374 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     stack.upcast()
 }
 
-type Action = Rc<dyn Fn()>;
+fn busy_indicator() -> (gtk::Box, gtk::Label) {
+    let busy = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    busy.append(&gtk::Spinner::builder().spinning(true).build());
+    let label = gtk::Label::new(None);
+    label.add_css_class("dim");
+    label.add_css_class("caption");
+    busy.append(&label);
+    (busy, label)
+}
 
-/// Loads scrobble rows off the GTK main loop, computes the recap for the
-/// selected period on the worker thread, and hands the result to the renderer.
-fn build_loader(ui: &Rc<Ui>, state: &Rc<StatsState>, render: &Action) -> Action {
-    let ui = Rc::clone(ui);
-    let state = Rc::clone(state);
-    let render = Rc::clone(render);
-    Rc::new(move || {
-        if state.loading.get() {
-            state.reload_wanted.set(true);
+impl Page {
+    fn period_bar(self: &Rc<Self>) -> gtk::Widget {
+        let bar = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(14)
+            .build();
+        let linked = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(6)
+            .halign(gtk::Align::Start)
+            .build();
+        linked.add_css_class("linked");
+        for (period, button) in &self.toggles {
+            let period = *period;
+            let page = Rc::clone(self);
+            button.connect_clicked(move |button| {
+                if page.period.get() == period {
+                    button.set_active(true);
+                    return;
+                }
+                page.select(period);
+            });
+            linked.append(button);
+        }
+        bar.append(&linked);
+        bar.append(&self.busy);
+        bar.upcast()
+    }
+
+    fn sync_toggles(&self) {
+        let current = self.period.get();
+        for (period, button) in &self.toggles {
+            button.set_active(*period == current);
+        }
+    }
+
+    fn select(self: &Rc<Self>, period: Period) {
+        self.period.set(period);
+        crate::logger::info("ui", &format!("stats period: {}", period.label()));
+        self.sync_toggles();
+        self.present();
+    }
+
+    /// Shows the current period from memory when it has been seen, otherwise
+    /// asks for it and leaves the page as it is until the answer lands.
+    fn present(self: &Rc<Self>) {
+        let period = self.period.get();
+        if self.snapshots.borrow().contains_key(&period) {
+            self.render();
+        } else {
+            self.load_local(period);
+        }
+        self.update_busy();
+    }
+
+    /// Forgets every snapshot (the history just changed) and refreshes what is
+    /// on screen without clearing it first.
+    fn invalidate(self: &Rc<Self>) {
+        self.epoch.set(self.epoch.get() + 1);
+        self.snapshots.borrow_mut().clear();
+        self.present();
+    }
+
+    fn load_local(self: &Rc<Self>, period: Period) {
+        if !self.loading.borrow_mut().insert(period) {
             return;
         }
-        state.loading.set(true);
-        let db_path = ui.core.db_path.clone();
-        let period = state.period.get();
-        let session = ui.core.session.borrow().clone();
+        let epoch = self.epoch.get();
+        let db_path = self.ui.core.db_path.clone();
         let (tx, rx) = async_channel::bounded::<Option<RecapData>>(1);
         std::thread::Builder::new()
             .name("flaccy-stats".into())
             .spawn(move || {
-                let data = Db::open(&db_path).ok().map(|db| {
-                    let rows: Vec<ScrobbleRow> = db.fetch_all_scrobble_rows();
-                    let mut data = recap::compute(&rows, period, chrono::Utc::now().timestamp());
-                    backfill_from_lastfm(&mut data, period, session.as_ref());
-                    data
-                });
+                let started = Instant::now();
+                let data = Db::open(&db_path)
+                    .ok()
+                    .map(|db| recap::load(&db, period, chrono::Utc::now().timestamp()));
+                crate::logger::info(
+                    "charts",
+                    &format!(
+                        "stats {} read in {} ms",
+                        period.label(),
+                        started.elapsed().as_millis()
+                    ),
+                );
                 let _ = tx.send_blocking(data);
             })
             .ok();
-        let state = Rc::clone(&state);
-        let render = Rc::clone(&render);
+        let page = Rc::clone(self);
         glib::spawn_future_local(async move {
             let data = rx.recv().await.ok().flatten();
-            state.loading.set(false);
-            *state.data.borrow_mut() = data.map(Rc::new);
-            state.reload_wanted.set(false);
-            render();
+            page.loading.borrow_mut().remove(&period);
+            let wanted = page.period.get() == period;
+            if page.epoch.get() != epoch {
+                if wanted {
+                    page.load_local(period);
+                }
+            } else if let Some(data) = data {
+                page.snapshots.borrow_mut().insert(period, Rc::new(data));
+                if wanted {
+                    page.render();
+                }
+            }
+            page.update_busy();
         });
-    })
-}
+    }
 
-/// Replaces the local top lists with Last.fm's server-side period charts when
-/// authenticated (iOS backfillFromNetwork): the server aggregates the full
-/// history, while local rows may be import-capped. Local lists remain the
-/// offline fallback whenever the network returns empty.
-fn backfill_from_lastfm(
-    data: &mut RecapData,
-    period: Period,
-    session: Option<&crate::config::Session>,
-) {
-    let Some(session) = session else {
-        crate::logger::info("charts", "charts: local stats only (not authenticated)");
-        return;
-    };
-    let Some(client) = crate::lastfm::LastFmClient::new(Some(session.key.clone())) else {
-        return;
-    };
-    let api_period = period.api_value();
-    match client.fetch_top_artists(&session.username, api_period, 10) {
-        Ok(artists) if !artists.is_empty() => {
-            data.top_artists = artists;
-            crate::logger::info(
-                "charts",
-                &format!("charts backfill: artists from Last.fm ({api_period})"),
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            crate::logger::warn("charts", &format!("charts backfill artists failed: {err}"))
-        }
+    fn update_busy(&self) {
+        let period = self.period.get();
+        let local = self.loading.borrow().contains(&period);
+        let remote = self.remote_loading.borrow().contains(&period);
+        self.busy.set_visible(local || remote);
+        self.busy_label.set_label(if remote && !local {
+            "Updating from Last.fm…"
+        } else {
+            ""
+        });
     }
-    match client.fetch_top_albums(&session.username, api_period, 10) {
-        Ok(albums) if !albums.is_empty() => {
-            data.top_albums = albums
-                .into_iter()
-                .map(|(album, artist, count, _)| (format!("{album} — {artist}"), count))
-                .collect();
-        }
-        Ok(_) => {}
-        Err(err) => crate::logger::warn("charts", &format!("charts backfill albums failed: {err}")),
-    }
-    match client.fetch_top_tracks(&session.username, api_period, 10) {
-        Ok(tracks) if !tracks.is_empty() => {
-            data.top_tracks = tracks
-                .into_iter()
-                .map(|(title, artist, count)| (format!("{title} — {artist}"), count))
-                .collect();
-        }
-        Ok(_) => {}
-        Err(err) => crate::logger::warn("charts", &format!("charts backfill tracks failed: {err}")),
-    }
-}
 
-fn build_renderer(
-    ui: &Rc<Ui>,
-    state: &Rc<StatsState>,
-    loader: &Rc<RefCell<Option<Action>>>,
-    content: &gtk::Box,
-    stack: &gtk::Stack,
-) -> Action {
-    let ui = Rc::clone(ui);
-    let state = Rc::clone(state);
-    let loader = Rc::clone(loader);
-    let content = content.clone();
-    let stack = stack.clone();
-    let render: Action = Rc::new(move || {
-        while let Some(child) = content.first_child() {
-            content.remove(&child);
-        }
-        let Some(data) = state.data.borrow().clone() else {
-            stack.set_visible_child_name("empty");
+    fn render(self: &Rc<Self>) {
+        let period = self.period.get();
+        let Some(snapshot) = self.snapshots.borrow().get(&period).cloned() else {
             return;
         };
-        let all_time_empty = state.period.get() == Period::AllTime && data.total_plays == 0;
-        if all_time_empty {
-            stack.set_visible_child_name("empty");
+        if !snapshot.has_history {
+            self.stack.set_visible_child_name("empty");
             return;
         }
-        stack.set_visible_child_name("stats");
+        self.stack.set_visible_child_name("stats");
+        replace_child(&self.tiles, &tiles_row(&snapshot, period));
+        replace_child(&self.import, &import_row(&self.ui));
+        replace_child(&self.heatmap, &heatmap_widget(&snapshot));
+        replace_child(&self.clock, &clock_widget(&snapshot));
+        self.fill_lists();
+        self.fetch_remote_if_due(period);
+    }
 
-        content.append(&period_picker(&state, &loader));
-        content.append(&tiles_row(&data));
-        content.append(&actions_row(&ui, &state));
-        content.append(&import_row(&ui));
+    /// The recap as the page shows it: the local snapshot with Last.fm's lists
+    /// laid over it when they have arrived.
+    fn current(&self) -> Option<(RecapData, Period)> {
+        let period = self.period.get();
+        let mut data = (*self.snapshots.borrow().get(&period)?.clone()).clone();
+        if let Some(remote) = self.remote.borrow().get(&period) {
+            remote.apply(&mut data);
+        }
+        Some((data, period))
+    }
 
-        content.append(&section_title("STREAKS"));
-        content.append(&heatmap_widget(&data));
-
-        content.append(&section_title("LISTENING CLOCK"));
-        content.append(&clock_widget(&data));
-
-        let library = ui.core.library.borrow().clone();
+    fn fill_lists(self: &Rc<Self>) {
+        let Some((data, _)) = self.current() else {
+            return;
+        };
+        while let Some(child) = self.lists.first_child() {
+            self.lists.remove(&child);
+        }
+        let library = self.ui.core.library.borrow().clone();
         let index = ChartIndex::new(&library);
-        let lists = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(24)
-            .homogeneous(true)
-            .valign(gtk::Align::Start)
-            .build();
-        lists.append(&top_list(
-            &ui,
+        self.lists.append(&top_list(
+            &self.ui,
             "TOP ARTISTS",
             &data.top_artists,
             ChartKind::Artists,
             &index,
         ));
-        lists.append(&top_list(
-            &ui,
+        self.lists.append(&top_list(
+            &self.ui,
             "TOP ALBUMS",
             &data.top_albums,
             ChartKind::Albums,
             &index,
         ));
-        lists.append(&top_list(
-            &ui,
+        self.lists.append(&top_list(
+            &self.ui,
             "TOP TRACKS",
             &data.top_tracks,
             ChartKind::Tracks,
             &index,
         ));
-        content.append(&lists);
-    });
-    render
-}
-
-fn period_picker(state: &Rc<StatsState>, loader: &Rc<RefCell<Option<Action>>>) -> gtk::Widget {
-    let row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(6)
-        .halign(gtk::Align::Start)
-        .build();
-    row.add_css_class("linked");
-    for period in recap::ALL_PERIODS {
-        let button = gtk::ToggleButton::with_label(period.label());
-        button.set_active(state.period.get() == period);
-        let state = Rc::clone(state);
-        let loader = Rc::clone(loader);
-        button.connect_clicked(move |button| {
-            if state.period.get() == period {
-                button.set_active(true);
-                return;
-            }
-            state.period.set(period);
-            crate::logger::info("ui", &format!("stats period: {}", period.label()));
-            if let Some(reload) = loader.borrow().clone() {
-                reload();
-            }
-        });
-        row.append(&button);
     }
-    row.upcast()
+
+    /// Asks Last.fm for its server-side charts without holding anything up:
+    /// the local lists are already on screen and swap in place when these land.
+    fn fetch_remote_if_due(self: &Rc<Self>, period: Period) {
+        let Some(session) = self.ui.core.session.borrow().clone() else {
+            if !self.announced_local_only.replace(true) {
+                crate::logger::info("charts", "charts: local stats only (not authenticated)");
+            }
+            return;
+        };
+        if self
+            .remote
+            .borrow()
+            .get(&period)
+            .is_some_and(RemoteCharts::is_fresh)
+        {
+            return;
+        }
+        if !self.remote_loading.borrow_mut().insert(period) {
+            return;
+        }
+        self.update_busy();
+        let (tx, rx) = async_channel::bounded::<Option<RemoteCharts>>(1);
+        std::thread::Builder::new()
+            .name("flaccy-charts".into())
+            .spawn(move || {
+                let _ = tx.send_blocking(fetch_remote_charts(&session, period));
+            })
+            .ok();
+        let page = Rc::clone(self);
+        glib::spawn_future_local(async move {
+            let charts = rx.recv().await.ok().flatten();
+            page.remote_loading.borrow_mut().remove(&period);
+            if let Some(charts) = charts {
+                page.remote.borrow_mut().insert(period, charts);
+                if page.period.get() == period {
+                    page.fill_lists();
+                }
+            }
+            page.update_busy();
+        });
+    }
 }
 
-fn tiles_row(data: &RecapData) -> gtk::Widget {
+fn replace_child(slot: &gtk::Box, child: &gtk::Widget) {
+    while let Some(old) = slot.first_child() {
+        slot.remove(&old);
+    }
+    slot.append(child);
+}
+
+/// Last.fm's top artists, albums and tracks for the period, fetched together
+/// rather than one after another (iOS backfillFromNetwork): the server
+/// aggregates the whole history, which covers listening done on other devices.
+fn fetch_remote_charts(session: &crate::config::Session, period: Period) -> Option<RemoteCharts> {
+    let client = crate::lastfm::LastFmClient::new(Some(session.key.clone()))?;
+    let api_period = period.api_value();
+    let username = session.username.as_str();
+    let (artists, albums, tracks) = std::thread::scope(|scope| {
+        let artists =
+            scope.spawn(|| client.fetch_top_artists(username, api_period, REMOTE_LIST_LIMIT));
+        let albums =
+            scope.spawn(|| client.fetch_top_albums(username, api_period, REMOTE_LIST_LIMIT));
+        let tracks =
+            scope.spawn(|| client.fetch_top_tracks(username, api_period, REMOTE_LIST_LIMIT));
+        (artists.join(), albums.join(), tracks.join())
+    });
+    crate::logger::info(
+        "charts",
+        &format!("charts backfill: Last.fm ({api_period})"),
+    );
+    Some(RemoteCharts {
+        artists: usable_list("artists", artists),
+        albums: usable_list("albums", albums).map(|albums| {
+            albums
+                .into_iter()
+                .map(|(album, artist, count, _)| (format!("{album} — {artist}"), count))
+                .collect()
+        }),
+        tracks: usable_list("tracks", tracks).map(|tracks| {
+            tracks
+                .into_iter()
+                .map(|(title, artist, count)| (format!("{title} — {artist}"), count))
+                .collect()
+        }),
+        fetched: Instant::now(),
+    })
+}
+
+/// A fetched list when it is worth showing; `None` for a failure (logged) or an
+/// empty answer, either of which leaves the local list in place.
+fn usable_list<T>(
+    what: &str,
+    result: std::thread::Result<Result<Vec<T>, String>>,
+) -> Option<Vec<T>> {
+    match result {
+        Ok(Ok(list)) if !list.is_empty() => Some(list),
+        Ok(Ok(_)) | Err(_) => None,
+        Ok(Err(err)) => {
+            crate::logger::warn("charts", &format!("charts backfill {what} failed: {err}"));
+            None
+        }
+    }
+}
+
+fn tiles_row(data: &RecapData, period: Period) -> gtk::Widget {
     let tiles = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .spacing(14)
         .homogeneous(true)
         .build();
-    tiles.append(&stat_tile(&format_count(data.total_plays), "PLAYS"));
-    tiles.append(&stat_tile(&format_count(data.total_minutes), "MINUTES"));
-    tiles.append(&stat_tile(&data.streak_days.to_string(), "DAY STREAK"));
-    tiles.append(&stat_tile(data.persona, "PERSONA"));
+    let window = period.previous_label();
+    let previous = data.previous;
+    tiles.append(&stat_tile(
+        &format_count(data.total_plays),
+        "PLAYS",
+        delta_chip(
+            previous.map(|p| p.plays),
+            data.total_plays,
+            "plays",
+            window.as_deref(),
+        ),
+    ));
+    tiles.append(&stat_tile(
+        &format_count(data.total_minutes),
+        "MINUTES",
+        delta_chip(
+            previous.map(|p| p.minutes),
+            data.total_minutes,
+            "minutes",
+            window.as_deref(),
+        ),
+    ));
+    tiles.append(&stat_tile(
+        &data.streak_days.to_string(),
+        "DAY STREAK",
+        None,
+    ));
+    tiles.append(&stat_tile(data.persona, "PERSONA", None));
     tiles.upcast()
 }
 
+/// The "▲ 12%" chip beside a tile's caption, with the raw numbers in its
+/// tooltip. `None` when there is no previous window (All Time) or nothing to
+/// compare.
+fn delta_chip(
+    previous: Option<i64>,
+    current: i64,
+    unit: &str,
+    window: Option<&str>,
+) -> Option<gtk::Widget> {
+    let previous = previous?;
+    let delta = PeriodDelta::compare(current, previous);
+    let text = delta.chip_text()?;
+    let class = match delta {
+        PeriodDelta::Up(_) | PeriodDelta::New => "delta-up",
+        PeriodDelta::Down(_) => "delta-down",
+        PeriodDelta::Even | PeriodDelta::None => "delta-even",
+    };
+    let chip = gtk::Label::new(Some(&text));
+    chip.add_css_class("delta-chip");
+    chip.add_css_class(class);
+    chip.set_valign(gtk::Align::Center);
+    chip.set_tooltip_text(Some(&format!(
+        "{} {unit} · {} in the {}",
+        group_digits(current.max(0) as usize),
+        group_digits(previous.max(0) as usize),
+        window.unwrap_or("previous period"),
+    )));
+    Some(chip.upcast())
+}
+
 /// Share-card and Year in Music entry points for the current recap.
-fn actions_row(ui: &Rc<Ui>, state: &Rc<StatsState>) -> gtk::Widget {
+fn actions_row(page: &Rc<Page>) -> gtk::Widget {
     let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
         .spacing(10)
@@ -335,14 +603,15 @@ fn actions_row(ui: &Rc<Ui>, state: &Rc<StatsState>) -> gtk::Widget {
     let share = gtk::Button::with_label("Share Card");
     share.add_css_class("pill");
     share.set_tooltip_text(Some("Export this recap as a 1080×1350 image"));
+    let ui = Rc::clone(&page.ui);
     {
-        let ui = Rc::clone(ui);
-        let state = Rc::clone(state);
+        let ui = Rc::clone(&ui);
+        let page = Rc::clone(page);
         share.connect_clicked(move |_| {
-            let Some(data) = state.data.borrow().clone() else {
+            let Some((owned, period)) = page.current() else {
                 return;
             };
-            let period_name = state.period.get().display_name();
+            let period_name = period.display_name();
             let username = ui
                 .core
                 .session
@@ -350,7 +619,6 @@ fn actions_row(ui: &Rc<Ui>, state: &Rc<StatsState>) -> gtk::Widget {
                 .as_ref()
                 .map(|s| s.username.clone());
             let (tx, rx) = async_channel::bounded::<Option<Vec<u8>>>(1);
-            let owned = (*data).clone();
             std::thread::Builder::new()
                 .name("flaccy-card".into())
                 .spawn(move || {
@@ -374,7 +642,7 @@ fn actions_row(ui: &Rc<Ui>, state: &Rc<StatsState>) -> gtk::Widget {
     let yim = gtk::Button::with_label("Year in Music");
     yim.add_css_class("pill");
     {
-        let ui = Rc::clone(ui);
+        let ui = Rc::clone(&ui);
         yim.connect_clicked(move |_| {
             let db_path = ui.core.db_path.clone();
             let (tx, rx) = async_channel::bounded::<Vec<i32>>(1);
@@ -494,9 +762,9 @@ fn import_row(ui: &Rc<Ui>) -> gtk::Widget {
 /// and a hover tooltip showing the per-day play count.
 fn heatmap_widget(data: &Rc<RecapData>) -> gtk::Widget {
     let now = chrono::Utc::now().timestamp();
-    let Some(grid) = recap::heatmap_grid(&data.heatmap, now) else {
+    let Some(grid) = recap::heatmap_grid(data.heatmap_start, now) else {
         let label = gtk::Label::builder()
-            .label("No plays in this period yet.")
+            .label("No dated plays yet.")
             .xalign(0.0)
             .build();
         label.add_css_class("dim");
@@ -547,8 +815,11 @@ fn heatmap_widget(data: &Rc<RecapData>) -> gtk::Widget {
                     if count == 0 {
                         cr.set_source_rgba(fg_r, fg_g, fg_b, 0.06);
                     } else {
+                        let outside = data.period_start.is_some_and(|start| date < start);
                         let fraction = count as f64 / max_count as f64;
-                        cr.set_source_rgba(tint.0, tint.1, tint.2, 0.25 + 0.65 * fraction);
+                        let alpha = 0.25 + 0.65 * fraction;
+                        let alpha = if outside { alpha * DIMMED_ALPHA } else { alpha };
+                        cr.set_source_rgba(tint.0, tint.1, tint.2, alpha);
                     }
                     rounded_rect(cr, x, y, HEATMAP_CELL, HEATMAP_CELL, HEATMAP_CELL * 0.28);
                     let _ = cr.fill();
@@ -665,7 +936,7 @@ fn format_count(value: i64) -> String {
     }
 }
 
-fn stat_tile(value: &str, caption: &str) -> gtk::Widget {
+fn stat_tile(value: &str, caption: &str, delta: Option<gtk::Widget>) -> gtk::Widget {
     let tile = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(4)
@@ -678,9 +949,17 @@ fn stat_tile(value: &str, caption: &str) -> gtk::Widget {
         .build();
     value_label.add_css_class("stat-value");
     tile.append(&value_label);
+    let caption_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
     let caption_label = gtk::Label::builder().label(caption).xalign(0.0).build();
     caption_label.add_css_class("stat-caption");
-    tile.append(&caption_label);
+    caption_row.append(&caption_label);
+    if let Some(delta) = delta {
+        caption_row.append(&delta);
+    }
+    tile.append(&caption_row);
     tile.upcast()
 }
 

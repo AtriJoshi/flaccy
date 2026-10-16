@@ -319,6 +319,10 @@ mod tests {
             streak_days: 12,
             persona: "Devotee",
             heatmap: HashMap::new(),
+            heatmap_start: None,
+            period_start: None,
+            previous: None,
+            has_history: true,
         }
     }
 

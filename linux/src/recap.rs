@@ -1,8 +1,23 @@
-use crate::db::ScrobbleRow;
+use crate::db::{Db, ScrobbleRow};
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Scrobbles stamped before this (2002-01-01 UTC, the year Last.fm launched)
+/// carry no real date: an old scrobbler submitted a zero timestamp, so the
+/// plays count but they belong on no calendar, clock face or streak.
+pub const MIN_DATED_UNIX: i64 = 1_009_843_200;
+
+/// Weeks the streak calendar spans when a period is selected.
+const HEATMAP_WEEKS: i64 = 53;
+
+/// How far back a period's rows are fetched so the calendar can fill its full
+/// width: the 53 weeks plus the days of the current week already past.
+const HEATMAP_FETCH_DAYS: i64 = HEATMAP_WEEKS * 7 + 6;
+
+/// Scrobble times read per round while walking back through a streak.
+const STREAK_CHUNK: usize = 2_000;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Period {
     Week,
     Month,
@@ -56,17 +71,32 @@ impl Period {
         }
     }
 
-    pub fn cutoff_unix(self, now_unix: i64) -> Option<i64> {
-        let days = match self {
-            Period::Week => 7,
-            Period::Month => 30,
-            Period::ThreeMonths => 90,
-            Period::SixMonths => 180,
-            Period::Year => 365,
-            Period::AllTime => return None,
-        };
-        Some(now_unix - days * 86_400)
+    pub fn span_days(self) -> Option<i64> {
+        match self {
+            Period::Week => Some(7),
+            Period::Month => Some(30),
+            Period::ThreeMonths => Some(90),
+            Period::SixMonths => Some(180),
+            Period::Year => Some(365),
+            Period::AllTime => None,
+        }
     }
+
+    pub fn cutoff_unix(self, now_unix: i64) -> Option<i64> {
+        self.span_days().map(|days| now_unix - days * 86_400)
+    }
+
+    /// The window the tile deltas compare against, as the tooltip names it.
+    pub fn previous_label(self) -> Option<String> {
+        self.span_days().map(|days| format!("previous {days} days"))
+    }
+}
+
+/// What the preceding window of equal length held, for the tile deltas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreviousTotals {
+    pub plays: i64,
+    pub minutes: i64,
 }
 
 #[derive(Clone)]
@@ -80,17 +110,70 @@ pub struct RecapData {
     pub streak_days: i64,
     pub persona: &'static str,
     pub heatmap: HashMap<NaiveDate, i64>,
+    /// The Sunday the streak calendar starts on: 53 weeks back for a period,
+    /// the first dated play for All Time. `None` when there is nothing dated.
+    pub heatmap_start: Option<NaiveDate>,
+    /// Cells before this day fall outside the selected period and are drawn
+    /// dimmed. `None` for the periods that fill the whole calendar.
+    pub period_start: Option<NaiveDate>,
+    pub previous: Option<PreviousTotals>,
+    /// Whether any scrobble exists at all, so a quiet week can read as a quiet
+    /// week and only a library that has never been listened to gets the
+    /// first-run page.
+    pub has_history: bool,
 }
 
-pub fn compute(all_rows: &[ScrobbleRow], period: Period, now_unix: i64) -> RecapData {
-    let scoped: Vec<&ScrobbleRow> = match period.cutoff_unix(now_unix) {
-        Some(cutoff) => all_rows
-            .iter()
-            .filter(|r| r.timestamp_unix >= cutoff)
-            .collect(),
-        None => all_rows.iter().collect(),
+/// Everything the Stats tab shows for one period, read with as little of the
+/// history as the period needs: a period seeks its index range, the streak
+/// walks back only to its first gap, and only All Time reads every row.
+pub fn load(db: &Db, period: Period, now: i64) -> RecapData {
+    let rows = match fetch_floor(period, now) {
+        Some(floor) => db.fetch_scrobble_rows_since(floor),
+        None => db.fetch_all_scrobble_rows(),
     };
-    let clock = listening_clock(&scoped);
+    let streak = current_streak(|before| db.scrobble_times_before(before, STREAK_CHUNK), now);
+    let previous = period
+        .cutoff_unix(now)
+        .zip(period.span_days())
+        .map(|(cutoff, days)| {
+            let (plays, seconds) = db.scrobble_totals_between(cutoff - days * 86_400, cutoff);
+            PreviousTotals {
+                plays,
+                minutes: seconds / 60,
+            }
+        });
+    let mut data = compute(&rows, period, now, streak, previous);
+    data.has_history = data.has_history || db.has_scrobbles();
+    data
+}
+
+/// The oldest scrobble a period's recap has to read, `None` for All Time.
+fn fetch_floor(period: Period, now: i64) -> Option<i64> {
+    period.span_days()?;
+    Some(now - HEATMAP_FETCH_DAYS * 86_400)
+}
+
+/// Builds the recap from `rows`, which must reach back at least as far as
+/// `fetch_floor` and run oldest first. `streak_days` and `previous` come from
+/// the database because neither can be read off a period's rows.
+pub fn compute(
+    rows: &[ScrobbleRow],
+    period: Period,
+    now_unix: i64,
+    streak_days: i64,
+    previous: Option<PreviousTotals>,
+) -> RecapData {
+    let scoped: Vec<&ScrobbleRow> = match period.cutoff_unix(now_unix) {
+        Some(cutoff) => rows.iter().filter(|r| r.timestamp_unix >= cutoff).collect(),
+        None => rows.iter().collect(),
+    };
+    let dated: Vec<&ScrobbleRow> = scoped
+        .iter()
+        .copied()
+        .filter(|r| r.timestamp_unix >= MIN_DATED_UNIX)
+        .collect();
+    let clock = listening_clock(&dated);
+    let heatmap_start = heatmap_start(period, rows, now_unix);
     RecapData {
         total_plays: scoped.len() as i64,
         total_minutes: scoped.iter().map(|r| r.duration).sum::<i64>() / 60,
@@ -98,9 +181,33 @@ pub fn compute(all_rows: &[ScrobbleRow], period: Period, now_unix: i64) -> Recap
         top_albums: top_by(&scoped, |r| format!("{} — {}", r.album, r.artist), 10),
         top_tracks: top_by(&scoped, |r| format!("{} — {}", r.title, r.artist), 10),
         clock,
-        streak_days: streak_days(all_rows, now_unix),
+        streak_days,
         persona: persona(&scoped, &clock),
-        heatmap: day_heatmap(&scoped),
+        heatmap: day_heatmap(rows, heatmap_start),
+        heatmap_start,
+        period_start: dimmed_before(period, now_unix),
+        previous,
+        has_history: !rows.is_empty(),
+    }
+}
+
+fn sunday_on_or_before(date: NaiveDate) -> NaiveDate {
+    date - chrono::Duration::days(date.weekday().num_days_from_sunday() as i64)
+}
+
+fn heatmap_start(period: Period, rows: &[ScrobbleRow], now_unix: i64) -> Option<NaiveDate> {
+    if period == Period::AllTime {
+        let first = rows.iter().find(|r| r.timestamp_unix >= MIN_DATED_UNIX)?;
+        return Some(sunday_on_or_before(local_date(first.timestamp_unix)));
+    }
+    Some(sunday_on_or_before(local_date(now_unix)) - chrono::Duration::weeks(HEATMAP_WEEKS - 1))
+}
+
+/// The first day inside the period, when the calendar shows days outside it.
+fn dimmed_before(period: Period, now_unix: i64) -> Option<NaiveDate> {
+    match period {
+        Period::Year | Period::AllTime => None,
+        _ => period.cutoff_unix(now_unix).map(local_date),
     }
 }
 
@@ -144,27 +251,57 @@ fn listening_clock(rows: &[&ScrobbleRow]) -> [i64; 24] {
     buckets
 }
 
-pub fn streak_days(rows: &[ScrobbleRow], now_unix: i64) -> i64 {
-    if rows.is_empty() {
-        return 0;
-    }
-    let days: HashSet<NaiveDate> = rows.iter().map(|r| local_date(r.timestamp_unix)).collect();
+/// Consecutive listening days ending today, read newest first in rounds of
+/// `times_before(t)` (the newest scrobble times strictly before `t`) so a streak
+/// costs the plays inside it rather than the whole history. No play today means
+/// no streak.
+pub fn current_streak(mut times_before: impl FnMut(i64) -> Vec<i64>, now_unix: i64) -> i64 {
+    let today = local_date(now_unix);
     let mut streak = 0;
-    let mut day = local_date(now_unix);
-    while days.contains(&day) {
-        streak += 1;
-        match day.pred_opt() {
-            Some(previous) => day = previous,
-            None => break,
+    let mut last: Option<NaiveDate> = None;
+    let mut before = now_unix + 1;
+    loop {
+        let chunk = times_before(before);
+        for &time in &chunk {
+            if time < MIN_DATED_UNIX {
+                return streak;
+            }
+            let day = local_date(time);
+            if day > today {
+                continue;
+            }
+            match last {
+                None if day == today => {
+                    streak = 1;
+                    last = Some(day);
+                }
+                None => return 0,
+                Some(counted) if day == counted => {}
+                Some(counted) if counted.pred_opt() == Some(day) => {
+                    streak += 1;
+                    last = Some(day);
+                }
+                Some(_) => return streak,
+            }
+        }
+        match chunk.last() {
+            Some(&oldest) if chunk.len() >= STREAK_CHUNK => before = oldest,
+            _ => return streak,
         }
     }
-    streak
 }
 
-fn day_heatmap(rows: &[&ScrobbleRow]) -> HashMap<NaiveDate, i64> {
+/// Plays per local day for every dated row from `start` on.
+fn day_heatmap(rows: &[ScrobbleRow], start: Option<NaiveDate>) -> HashMap<NaiveDate, i64> {
     let mut map = HashMap::new();
-    for row in rows {
-        *map.entry(local_date(row.timestamp_unix)).or_insert(0) += 1;
+    let Some(start) = start else {
+        return map;
+    };
+    for row in rows.iter().filter(|r| r.timestamp_unix >= MIN_DATED_UNIX) {
+        let day = local_date(row.timestamp_unix);
+        if day >= start {
+            *map.entry(day).or_insert(0) += 1;
+        }
     }
     map
 }
@@ -198,18 +335,15 @@ pub fn persona(rows: &[&ScrobbleRow], clock: &[i64; 24]) -> &'static str {
 }
 
 /// Heatmap grid layout: 7 day-of-week rows (Sunday first) × week columns from
-/// the earliest datum to the current week, GitHub-style.
+/// the calendar's start to the current week, GitHub-style.
 pub struct HeatmapGrid {
     pub start_sunday: NaiveDate,
     pub weeks: usize,
 }
 
-pub fn heatmap_grid(heatmap: &HashMap<NaiveDate, i64>, now_unix: i64) -> Option<HeatmapGrid> {
-    let earliest = heatmap.keys().min().copied()?;
-    let today = local_date(now_unix);
-    let start_sunday =
-        earliest - chrono::Duration::days(earliest.weekday().num_days_from_sunday() as i64);
-    let end_sunday = today - chrono::Duration::days(today.weekday().num_days_from_sunday() as i64);
+pub fn heatmap_grid(start_sunday: Option<NaiveDate>, now_unix: i64) -> Option<HeatmapGrid> {
+    let start_sunday = start_sunday?;
+    let end_sunday = sunday_on_or_before(local_date(now_unix));
     let weeks = ((end_sunday - start_sunday).num_days() / 7 + 1).max(1) as usize;
     Some(HeatmapGrid {
         start_sunday,
@@ -247,6 +381,7 @@ pub fn track_key(title: &str, artist: &str) -> String {
 pub fn scrobble_years(rows: &[ScrobbleRow]) -> Vec<i32> {
     let mut years: Vec<i32> = rows
         .iter()
+        .filter(|r| r.timestamp_unix >= MIN_DATED_UNIX)
         .map(|r| local_date(r.timestamp_unix).year())
         .collect::<HashSet<_>>()
         .into_iter()
@@ -441,37 +576,152 @@ mod tests {
         assert_eq!(persona(&refs, &clock), "Devotee");
     }
 
+    fn streak_over(times: &[i64], now: i64) -> i64 {
+        let mut sorted = times.to_vec();
+        sorted.sort_unstable_by(|a, b| b.cmp(a));
+        current_streak(
+            |before| {
+                sorted
+                    .iter()
+                    .copied()
+                    .filter(|t| *t < before)
+                    .take(STREAK_CHUNK)
+                    .collect()
+            },
+            now,
+        )
+    }
+
     #[test]
     fn streak_counts_consecutive_days_ending_today() {
         let now = chrono::Utc::now().timestamp();
-        let rows = vec![
-            row("a", "x", now),
-            row("b", "x", now - 86_400),
-            row("c", "x", now - 2 * 86_400),
-            row("d", "x", now - 5 * 86_400),
-        ];
-        assert_eq!(streak_days(&rows, now), 3);
+        let times = [now, now - 86_400, now - 2 * 86_400, now - 5 * 86_400];
+        assert_eq!(streak_over(&times, now), 3);
     }
 
     #[test]
     fn streak_zero_when_not_today() {
         let now = chrono::Utc::now().timestamp();
-        let rows = vec![row("a", "x", now - 3 * 86_400)];
-        assert_eq!(streak_days(&rows, now), 0);
+        assert_eq!(streak_over(&[now - 3 * 86_400], now), 0);
+    }
+
+    #[test]
+    fn streak_counts_a_day_once_however_many_plays_it_holds() {
+        let now = chrono::Utc::now().timestamp();
+        let times = [now, now - 60, now - 120, now - 86_400, now - 86_460];
+        assert_eq!(streak_over(&times, now), 2);
+    }
+
+    #[test]
+    fn streak_reads_across_rounds_and_stops_at_the_first_gap() {
+        let now = chrono::Utc::now().timestamp();
+        let times: Vec<i64> = (0..STREAK_CHUNK as i64 * 2 + 50)
+            .map(|i| now - i * 43_200)
+            .collect();
+        let days = streak_over(&times, now);
+        assert!(days > 1_000, "the streak spans several rounds, got {days}");
+        let mut with_gap = times.clone();
+        with_gap.retain(|t| *t > now - 10 * 86_400 || *t < now - 12 * 86_400);
+        assert!(streak_over(&with_gap, now) <= 10);
+    }
+
+    #[test]
+    fn streak_ignores_undated_plays_and_a_future_clock() {
+        let now = chrono::Utc::now().timestamp();
+        let times = [now + 3 * 86_400, now, 5, 4, 3];
+        assert_eq!(streak_over(&times, now), 1);
     }
 
     #[test]
     fn period_scoping_filters_rows() {
         let now = 1_800_000_000;
         let rows = vec![
-            row("new", "x", now - 86_400),
             row("old", "x", now - 400 * 86_400),
+            row("new", "x", now - 86_400),
         ];
-        let week = compute(&rows, Period::Week, now);
+        let week = compute(&rows, Period::Week, now, 0, None);
         assert_eq!(week.total_plays, 1);
-        let all = compute(&rows, Period::AllTime, now);
+        let all = compute(&rows, Period::AllTime, now, 0, None);
         assert_eq!(all.total_plays, 2);
         assert_eq!(all.total_minutes, 8);
+    }
+
+    #[test]
+    fn undated_plays_count_but_never_reach_the_calendar_or_the_clock() {
+        let now = 1_800_000_000;
+        let rows = vec![
+            row("a", "x", 1),
+            row("b", "x", 2),
+            row("c", "x", now - 86_400),
+        ];
+        let all = compute(&rows, Period::AllTime, now, 0, None);
+        assert_eq!(all.total_plays, 3, "Last.fm counts them, so do the totals");
+        assert_eq!(all.top_tracks.len(), 3);
+        assert_eq!(
+            all.clock.iter().sum::<i64>(),
+            1,
+            "only the dated play is on the clock"
+        );
+        assert_eq!(all.heatmap.values().sum::<i64>(), 1);
+        let grid = heatmap_grid(all.heatmap_start, now).expect("grid");
+        assert!(
+            grid.weeks <= 2,
+            "the calendar starts at the first dated play, got {}",
+            grid.weeks
+        );
+    }
+
+    #[test]
+    fn a_period_calendar_spans_53_weeks_and_dims_what_the_period_excludes() {
+        let now = 1_800_000_000;
+        let rows = vec![
+            row("old", "x", now - 200 * 86_400),
+            row("new", "x", now - 86_400),
+        ];
+        let week = compute(&rows, Period::Week, now, 0, None);
+        let grid = heatmap_grid(week.heatmap_start, now).expect("grid");
+        assert_eq!(grid.weeks, 53);
+        assert_eq!(grid.start_sunday.weekday().num_days_from_sunday(), 0);
+        assert_eq!(
+            week.heatmap.values().sum::<i64>(),
+            2,
+            "plays outside the period still fill the calendar"
+        );
+        assert_eq!(week.total_plays, 1);
+        assert_eq!(week.period_start, Some(local_date(now - 7 * 86_400)));
+        let year = compute(&rows, Period::Year, now, 0, None);
+        assert_eq!(
+            year.period_start, None,
+            "12 months fills the calendar, nothing to dim"
+        );
+        let all = compute(&rows, Period::AllTime, now, 0, None);
+        assert_eq!(all.period_start, None);
+    }
+
+    #[test]
+    fn fetch_floor_only_exists_for_a_period() {
+        let now = 1_800_000_000;
+        assert_eq!(fetch_floor(Period::AllTime, now), None);
+        let floor = fetch_floor(Period::Week, now).expect("floor");
+        let start = heatmap_start(Period::Week, &[], now).expect("start");
+        assert!(
+            local_date(floor) <= start,
+            "the floor reaches the calendar's first day"
+        );
+        assert!(floor < Period::Year.cutoff_unix(now).expect("cutoff"));
+    }
+
+    #[test]
+    fn previous_label_names_the_window_in_days() {
+        assert_eq!(
+            Period::Week.previous_label().as_deref(),
+            Some("previous 7 days")
+        );
+        assert_eq!(
+            Period::Year.previous_label().as_deref(),
+            Some("previous 365 days")
+        );
+        assert_eq!(Period::AllTime.previous_label(), None);
     }
 
     #[test]
@@ -563,11 +813,10 @@ mod tests {
     #[test]
     fn heatmap_grid_spans_weeks() {
         let now = 1_800_000_000;
-        let mut map = HashMap::new();
-        map.insert(local_date(now - 30 * 86_400), 3);
-        map.insert(local_date(now), 1);
-        let grid = heatmap_grid(&map, now).expect("grid");
+        let start = sunday_on_or_before(local_date(now - 30 * 86_400));
+        let grid = heatmap_grid(Some(start), now).expect("grid");
         assert!(grid.weeks >= 5 && grid.weeks <= 6, "weeks = {}", grid.weeks);
         assert_eq!(grid.start_sunday.weekday().num_days_from_sunday(), 0);
+        assert!(heatmap_grid(None, now).is_none());
     }
 }
