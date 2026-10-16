@@ -14,7 +14,7 @@ final class MacEqualizerWindowController: NSWindowController, NSWindowDelegate {
 
     private convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1080, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -33,7 +33,7 @@ final class MacEqualizerWindowController: NSWindowController, NSWindowDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(interfaceScaleChanged), name: .flaccyInterfaceScaleChanged, object: nil)
     }
 
-    private static let baseMinimumSize = NSSize(width: 940, height: 640)
+    private static let baseMinimumSize = NSSize(width: 1200, height: 700)
 
     private static func minimumSize(at scale: CGFloat) -> NSSize {
         let grown = NSSize(width: baseMinimumSize.width * scale, height: baseMinimumSize.height * scale)
