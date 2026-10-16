@@ -118,4 +118,11 @@ final class ArtworkFramingTests: XCTestCase {
         XCTAssertEqual(panned.centerY, 4000 - 500, accuracy: 1e-9)
         XCTAssertEqual(panned.centerX, 500, accuracy: 1e-9)
     }
+
+    func testF14AFramingIsSoftWhenFewerThanFiveHundredPixelsShow() {
+        XCTAssertFalse(framing(1000, 1000).isSoft)
+        XCTAssertTrue(framing(400, 400).isSoft)
+        XCTAssertTrue(framing(3000, 3000).zoomed(to: 1.0).isSoft)
+        XCTAssertFalse(framing(500, 500).isSoft)
+    }
 }

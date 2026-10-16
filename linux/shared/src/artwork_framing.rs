@@ -9,6 +9,10 @@ pub const MAXIMUM_ZOOM_MULTIPLE: f64 = 5.0;
 pub const DOUBLE_CLICK_MULTIPLE: f64 = 2.5;
 pub const ZOOM_CEILING_FLOOR: f64 = 1.0;
 
+/// A cover showing fewer source pixels than this will look soft on a large
+/// display, which the editor says out loud.
+pub const SOFT_BELOW_PIXELS: f64 = 500.0;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ArtworkFraming {
     pub image_width: f64,
@@ -65,6 +69,10 @@ impl ArtworkFraming {
 
     pub fn is_at_fill(&self) -> bool {
         self.zoom <= self.fill_zoom() * 1.01
+    }
+
+    pub fn is_soft(&self) -> bool {
+        self.visible_side() < SOFT_BELOW_PIXELS
     }
 
     /// Side of the source square currently showing, in source pixels.
@@ -304,5 +312,13 @@ mod tests {
         let panned = f.panned(0.0, -100_000.0);
         assert!((panned.center_y() - 3500.0).abs() < EPS);
         assert!((panned.center_x() - 500.0).abs() < EPS);
+    }
+
+    #[test]
+    fn f14_a_framing_is_soft_when_fewer_than_five_hundred_pixels_show() {
+        assert!(!framing(1000.0, 1000.0, 400.0).is_soft());
+        assert!(framing(400.0, 400.0, 400.0).is_soft());
+        assert!(framing(3000.0, 3000.0, 400.0).zoomed(1.0, None).is_soft());
+        assert!(!framing(500.0, 500.0, 400.0).is_soft());
     }
 }

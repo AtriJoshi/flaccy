@@ -21,6 +21,10 @@ public struct ArtworkFraming: Equatable, Sendable {
     /// shrinking, so a small source still lets a person inspect single pixels.
     public static let zoomCeilingFloor = 1.0
 
+    /// A cover showing fewer source pixels than this will look soft on a large
+    /// display, which the editor says out loud.
+    public static let softBelowPixels = 500.0
+
     public let imageWidth: Double
     public let imageHeight: Double
     public private(set) var frameSide: Double
@@ -50,6 +54,8 @@ public struct ArtworkFraming: Equatable, Sendable {
     }
 
     public var isAtFill: Bool { zoom <= fillZoom * 1.01 }
+
+    public var isSoft: Bool { visibleSide < Self.softBelowPixels }
 
     /// Side of the source square currently showing, in source pixels.
     public var visibleSide: Double { frameSide / zoom }
