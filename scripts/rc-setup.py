@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Idempotent RevenueCat (v2) setup for Flaccy.
+"""Superseded by `midgar products` (Midgar decision D13); kept until this app's store flow moves to it. See ops/runbooks/store-commands.md in guitaripod/midgar-platform.
+
+Idempotent RevenueCat (v2) setup for Flaccy.
 
 iOS and Mac are separate SKUs with separate RevenueCat projects. For the chosen
 platform this registers the App Store app, imports its yearly subscription, its
