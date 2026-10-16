@@ -9,7 +9,7 @@ import Combine
 /// by ChartsViewModel.
 final class ChartsViewController: NSViewController {
 
-    private let viewModel = ChartsViewModel()
+    private let viewModel = ChartsViewModel(initialPeriod: .week)
     private var cancellables = Set<AnyCancellable>()
 
     private let backdrop = AmbientBackdropView()
@@ -20,6 +20,7 @@ final class ChartsViewController: NSViewController {
     private let periodPicker = NSSegmentedControl()
     private let profileLabel = NSTextField(labelWithString: "")
     private let shareButton = NSButton(title: String(localized: "Share"), target: nil, action: nil)
+    private let loadingSpinner = NSProgressIndicator()
 
     private let importBanner = NSView()
     private let importLabel = NSTextField(labelWithString: "")
@@ -166,7 +167,11 @@ final class ChartsViewController: NSViewController {
         periodPicker.action = #selector(periodChanged)
         periodPicker.segmentStyle = .capsule
 
-        let header = NSStackView(views: [titleColumn, NSView(), periodPicker, shareButton])
+        loadingSpinner.style = .spinning
+        loadingSpinner.controlSize = .small
+        loadingSpinner.isDisplayedWhenStopped = false
+
+        let header = NSStackView(views: [titleColumn, NSView(), loadingSpinner, periodPicker, shareButton])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 12
@@ -389,12 +394,20 @@ final class ChartsViewController: NSViewController {
         return RecapCard.host(row)
     }
 
+    /// First load shows the skeleton; every later load keeps the previous
+    /// period on screen and only spins a small indicator beside the picker, so
+    /// flipping periods never blanks the page.
     private func setLoading(_ loading: Bool) {
         let hasData = viewModel.data != nil
         skeletonContainer.isHidden = !loading || hasData
         if loading, !hasData {
             sectionViews.forEach { $0.isHidden = true }
             emptyState.isHidden = true
+        }
+        if loading, hasData {
+            loadingSpinner.startAnimation(nil)
+        } else {
+            loadingSpinner.stopAnimation(nil)
         }
     }
 
@@ -426,7 +439,9 @@ final class ChartsViewController: NSViewController {
         renderTracks(data)
 
         clockView.configure(buckets: data.listeningClock, tint: accent)
-        heatmapView.configure(counts: data.heatmap, tint: accent)
+        heatmapView.configure(
+            counts: data.calendarHeatmap ?? data.heatmap, tint: accent, dimBefore: Self.dimmingStart(for: data.period)
+        )
         streakLabel.stringValue = data.streak > 0
             ? String(localized: "\(data.streak) days in a row and counting")
             : String(localized: "No active streak — press play to start one")
@@ -437,20 +452,52 @@ final class ChartsViewController: NSViewController {
         personaIcon.contentTintColor = accent
     }
 
-    private func renderStats(_ data: RecapData) {
-        statsRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let tiles: [(String, String, String)] = [
-            (RecapFormat.count(data.totalPlays), String(localized: "PLAYS"), "play.circle.fill"),
-            (RecapFormat.count(data.totalMinutes), String(localized: "MINUTES"), "clock.fill"),
-            ("\(data.streak)", String(localized: "DAY STREAK"), "flame.fill"),
-            (RecapPersona.title(for: data.persona), String(localized: "PERSONA"), RecapPersona.symbol(for: data.persona)),
-        ]
-        for (value, caption, symbol) in tiles {
-            statsRow.addArrangedSubview(statTile(value: value, caption: caption, symbol: symbol))
+    /// Where dimming starts on the heatmap: a period of a year or more fills
+    /// the calendar, so only the shorter ones leave earlier days faded.
+    private static func dimmingStart(for period: ChartPeriod) -> Date? {
+        switch period {
+        case .week, .month, .threeMonths, .sixMonths: period.cutoffDate
+        case .year, .allTime: nil
         }
     }
 
-    private func statTile(value: String, caption: String, symbol: String) -> NSView {
+    private func renderStats(_ data: RecapData) {
+        statsRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let tiles: [(String, String, String, NSView?)] = [
+            (
+                RecapFormat.count(data.totalPlays), String(localized: "PLAYS"), "play.circle.fill",
+                deltaChip(
+                    current: data.totalPlays, previous: data.previousPlays, spanDays: data.previousSpanDays,
+                    tooltip: { String(localized: "\(RecapFormat.count($0)) plays · \(RecapFormat.count($1)) in the previous \($2) days") }
+                )
+            ),
+            (
+                RecapFormat.count(data.totalMinutes), String(localized: "MINUTES"), "clock.fill",
+                deltaChip(
+                    current: data.totalMinutes, previous: data.previousMinutes, spanDays: data.previousSpanDays,
+                    tooltip: { String(localized: "\(RecapFormat.count($0)) minutes · \(RecapFormat.count($1)) in the previous \($2) days") }
+                )
+            ),
+            ("\(data.streak)", String(localized: "DAY STREAK"), "flame.fill", nil),
+            (RecapPersona.title(for: data.persona), String(localized: "PERSONA"), RecapPersona.symbol(for: data.persona), nil),
+        ]
+        for (value, caption, symbol, chip) in tiles {
+            statsRow.addArrangedSubview(statTile(value: value, caption: caption, symbol: symbol, chip: chip))
+        }
+    }
+
+    /// The comparison pill for a tile, absent for All Time (nothing precedes
+    /// it) and when neither window had any plays.
+    private func deltaChip(
+        current: Int, previous: Int?, spanDays: Int?, tooltip: (Int, Int, Int) -> String
+    ) -> NSView? {
+        guard let previous, let spanDays else { return nil }
+        let chip = MacDeltaChipView(delta: PeriodDelta.compare(current: current, previous: previous), accent: accent)
+        chip?.toolTip = tooltip(current, previous, spanDays)
+        return chip
+    }
+
+    private func statTile(value: String, caption: String, symbol: String, chip: NSView?) -> NSView {
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
         icon.symbolConfiguration = .init(pointSize: 13, weight: .semibold)
         icon.contentTintColor = accent
@@ -461,7 +508,11 @@ final class ChartsViewController: NSViewController {
         let captionLabel = NSTextField(labelWithString: caption)
         captionLabel.font = .systemFont(ofSize: 10, weight: .bold)
         captionLabel.textColor = MacColors.secondaryLabel
-        let stack = NSStackView(views: [icon, valueLabel, captionLabel])
+        let valueRow = NSStackView(views: [valueLabel] + (chip.map { [$0] } ?? []))
+        valueRow.orientation = .horizontal
+        valueRow.alignment = .centerY
+        valueRow.spacing = 8
+        let stack = NSStackView(views: [icon, valueRow, captionLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 3
@@ -655,6 +706,21 @@ final class ChartsViewController: NSViewController {
             break
         }
     }
+
+    #if DEBUG
+    func selectPeriodForCapture(_ period: ChartPeriod) {
+        guard let index = ChartPeriod.allCases.firstIndex(of: period) else { return }
+        periodPicker.selectedSegment = index
+        viewModel.load(period: period)
+    }
+
+    func scrollToBottomForCapture() {
+        view.layoutSubtreeIfNeeded()
+        let clip = scrollView.contentView
+        clip.scroll(to: NSPoint(x: 0, y: max(0, documentView.bounds.height - clip.bounds.height)))
+        scrollView.reflectScrolledClipView(clip)
+    }
+    #endif
 
     @objc private func periodChanged() {
         let index = periodPicker.selectedSegment

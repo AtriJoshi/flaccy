@@ -1,10 +1,8 @@
 import Foundation
 
 extension ChartPeriod {
-    /// The earliest instant included in this period, measured back from now.
-    var cutoffDate: Date {
-        let now = Date()
-        let calendar = Calendar.current
+    /// The earliest instant included in this period, measured back from `now`.
+    func cutoff(now: Date, calendar: Calendar = .current) -> Date {
         switch self {
         case .week: return calendar.date(byAdding: .day, value: -7, to: now) ?? now
         case .month: return calendar.date(byAdding: .month, value: -1, to: now) ?? now
@@ -14,9 +12,12 @@ extension ChartPeriod {
         case .allTime: return .distantPast
         }
     }
+
+    /// The earliest instant included in this period, measured back from now.
+    var cutoffDate: Date { cutoff(now: Date()) }
 }
 
-struct RecapMetrics {
+nonisolated struct RecapMetrics: Sendable {
     let totalPlays: Int
     let totalMinutes: Int
     let topArtists: [ChartArtist]
@@ -25,7 +26,11 @@ struct RecapMetrics {
     let listeningClock: [Int]
     let streakDays: Int
     let heatmap: [Date: Int]
+    let calendarHeatmap: [Date: Int]
     let persona: String
+    let previousPlays: Int?
+    let previousMinutes: Int?
+    let previousSpanDays: Int?
 }
 
 /// Local listening statistics computed entirely from the `scrobbles` table so
@@ -35,54 +40,88 @@ nonisolated final class LastFMStatsService: @unchecked Sendable {
 
     static let shared = LastFMStatsService()
 
+    /// Rows stamped before this instant are "undated": an old scrobbler bug left
+    /// imported histories with plays at 1970-01-01. They still count toward
+    /// totals and top lists, but placing them on a calendar, a clock or a
+    /// streak would stretch every one of those across fifty years of nothing.
+    static let firstDatedScrobble = Date(timeIntervalSince1970: 1_009_843_200)
+
+    /// The heatmap always shows at least this many Sunday-aligned columns.
+    static let calendarHeatmapWeeks = 53
+
+    private static let bucketSeconds = 900
+    private static let secondsPerDay = 86_400
+
     private let db = DatabaseManager.shared
     private let lastFM = LastFMService.shared
 
     private init() {}
 
-    private func rows(in period: ChartPeriod) -> [ScrobbleRecord] {
-        guard period != .allTime else { return (try? db.fetchAllScrobbleRows()) ?? [] }
-        return (try? db.fetchScrobbleRows(from: period.cutoffDate, to: .distantFuture)) ?? []
-    }
+    var scrobbleRevision: Int { db.scrobbleRevision }
 
-    /// Computes every Recap metric from a single full-table fetch, instead of
-    /// one fetch per metric. The streak uses the unfiltered rows; everything
-    /// else uses the rows inside the period cutoff.
-    func recapMetrics(period: ChartPeriod) -> RecapMetrics {
-        let all = (try? db.fetchAllScrobbleRows()) ?? []
-        let scoped = period == .allTime ? all : all.filter { $0.timestamp >= period.cutoffDate }
-        let clock = Self.listeningClock(from: scoped)
+    /// Computes every Recap metric from aggregates the database folds itself,
+    /// so no scrobble row is ever decoded: the totals and the three top lists
+    /// are `GROUP BY` results (the totals are the sums of the per-artist groups), and the clock, heatmap, streak and persona's night
+    /// ratio all come from one quarter-hour histogram of the dated plays. The
+    /// histogram is read in two disjoint pieces, before and inside the period,
+    /// so a short period never pays for the long calendar around it.
+    func recapMetrics(period: ChartPeriod, now: Date = Date(), calendar: Calendar = .current) -> RecapMetrics {
+        let cutoff = period.cutoff(now: now, calendar: calendar)
+        let artistCounts = (try? db.scrobbleArtistCounts(from: cutoff, to: .distantFuture)) ?? []
+        let totals = (plays: artistCounts.reduce(0) { $0 + $1.count }, seconds: artistCounts.reduce(0) { $0 + $1.seconds })
+        let albums = (try? db.scrobbleTopAlbums(from: cutoff, to: .distantFuture, limit: 9)) ?? []
+        let tracks = (try? db.scrobbleTopTracks(from: cutoff, to: .distantFuture, limit: 10)) ?? []
+
+        let zone = calendar.timeZone
+        let periodFrom = max(cutoff, Self.firstDatedScrobble)
+        let wideFrom = calendarWindowStart(period: period, periodFrom: periodFrom, now: now, calendar: calendar)
+        let during = Self.tally((try? db.scrobbleQuarterHourCounts(from: periodFrom, to: .distantFuture)) ?? [], zone: zone)
+        var calendarTally = during
+        if wideFrom < periodFrom {
+            let before = Self.tally((try? db.scrobbleQuarterHourCounts(from: wideFrom, to: periodFrom)) ?? [], zone: zone)
+            calendarTally.merge(before)
+        }
+
+        let streak = streakDays(calendarDays: calendarTally.days, wideFrom: wideFrom, now: now, calendar: calendar)
+        let previous = previousWindowTotals(period: period, cutoff: cutoff, now: now)
         return RecapMetrics(
-            totalPlays: scoped.count,
-            totalMinutes: Self.totalMinutes(from: scoped),
-            topArtists: Self.topArtists(from: scoped, limit: 10),
-            topAlbums: Self.topAlbums(from: scoped, limit: 9),
-            topTracks: Self.topTracks(from: scoped, limit: 10),
-            listeningClock: clock,
-            streakDays: Self.streakDays(from: all),
-            heatmap: Self.dayHeatmap(from: scoped),
-            persona: Self.persona(from: scoped, clock: clock)
+            totalPlays: totals.plays,
+            totalMinutes: totals.seconds / 60,
+            topArtists: Self.topArtists(from: artistCounts, limit: 10),
+            topAlbums: albums.enumerated().map {
+                ChartAlbum(rank: $0.offset + 1, name: $0.element.album, artistName: $0.element.artist, playCount: $0.element.count, imageURL: nil)
+            },
+            topTracks: tracks.enumerated().map {
+                ChartTrack(rank: $0.offset + 1, name: $0.element.title, artistName: $0.element.artist, playCount: $0.element.count)
+            },
+            listeningClock: during.clock,
+            streakDays: streak,
+            heatmap: during.heatmap(calendar: calendar),
+            calendarHeatmap: calendarTally.heatmap(calendar: calendar),
+            persona: Self.persona(
+                plays: totals.plays,
+                distinctArtists: Set(artistCounts.map { $0.artist.lowercased() }).count,
+                clock: during.clock
+            ),
+            previousPlays: previous?.plays,
+            previousMinutes: previous?.minutes,
+            previousSpanDays: previous?.spanDays
         )
     }
 
     func topArtists(period: ChartPeriod, limit: Int = 50) -> [ChartArtist] {
-        Self.topArtists(from: rows(in: period), limit: limit)
-    }
-
-    func topAlbums(period: ChartPeriod, limit: Int = 50) -> [ChartAlbum] {
-        Self.topAlbums(from: rows(in: period), limit: limit)
-    }
-
-    func topTracks(period: ChartPeriod, limit: Int = 50) -> [ChartTrack] {
-        Self.topTracks(from: rows(in: period), limit: limit)
+        let counts = (try? db.scrobbleArtistCounts(from: period.cutoffDate, to: .distantFuture)) ?? []
+        return Self.topArtists(from: counts, limit: limit)
     }
 
     /// Per-track scrobble counts over the period, keyed by a lowercased
     /// `title\0artist` composite matching `StationBuilder`/`LovedTracksService`.
+    /// Folded by the database, so a library with a hundred thousand scrobbles
+    /// costs a `GROUP BY` instead of a full-table decode.
     func scrobbleCounts(period: ChartPeriod) -> [String: Int] {
         var counts: [String: Int] = [:]
-        for row in rows(in: period) {
-            counts[Self.trackKey(row.trackTitle, row.artist), default: 0] += 1
+        for row in (try? db.scrobbleTrackCounts(from: period.cutoffDate, to: .distantFuture)) ?? [] {
+            counts[Self.trackKey(row.title, row.artist), default: 0] += row.count
         }
         return counts
     }
@@ -91,117 +130,118 @@ nonisolated final class LastFMStatsService: @unchecked Sendable {
         "\(title.lowercased())\u{0}\(artist.lowercased())"
     }
 
-    func totalPlays(period: ChartPeriod = .allTime) -> Int {
-        let from = period == .allTime ? Date.distantPast : period.cutoffDate
-        return (try? db.scrobbleCountInRange(from: from, to: .distantFuture)) ?? 0
+    /// Where the heatmap's data starts: this week's Sunday minus 52 weeks, or
+    /// the period's own first Sunday when that is earlier, or the first dated
+    /// play for All Time. A local midnight, except for All Time.
+    private func calendarWindowStart(period: ChartPeriod, periodFrom: Date, now: Date, calendar: Calendar) -> Date {
+        guard period != .allTime else { return Self.firstDatedScrobble }
+        let trailing = Self.sunday(onOrBefore: now, calendar: calendar)
+            .flatMap { calendar.date(byAdding: .day, value: -7 * (Self.calendarHeatmapWeeks - 1), to: $0) }
+        let periodStart = Self.sunday(onOrBefore: periodFrom, calendar: calendar)
+        let earliest = [trailing, periodStart].compactMap { $0 }.min() ?? periodFrom
+        return max(earliest, Self.firstDatedScrobble)
     }
 
-    func totalMinutes(period: ChartPeriod = .allTime) -> Int {
-        Self.totalMinutes(from: rows(in: period))
+    private static func sunday(onOrBefore date: Date, calendar: Calendar) -> Date? {
+        let day = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: day) - 1
+        return calendar.date(byAdding: .day, value: -weekday, to: day)
     }
 
-    /// Play counts bucketed by hour-of-day (index 0...23) in the local calendar.
-    func listeningClock(period: ChartPeriod = .allTime) -> [Int] {
-        Self.listeningClock(from: rows(in: period))
-    }
-
-    /// Number of consecutive days ending today on which at least one scrobble
-    /// happened.
-    func currentStreakDays() -> Int {
-        Self.streakDays(from: (try? db.fetchAllScrobbleRows()) ?? [])
-    }
-
-    /// Play counts keyed by the start of each day, over the given period.
-    func dayHeatmap(period: ChartPeriod = .year) -> [Date: Int] {
-        Self.dayHeatmap(from: rows(in: period))
-    }
-
-    func persona(period: ChartPeriod = .allTime) -> String {
-        let scoped = rows(in: period)
-        return Self.persona(from: scoped, clock: Self.listeningClock(from: scoped))
-    }
-
-    private static func topArtists(from rows: [ScrobbleRecord], limit: Int) -> [ChartArtist] {
-        var counts: [String: Int] = [:]
-        for row in rows { counts[row.artist, default: 0] += 1 }
-        return counts.sorted { $0.value > $1.value }
-            .prefix(limit)
-            .enumerated()
-            .map { ChartArtist(rank: $0.offset + 1, name: $0.element.key, playCount: $0.element.value) }
-    }
-
-    private static func topAlbums(from rows: [ScrobbleRecord], limit: Int) -> [ChartAlbum] {
-        var counts: [String: (album: String, artist: String, count: Int)] = [:]
-        for row in rows {
-            let key = "\(row.albumTitle)\u{0}\(row.artist)"
-            let existing = counts[key]
-            counts[key] = (row.albumTitle, row.artist, (existing?.count ?? 0) + 1)
-        }
-        return counts.values.sorted { $0.count > $1.count }
-            .prefix(limit)
-            .enumerated()
-            .map { ChartAlbum(rank: $0.offset + 1, name: $0.element.album, artistName: $0.element.artist, playCount: $0.element.count, imageURL: nil) }
-    }
-
-    private static func topTracks(from rows: [ScrobbleRecord], limit: Int) -> [ChartTrack] {
-        var counts: [String: (title: String, artist: String, count: Int)] = [:]
-        for row in rows {
-            let key = "\(row.trackTitle)\u{0}\(row.artist)"
-            let existing = counts[key]
-            counts[key] = (row.trackTitle, row.artist, (existing?.count ?? 0) + 1)
-        }
-        return counts.values.sorted { $0.count > $1.count }
-            .prefix(limit)
-            .enumerated()
-            .map { ChartTrack(rank: $0.offset + 1, name: $0.element.title, artistName: $0.element.artist, playCount: $0.element.count) }
-    }
-
-    private static func totalMinutes(from rows: [ScrobbleRecord]) -> Int {
-        rows.reduce(0) { $0 + $1.duration } / 60
-    }
-
-    private static func listeningClock(from rows: [ScrobbleRecord]) -> [Int] {
-        var buckets = [Int](repeating: 0, count: 24)
-        let calendar = Calendar.current
-        for row in rows {
-            let hour = calendar.component(.hour, from: row.timestamp)
-            if hour >= 0 && hour < 24 { buckets[hour] += 1 }
-        }
-        return buckets
-    }
-
-    private static func streakDays(from rows: [ScrobbleRecord]) -> Int {
-        guard !rows.isEmpty else { return 0 }
-        let calendar = Calendar.current
-        let days = Set(rows.map { calendar.startOfDay(for: $0.timestamp) })
-
+    /// Consecutive days ending today with a play, counted from the days already
+    /// read for the heatmap. Only a streak that runs off the start of that
+    /// window reads further back, one calendar-sized chunk at a time and only
+    /// until the first gap, so the usual case touches no extra rows.
+    private func streakDays(calendarDays: [Int: Int], wideFrom: Date, now: Date, calendar: Calendar) -> Int {
+        let zone = calendar.timeZone
+        var day = Self.localTime(of: Int(now.timeIntervalSince1970), zone: zone).day
         var streak = 0
-        var day = calendar.startOfDay(for: Date())
-        while days.contains(day) {
+        while calendarDays[day] != nil {
             streak += 1
-            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
-            day = previous
+            day -= 1
+        }
+        var floor = wideFrom
+        while floor > Self.firstDatedScrobble, day < Self.localTime(of: Int(floor.timeIntervalSince1970), zone: zone).day {
+            let chunkSpan = TimeInterval(7 * Self.calendarHeatmapWeeks * Self.secondsPerDay)
+            let chunkFrom = max(Self.firstDatedScrobble, calendar.startOfDay(for: floor.addingTimeInterval(-chunkSpan)))
+            let older = Self.tally((try? db.scrobbleQuarterHourCounts(from: chunkFrom, to: floor)) ?? [], zone: zone)
+            while older.days[day] != nil {
+                streak += 1
+                day -= 1
+            }
+            floor = chunkFrom
         }
         return streak
     }
 
-    private static func dayHeatmap(from rows: [ScrobbleRecord]) -> [Date: Int] {
-        var map: [Date: Int] = [:]
-        let calendar = Calendar.current
-        for row in rows {
-            let day = calendar.startOfDay(for: row.timestamp)
-            map[day, default: 0] += 1
-        }
-        return map
+    /// The same totals over the window of equal length just before the period,
+    /// so a tile can say whether this stretch beat the last one.
+    private func previousWindowTotals(
+        period: ChartPeriod, cutoff: Date, now: Date
+    ) -> (plays: Int, minutes: Int, spanDays: Int)? {
+        guard period != .allTime else { return nil }
+        let span = now.timeIntervalSince(cutoff)
+        let totals = (try? db.scrobbleTotals(from: cutoff.addingTimeInterval(-span), to: cutoff)) ?? (plays: 0, seconds: 0)
+        return (totals.plays, totals.seconds / 60, Int((span / TimeInterval(Self.secondsPerDay)).rounded()))
     }
 
-    private static func persona(from rows: [ScrobbleRecord], clock: [Int]) -> String {
-        guard !rows.isEmpty else { return "Newcomer" }
-        let distinctArtists = Set(rows.map { $0.artist.lowercased() }).count
-        let plays = rows.count
+    /// Dated plays folded into local days and hours. `days` is keyed by the
+    /// local day number (days since 1970 in the viewer's zone) and remembers one
+    /// zone offset per day so the day can be turned back into a `Date`.
+    private struct Tally {
+        var days: [Int: Int] = [:]
+        var offsets: [Int: Int] = [:]
+        var clock = [Int](repeating: 0, count: 24)
+
+        mutating func merge(_ other: Tally) {
+            for (day, count) in other.days { days[day, default: 0] += count }
+            for (day, offset) in other.offsets where offsets[day] == nil { offsets[day] = offset }
+        }
+
+        func heatmap(calendar: Calendar) -> [Date: Int] {
+            var map: [Date: Int] = [:]
+            map.reserveCapacity(days.count)
+            for (day, count) in days {
+                let noonUTC = TimeInterval(day * LastFMStatsService.secondsPerDay + LastFMStatsService.secondsPerDay / 2)
+                let noonLocal = Date(timeIntervalSince1970: noonUTC - TimeInterval(offsets[day] ?? 0))
+                map[calendar.startOfDay(for: noonLocal), default: 0] += count
+            }
+            return map
+        }
+    }
+
+    private static func tally(_ buckets: [(bucket: Int, count: Int)], zone: TimeZone) -> Tally {
+        var tally = Tally()
+        for (bucket, count) in buckets {
+            let local = localTime(of: bucket * bucketSeconds, zone: zone)
+            tally.days[local.day, default: 0] += count
+            if tally.offsets[local.day] == nil { tally.offsets[local.day] = local.offset }
+            tally.clock[local.hour] += count
+        }
+        return tally
+    }
+
+    private static func localTime(of seconds: Int, zone: TimeZone) -> (day: Int, hour: Int, offset: Int) {
+        let offset = zone.secondsFromGMT(for: Date(timeIntervalSince1970: TimeInterval(seconds)))
+        let local = seconds + offset
+        return (local / secondsPerDay, local % secondsPerDay / 3600, offset)
+    }
+
+    private static func topArtists(from counts: [(artist: String, count: Int, seconds: Int)], limit: Int) -> [ChartArtist] {
+        counts.sorted { $0.count != $1.count ? $0.count > $1.count : $0.artist < $1.artist }
+            .prefix(limit)
+            .enumerated()
+            .map { ChartArtist(rank: $0.offset + 1, name: $0.element.artist, playCount: $0.element.count) }
+    }
+
+    /// Night plays are measured against dated plays only: an undated row has no
+    /// hour, so counting it in the denominator would dilute the ratio.
+    private static func persona(plays: Int, distinctArtists: Int, clock: [Int]) -> String {
+        guard plays > 0 else { return "Newcomer" }
         let diversity = Double(distinctArtists) / Double(plays)
         let nightPlays = (0..<6).reduce(0) { $0 + clock[$1] } + clock[23]
-        let nightRatio = Double(nightPlays) / Double(max(plays, 1))
+        let datedPlays = clock.reduce(0, +)
+        let nightRatio = Double(nightPlays) / Double(max(datedPlays, 1))
 
         if nightRatio > 0.35 { return "Night Owl" }
         if diversity > 0.6 { return "Explorer" }

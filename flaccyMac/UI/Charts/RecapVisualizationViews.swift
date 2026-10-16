@@ -131,10 +131,14 @@ final class MacHeatmapView: NSView {
 
     private var counts: [Date: Int] = [:]
     private var tint: NSColor = .systemGreen
+    private var dimBefore: Date?
     private var tooltipOwners: [NSString] = []
     private let calendar = Calendar.current
     private let cellSpacing: CGFloat = 3
     private let labelHeight: CGFloat = 16
+
+    static let minimumWeeks = LastFMStatsService.calendarHeatmapWeeks
+    private static let outsidePeriodAlpha: CGFloat = 0.35
 
     override var isFlipped: Bool { true }
 
@@ -142,9 +146,13 @@ final class MacHeatmapView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: 7 * 15 + 6 * cellSpacing + labelHeight)
     }
 
-    func configure(counts: [Date: Int], tint: NSColor) {
+    /// `dimBefore` marks where the selected period begins: days earlier than
+    /// it still show their intensity but at a fraction of the strength, so a
+    /// short period reads as a window onto a longer calendar.
+    func configure(counts: [Date: Int], tint: NSColor, dimBefore: Date? = nil) {
         self.counts = counts
         self.tint = tint
+        self.dimBefore = dimBefore.map { calendar.startOfDay(for: $0) }
         needsDisplay = true
         rebuildTooltips()
         let active = counts.values.filter { $0 > 0 }.count
@@ -190,7 +198,7 @@ final class MacHeatmapView: NSView {
                 let y = labelHeight + CGFloat(row) * (grid.cell + cellSpacing)
                 let cellRect = CGRect(x: x, y: y, width: grid.cell, height: grid.cell)
                 let path = NSBezierPath(roundedRect: cellRect, xRadius: grid.cell * 0.28, yRadius: grid.cell * 0.28)
-                color(for: count, max: grid.maxCount).setFill()
+                cellColor(for: day, count: count, max: grid.maxCount).setFill()
                 path.fill()
             }
         }
@@ -215,7 +223,9 @@ final class MacHeatmapView: NSView {
 
         let earliest = counts.keys.min().map { calendar.startOfDay(for: $0) } ?? today
         let earliestWeekday = calendar.component(.weekday, from: earliest) - 1
-        let firstColumnStart = calendar.date(byAdding: .day, value: -earliestWeekday, to: earliest) ?? lastColumnStart
+        let dataStart = calendar.date(byAdding: .day, value: -earliestWeekday, to: earliest) ?? lastColumnStart
+        let trailingStart = calendar.date(byAdding: .day, value: -7 * (Self.minimumWeeks - 1), to: lastColumnStart) ?? dataStart
+        let firstColumnStart = min(dataStart, trailingStart)
         let spanDays = calendar.dateComponents([.day], from: firstColumnStart, to: lastColumnStart).day ?? 0
         let columns = max(1, spanDays / 7 + 1)
 
@@ -249,6 +259,12 @@ final class MacHeatmapView: NSView {
                 addToolTip(rect, owner: owner, userData: nil)
             }
         }
+    }
+
+    private func cellColor(for day: Date, count: Int, max: Int) -> NSColor {
+        let base = color(for: count, max: max)
+        guard let dimBefore, day < dimBefore else { return base }
+        return base.withAlphaComponent(base.alphaComponent * Self.outsidePeriodAlpha)
     }
 
     private func color(for count: Int, max: Int) -> NSColor {
