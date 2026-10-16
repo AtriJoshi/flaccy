@@ -506,48 +506,21 @@ impl AppCore {
         let Some(album) = library.album_by_key(key) else {
             return;
         };
-        if shuffle && !self.player.shuffle_enabled() {
-            self.player.toggle_shuffle();
-        }
-        if !shuffle && self.player.shuffle_enabled() {
-            self.player.toggle_shuffle();
-        }
-        let start = if shuffle {
-            let len = album.tracks.len();
-            (crate::palette::fnv1a_64(&format!("{}{}", key, chrono::Utc::now().timestamp_micros()))
-                % len.max(1) as u64) as usize
-        } else {
-            0
-        };
-        self.play_tracks(album.tracks.clone(), start);
+        self.play_list(album.tracks.clone(), shuffle, key);
     }
 
-    /// Every library track `artist` is on (feat. credits collapse to the lead
-    /// artist), in album order: the albums credited to them in full, plus the
-    /// individual tracks they perform on somebody else's record.
-    ///
-    /// Taking only credited albums would hand a composer on a Various Artists
-    /// soundtrack an empty queue while the library holds thirty-one of their
-    /// tracks.
+    /// Every library track `artist` is on, in album order.
     pub fn artist_tracks(&self, artist: &str) -> Vec<Track> {
-        let library = self.library.borrow();
-        let key = crate::hygiene::artist_key(artist);
-        library
-            .albums
-            .iter()
-            .flat_map(|album| {
-                let credited = crate::hygiene::artist_key(&album.artist) == key;
-                let key = key.clone();
-                album.tracks.iter().filter(move |track| {
-                    credited || crate::hygiene::artist_key(&track.artist) == key
-                })
-            })
-            .cloned()
-            .collect()
+        self.library.borrow().artist_tracks(artist)
     }
 
     pub fn play_artist(self: &Rc<Self>, artist: &str, shuffle: bool) {
-        let tracks = self.artist_tracks(artist);
+        self.play_list(self.artist_tracks(artist), shuffle, artist);
+    }
+
+    /// Plays `tracks` from the top, or shuffled from a seeded random start,
+    /// leaving the player's shuffle mode matching the request.
+    pub fn play_list(self: &Rc<Self>, tracks: Vec<Track>, shuffle: bool, seed: &str) {
         if tracks.is_empty() {
             return;
         }
@@ -555,7 +528,7 @@ impl AppCore {
             self.player.toggle_shuffle();
         }
         let start = if shuffle {
-            let seed = format!("{artist}{}", chrono::Utc::now().timestamp_micros());
+            let seed = format!("{seed}{}", chrono::Utc::now().timestamp_micros());
             (crate::palette::fnv1a_64(&seed) % tracks.len() as u64) as usize
         } else {
             0

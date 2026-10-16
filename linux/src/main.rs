@@ -1,4 +1,5 @@
 mod app;
+mod chart_queue;
 mod config;
 mod db;
 mod downloads;

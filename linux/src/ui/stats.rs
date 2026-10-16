@@ -1,5 +1,7 @@
+use crate::chart_queue::ChartIndex;
 use crate::db::{Db, ScrobbleRow};
 use crate::events::AppEvent;
+use crate::library::Track;
 use crate::recap::{self, Period, RecapData};
 use crate::ui::Ui;
 use adw::prelude::*;
@@ -248,15 +250,35 @@ fn build_renderer(
         content.append(&section_title("LISTENING CLOCK"));
         content.append(&clock_widget(&data));
 
+        let library = ui.core.library.borrow().clone();
+        let index = ChartIndex::new(&library);
         let lists = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(24)
             .homogeneous(true)
             .valign(gtk::Align::Start)
             .build();
-        lists.append(&top_list(&ui, "TOP ARTISTS", &data.top_artists, true));
-        lists.append(&top_list(&ui, "TOP ALBUMS", &data.top_albums, false));
-        lists.append(&top_list(&ui, "TOP TRACKS", &data.top_tracks, false));
+        lists.append(&top_list(
+            &ui,
+            "TOP ARTISTS",
+            &data.top_artists,
+            ChartKind::Artists,
+            &index,
+        ));
+        lists.append(&top_list(
+            &ui,
+            "TOP ALBUMS",
+            &data.top_albums,
+            ChartKind::Albums,
+            &index,
+        ));
+        lists.append(&top_list(
+            &ui,
+            "TOP TRACKS",
+            &data.top_tracks,
+            ChartKind::Tracks,
+            &index,
+        ));
         content.append(&lists);
     });
     render
@@ -668,15 +690,34 @@ fn section_title(text: &str) -> gtk::Widget {
     label.upcast()
 }
 
-/// Renders a ranked name/count list. With `artist_nav` the names become
-/// clickable links into the library's artist pages (Last.fm-sourced names that
-/// aren't in the library toast instead).
-fn top_list(ui: &Rc<Ui>, title: &str, rows: &[(String, i64)], artist_nav: bool) -> gtk::Widget {
+#[derive(Clone, Copy)]
+enum ChartKind {
+    Artists,
+    Albums,
+    Tracks,
+}
+
+/// Renders a ranked name/count list that plays. The header's Play and Shuffle
+/// queue every entry the library owns; clicking an owned row plays it (a song
+/// within the whole chart, an album, an artist as a station) and right-clicking
+/// opens the usual menu, which is also how to reach the artist or album page.
+fn top_list(
+    ui: &Rc<Ui>,
+    title: &str,
+    rows: &[(String, i64)],
+    kind: ChartKind,
+    index: &ChartIndex,
+) -> gtk::Widget {
+    let queue = Rc::new(match kind {
+        ChartKind::Artists => index.artist_queue(rows),
+        ChartKind::Albums => index.album_queue(rows),
+        ChartKind::Tracks => index.track_queue(rows),
+    });
     let column = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(10)
         .build();
-    column.append(&section_title(title));
+    column.append(&list_header(ui, title, &queue));
     if rows.is_empty() {
         let label = gtk::Label::builder()
             .label("No plays yet")
@@ -685,39 +726,116 @@ fn top_list(ui: &Rc<Ui>, title: &str, rows: &[(String, i64)], artist_nav: bool) 
         label.add_css_class("dim");
         column.append(&label);
     }
-    for (index, (name, count)) in rows.iter().enumerate() {
-        let row = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(10)
-            .build();
-        let rank = gtk::Label::builder()
-            .label(format!("{}", index + 1))
-            .width_chars(2)
-            .xalign(1.0)
-            .build();
-        rank.add_css_class("top-list-rank");
-        row.append(&rank);
-        let name_label = gtk::Label::builder()
-            .label(name)
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(pango::EllipsizeMode::End)
-            .tooltip_text(name)
-            .build();
-        if artist_nav {
-            let artist = name.clone();
-            crate::ui::controls::attach_label_nav(ui, &name_label, "Go to Artist", move |ui| {
-                crate::ui::goto_artist(ui, &artist);
-            });
-            name_label.set_tooltip_text(Some(name));
+    for (position, (name, count)) in rows.iter().enumerate() {
+        let row = list_row(position + 1, name, *count);
+        match kind {
+            ChartKind::Artists => {
+                if index.owns_artist(name) {
+                    make_playable(&row);
+                    let artist = name.clone();
+                    let ui_click = Rc::clone(ui);
+                    on_row_click(&row, move || ui_click.core.start_artist_station(&artist));
+                    crate::ui::context::attach_artist_context_menu(&row, name.clone());
+                }
+            }
+            ChartKind::Albums => {
+                if let Some(album) = index.album(name) {
+                    make_playable(&row);
+                    let key = album.key();
+                    let ui_click = Rc::clone(ui);
+                    let play_key = key.clone();
+                    on_row_click(&row, move || ui_click.core.play_album_key(&play_key, false));
+                    crate::ui::context::attach_album_context_menu(&row, key);
+                }
+            }
+            ChartKind::Tracks => {
+                if let Some(track) = index.track(name) {
+                    make_playable(&row);
+                    let ui_click = Rc::clone(ui);
+                    let queue = Rc::clone(&queue);
+                    let rel_path = track.rel_path.clone();
+                    let start_path = rel_path.clone();
+                    on_row_click(&row, move || {
+                        if let Some(start) = queue.iter().position(|t| t.rel_path == start_path) {
+                            ui_click.core.play_tracks(queue.to_vec(), start);
+                        }
+                    });
+                    crate::ui::context::attach_track_context_menu(&row, &ui.core, rel_path);
+                }
+            }
         }
-        row.append(&name_label);
-        let count_label = gtk::Label::new(Some(&count.to_string()));
-        count_label.add_css_class("duration-label");
-        row.append(&count_label);
         column.append(&row);
     }
     column.upcast()
+}
+
+fn list_header(ui: &Rc<Ui>, title: &str, queue: &Rc<Vec<Track>>) -> gtk::Widget {
+    let header = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(4)
+        .build();
+    let caption = section_title(title);
+    caption.set_hexpand(true);
+    caption.set_valign(gtk::Align::Center);
+    header.append(&caption);
+    if queue.is_empty() {
+        return header.upcast();
+    }
+    for (icon, tooltip, shuffle) in [
+        ("media-playback-start-symbolic", "Play", false),
+        ("media-playlist-shuffle-symbolic", "Shuffle", true),
+    ] {
+        let button = gtk::Button::from_icon_name(icon);
+        button.add_css_class("flat");
+        button.add_css_class("circular");
+        button.set_tooltip_text(Some(&format!("{tooltip} {}", title.to_lowercase())));
+        let ui = Rc::clone(ui);
+        let queue = Rc::clone(queue);
+        let seed = title.to_string();
+        button.connect_clicked(move |_| ui.core.play_list(queue.to_vec(), shuffle, &seed));
+        header.append(&button);
+    }
+    header.upcast()
+}
+
+fn list_row(rank_number: usize, name: &str, count: i64) -> gtk::Box {
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(10)
+        .build();
+    row.add_css_class("top-list-row");
+    let rank = gtk::Label::builder()
+        .label(format!("{rank_number}"))
+        .width_chars(2)
+        .xalign(1.0)
+        .build();
+    rank.add_css_class("top-list-rank");
+    row.append(&rank);
+    let name_label = gtk::Label::builder()
+        .label(name)
+        .xalign(0.0)
+        .hexpand(true)
+        .ellipsize(pango::EllipsizeMode::End)
+        .tooltip_text(name)
+        .build();
+    row.append(&name_label);
+    let count_label = gtk::Label::new(Some(&count.to_string()));
+    count_label.add_css_class("duration-label");
+    row.append(&count_label);
+    row
+}
+
+fn make_playable(row: &gtk::Box) {
+    row.add_css_class("playable");
+    row.set_cursor_from_name(Some("pointer"));
+}
+
+fn on_row_click(row: &gtk::Box, play: impl Fn() + 'static) {
+    let click = gtk::GestureClick::builder()
+        .button(gtk::gdk::BUTTON_PRIMARY)
+        .build();
+    click.connect_released(move |_, _, _, _| play());
+    row.add_controller(click);
 }
 
 /// Port of the iOS ListeningClockView radial-spoke drawing.

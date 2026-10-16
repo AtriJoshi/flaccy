@@ -475,6 +475,16 @@ overlay-split-view > .sidebar-pane:backdrop {
   opacity: 0.4;
 }
 
+.top-list-row {
+  border-radius: 8px;
+  margin: 0 -8px;
+  padding: 2px 8px;
+}
+
+.top-list-row.playable:hover {
+  background-color: alpha(@accent_bg_color, 0.14);
+}
+
 /* ---- accents & toggles -------------------------------------------------- */
 .accent-toggle {
   color: @accent_color;

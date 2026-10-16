@@ -138,6 +138,28 @@ impl Library {
     pub fn album_by_key(&self, key: &str) -> Option<&Album> {
         self.albums.iter().find(|a| a.key() == key)
     }
+
+    /// Every library track `artist` is on (feat. credits collapse to the lead
+    /// artist), in album order: the albums credited to them in full, plus the
+    /// individual tracks they perform on somebody else's record.
+    ///
+    /// Taking only credited albums would hand a composer on a Various Artists
+    /// soundtrack an empty queue while the library holds thirty-one of their
+    /// tracks.
+    pub fn artist_tracks(&self, artist: &str) -> Vec<Track> {
+        let key = crate::hygiene::artist_key(artist);
+        self.albums
+            .iter()
+            .flat_map(|album| {
+                let credited = crate::hygiene::artist_key(&album.artist) == key;
+                let key = key.clone();
+                album.tracks.iter().filter(move |track| {
+                    credited || crate::hygiene::artist_key(&track.artist) == key
+                })
+            })
+            .cloned()
+            .collect()
+    }
 }
 
 /// Orders an album's tracks for display. `trackNumber` restarts at 1 on every

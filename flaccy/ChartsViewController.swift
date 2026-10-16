@@ -20,6 +20,7 @@ final class ChartsViewController: UIViewController, SonglinkShareable {
     private var currentTint = UIColor.systemIndigo
     private var importState: RecapImportState = .available
     private var libraryIndex = RecapLibraryIndex()
+    private var playQueues: [RecapSection: [Track]] = [:]
     private var cancellables = Set<AnyCancellable>()
     private var renderGeneration = 0
 
@@ -243,8 +244,30 @@ final class ChartsViewController: UIViewController, SonglinkShareable {
                 withReuseIdentifier: RecapHeaderView.reuseID,
                 for: indexPath
             ) as! RecapHeaderView
-            header.configure(title: title)
+            self?.configure(header, title: title, section: section)
             return header
+        }
+    }
+
+    private func configure(_ header: RecapHeaderView, title: String, section: RecapSection) {
+        guard playQueues[section]?.isEmpty == false else {
+            header.configure(title: title)
+            return
+        }
+        header.configure(
+            title: title,
+            onPlay: { [weak self] in self?.playList(section, shuffled: false) },
+            onShuffle: { [weak self] in self?.playList(section, shuffled: true) }
+        )
+    }
+
+    private func refreshVisibleHeaders() {
+        let kind = UICollectionView.elementKindSectionHeader
+        for indexPath in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+            guard let header = collectionView.supplementaryView(forElementKind: kind, at: indexPath) as? RecapHeaderView,
+                  let section = dataSource.sectionIdentifier(for: indexPath.section),
+                  let title = section.headerTitle else { continue }
+            configure(header, title: title, section: section)
         }
     }
 
@@ -356,6 +379,11 @@ final class ChartsViewController: UIViewController, SonglinkShareable {
         navigationItem.rightBarButtonItem?.isEnabled = data.hasContent
 
         libraryIndex = RecapLibraryIndex(albums: Library.shared.albums, tracks: Library.shared.allTracks)
+        playQueues = [
+            .artists: libraryIndex.queue(forArtists: data.topArtists),
+            .albums: libraryIndex.queue(forAlbums: data.topAlbums),
+            .tracks: libraryIndex.queue(forTracks: data.topTracks),
+        ]
         let artists = data.topArtists.map { resolveArtist($0) }
         let albums = data.topAlbums.map { resolveAlbum($0) }
         let tracks = data.topTracks.map { resolveTrack($0) }
@@ -428,6 +456,7 @@ final class ChartsViewController: UIViewController, SonglinkShareable {
 
     private func apply(_ snapshot: NSDiffableDataSourceSnapshot<RecapSection, RecapItem>, for data: RecapData) {
         dataSource.apply(snapshot, animatingDifferences: false)
+        refreshVisibleHeaders()
 
         wantsSkeletonOnLoad = false
         hideSkeleton()
@@ -679,6 +708,13 @@ extension ChartsViewController: UICollectionViewDelegate {
                 },
             ])
         }
+    }
+
+    private func playList(_ section: RecapSection, shuffled: Bool) {
+        guard let queue = playQueues[section], !queue.isEmpty else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        AppLogger.info("Recap play list: \(section.headerTitle ?? "") (\(queue.count) tracks, shuffled: \(shuffled))", category: .playback)
+        audioPlayer.play(shuffled ? queue.shuffled() : queue, startingAt: 0)
     }
 
     private func playTrack(_ tapped: TrackItem) {

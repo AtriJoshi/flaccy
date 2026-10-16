@@ -79,6 +79,9 @@ pub fn artist_menu(artist: &str) -> gio::Menu {
     let station_section = gio::Menu::new();
     station_section.append_item(&item("Start Station", "win.artist-station", artist));
     menu.append_section(None, &station_section);
+    let nav_section = gio::Menu::new();
+    nav_section.append_item(&item("Go to Artist", "win.artist-go", artist));
+    menu.append_section(None, &nav_section);
     menu
 }
 
@@ -181,6 +184,18 @@ pub fn attach_track_context_menu(
             .map(|t| t.loved)
             .unwrap_or(false);
         let menu = track_menu(&rel_path, loved);
+        popup_menu_at(&target, &menu, x, y);
+    });
+    widget.add_controller(gesture);
+}
+
+pub fn attach_artist_context_menu(widget: &impl IsA<gtk::Widget>, artist: String) {
+    let gesture = gtk::GestureClick::builder()
+        .button(gdk::BUTTON_SECONDARY)
+        .build();
+    let target = widget.clone().upcast::<gtk::Widget>();
+    gesture.connect_pressed(move |_, _, x, y| {
+        let menu = artist_menu(&artist);
         popup_menu_at(&target, &menu, x, y);
     });
     widget.add_controller(gesture);

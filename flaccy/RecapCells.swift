@@ -424,27 +424,57 @@ private func recapCard(cornerRadius: CGFloat = 22) -> UIView {
 final class RecapHeaderView: UICollectionReusableView {
     static let reuseID = "RecapHeaderView"
     private let label = UILabel()
+    private let actions = UIStackView()
+    var onPlay: (() -> Void)?
+    var onShuffle: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         label.font = .scaled(.title3, size: 20, weight: .bold)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let play = LiquidGlass.iconCapsule(systemImage: "play.fill", accessibilityLabel: String(localized: "Play"), height: 34) { [weak self] in
+            self?.onPlay?()
+        }
+        let shuffle = LiquidGlass.iconCapsule(systemImage: "shuffle", accessibilityLabel: String(localized: "Shuffle"), height: 34) { [weak self] in
+            self?.onShuffle?()
+        }
+        actions.axis = .horizontal
+        actions.spacing = 8
+        actions.addArrangedSubview(play)
+        actions.addArrangedSubview(shuffle)
+        actions.setContentHuggingPriority(.required, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [label, UIView(), actions])
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(title: String) {
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onPlay = nil
+        onShuffle = nil
+    }
+
+    func configure(title: String, onPlay: (() -> Void)? = nil, onShuffle: (() -> Void)? = nil) {
         label.text = title
         accessibilityTraits = .header
+        self.onPlay = onPlay
+        self.onShuffle = onShuffle
+        actions.isHidden = onPlay == nil && onShuffle == nil
     }
 }
 

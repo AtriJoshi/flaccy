@@ -196,8 +196,10 @@ nonisolated struct RecapLibraryIndex {
     private let albumsByKey: [String: Album]
     private let tracksByKey: [String: Track]
     private let albumByArtist: [String: Album]
+    private let albums: [Album]
 
     init(albums: [Album] = [], tracks: [Track] = []) {
+        self.albums = albums
         var albumMap: [String: Album] = [:]
         var artistMap: [String: Album] = [:]
         for album in albums {
@@ -215,6 +217,40 @@ nonisolated struct RecapLibraryIndex {
     func album(name: String, artist: String) -> Album? { albumsByKey[Self.key(name, artist)] }
     func track(title: String, artist: String) -> Track? { tracksByKey[Self.key(title, artist)] }
     func representativeAlbum(forArtist artist: String) -> Album? { albumByArtist[Self.normalize(artist)] }
+
+    /// The owned songs behind a top-tracks chart, in rank order. Entries the
+    /// library does not hold are skipped, so the queue is whatever can play.
+    func queue(forTracks chart: [ChartTrack]) -> [Track] {
+        Self.unique(chart.compactMap { track(title: $0.name, artist: $0.artistName) })
+    }
+
+    /// The owned releases behind a top-albums chart, in rank order, each one
+    /// whole and in its own track order.
+    func queue(forAlbums chart: [ChartAlbum]) -> [Track] {
+        Self.unique(chart.flatMap { album(name: $0.name, artist: $0.artistName)?.tracks ?? [] })
+    }
+
+    /// Everything the library holds by each charted artist, in rank order.
+    func queue(forArtists chart: [ChartArtist]) -> [Track] {
+        Self.unique(chart.flatMap { tracks(byArtist: $0.name) })
+    }
+
+    /// Every owned track `artist` is on: the releases credited to them in full
+    /// plus the individual tracks they perform on somebody else's record, so a
+    /// composer on a Various Artists soundtrack is not an empty queue. Mirrors
+    /// `Core::artist_tracks` on Linux and `ownedTracks()` on the artist pages.
+    func tracks(byArtist artist: String) -> [Track] {
+        let key = LibraryHygiene.artistKey(artist)
+        return albums.flatMap { album -> [Track] in
+            if LibraryHygiene.artistKey(album.artist) == key { return album.tracks }
+            return album.tracks.filter { LibraryHygiene.artistKey($0.artist) == key }
+        }
+    }
+
+    private static func unique(_ tracks: [Track]) -> [Track] {
+        var seen = Set<URL>()
+        return tracks.filter { seen.insert($0.fileURL).inserted }
+    }
 
     private static func key(_ a: String, _ b: String) -> String {
         normalize(a) + "\u{0}" + normalize(b)

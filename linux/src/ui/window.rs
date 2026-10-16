@@ -957,6 +957,9 @@ fn register_actions(app: &adw::Application, ui: &Rc<Ui>, search: &gtk::SearchEnt
     add_string_action(ui, "artist-station", |ui, artist| {
         ui.core.start_artist_station(artist);
     });
+    add_string_action(ui, "artist-go", |ui, artist| {
+        ui::goto_artist(ui, artist);
+    });
     add_string_action(ui, "artist-play", |ui, artist| {
         ui.core.play_artist(artist, false);
     });

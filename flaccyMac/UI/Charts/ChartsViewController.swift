@@ -43,6 +43,13 @@ final class ChartsViewController: NSViewController {
     private var sectionViews: [NSView] = []
     private var accent: NSColor = .systemIndigo
 
+    private enum ChartList: CaseIterable {
+        case artists, albums, tracks
+    }
+
+    private var playQueues: [ChartList: [Track]] = [:]
+    private var listActions: [ChartList: NSView] = [:]
+
     override func loadView() {
         let root = AppearanceObservingView()
         root.wantsLayer = true
@@ -173,9 +180,9 @@ final class ChartsViewController: NSViewController {
 
         sectionViews = [
             statsRow,
-            sectionCard(title: String(localized: "Top Artists"), content: hostedList(artistsList)),
-            sectionCard(title: String(localized: "Top Albums"), content: hostedList(albumsGrid)),
-            sectionCard(title: String(localized: "Top Tracks"), content: hostedList(tracksList)),
+            sectionCard(title: String(localized: "Top Artists"), content: hostedList(artistsList), actions: listActionsView(for: .artists)),
+            sectionCard(title: String(localized: "Top Albums"), content: hostedList(albumsGrid), actions: listActionsView(for: .albums)),
+            sectionCard(title: String(localized: "Top Tracks"), content: hostedList(tracksList), actions: listActionsView(for: .tracks)),
             sectionCard(title: String(localized: "Listening Clock"), content: clockCardContent()),
             sectionCard(title: String(localized: "Your Streak"), content: heatmapCardContent()),
             sectionCard(title: String(localized: "Your Persona"), content: personaCardContent()),
@@ -281,17 +288,52 @@ final class ChartsViewController: NSViewController {
         emptyState.isHidden = true
     }
 
-    private func sectionCard(title: String, content: NSView) -> NSView {
-        let header = NSTextField(labelWithString: title)
-        header.font = .systemFont(ofSize: 17, weight: .bold)
-        header.textColor = MacColors.primaryLabel
+    private func sectionCard(title: String, content: NSView, actions: NSView? = nil) -> NSView {
+        let heading = NSTextField(labelWithString: title)
+        heading.font = .systemFont(ofSize: 17, weight: .bold)
+        heading.textColor = MacColors.primaryLabel
+        let header = NSStackView(views: [heading, NSView()] + (actions.map { [$0] } ?? []))
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
         content.translatesAutoresizingMaskIntoConstraints = false
         let stack = NSStackView(views: [header, content])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
+        header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         content.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return stack
+    }
+
+    private func listActionsView(for list: ChartList) -> NSView {
+        let play = GlassCapsuleButton(title: String(localized: "Play"), symbolName: "play.fill", prominent: true)
+        play.onClick = { [weak self] in self?.play(list, shuffled: false) }
+        let shuffle = GlassCapsuleButton(title: String(localized: "Shuffle"), symbolName: "shuffle")
+        shuffle.onClick = { [weak self] in self?.play(list, shuffled: true) }
+        let actions = NSStackView(views: [play, shuffle])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        actions.isHidden = true
+        listActions[list] = actions
+        return actions
+    }
+
+    private func refreshPlayQueues(_ data: RecapData, index: RecapLibraryIndex) {
+        playQueues = [
+            .artists: index.queue(forArtists: data.topArtists),
+            .albums: index.queue(forAlbums: data.topAlbums),
+            .tracks: index.queue(forTracks: data.topTracks),
+        ]
+        for list in ChartList.allCases {
+            listActions[list]?.isHidden = playQueues[list]?.isEmpty != false
+        }
+    }
+
+    private func play(_ list: ChartList, shuffled: Bool) {
+        guard let queue = playQueues[list], !queue.isEmpty else { return }
+        AppLogger.info("Recap play list: \(list) (\(queue.count) tracks, shuffled: \(shuffled))", category: .playback)
+        AudioPlayer.shared.play(shuffled ? queue.shuffled() : queue, startingAt: 0)
     }
 
     private func hostedList(_ list: NSStackView) -> NSView {
@@ -377,6 +419,7 @@ final class ChartsViewController: NSViewController {
             profileLabel.stringValue = String(localized: "Local listening history")
         }
 
+        refreshPlayQueues(data, index: RecapLibraryIndex(albums: Library.shared.albums, tracks: Library.shared.allTracks))
         renderStats(data)
         renderArtists(data)
         renderAlbums(data)
@@ -436,9 +479,10 @@ final class ChartsViewController: NSViewController {
                 localAlbum: album?.title, localArtist: album?.artist, remoteURL: nil,
                 seed: artist.name, circular: true
             )
-            row.clickAction = { [weak self] in
-                self?.reveal(artist: artist.name)
+            if album != nil {
+                row.clickAction = { [weak self] in self?.startStation(artist: artist.name) }
             }
+            row.menuProvider = { [weak self] in self?.artistMenu(name: artist.name, index: index, anchor: row) }
             artistsList.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: artistsList.widthAnchor, constant: -28).isActive = true
         }
@@ -455,9 +499,8 @@ final class ChartsViewController: NSViewController {
                 seed: "\(track.name)|\(track.artistName)", circular: false
             )
             if let local {
-                row.clickAction = { [weak self] in
-                    self?.reveal(albumTitle: local.albumTitle, artist: local.artist)
-                }
+                row.clickAction = { [weak self] in self?.play(track: local) }
+                row.menuProvider = { MacTrackMenuFactory.menu(for: local, anchor: row) }
             }
             tracksList.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: tracksList.widthAnchor, constant: -28).isActive = true
@@ -499,8 +542,9 @@ final class ChartsViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = 4
         artwork.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        stack.clickAction = { [weak self] in
-            self?.reveal(albumTitle: local?.title ?? album.name, artist: local?.artist ?? album.artistName)
+        if let local {
+            stack.clickAction = { AudioPlayer.shared.play(local.tracks, startingAt: 0) }
+            stack.menuProvider = { MacTrackMenuFactory.menu(for: local, anchor: stack) }
         }
         stack.toolTip = "\(album.name) — \(album.artistName)"
         return stack
@@ -555,12 +599,38 @@ final class ChartsViewController: NSViewController {
         return row
     }
 
-    private func reveal(artist: String) {
-        LibraryNavigator.revealArtist(artist)
+    private func play(track: Track) {
+        let queue = playQueues[.tracks] ?? []
+        guard let start = queue.firstIndex(where: { $0.fileURL == track.fileURL }) else { return }
+        AppLogger.info("Recap play track: \(track.title)", category: .playback)
+        AudioPlayer.shared.play(queue, startingAt: start)
     }
 
-    private func reveal(albumTitle: String, artist: String) {
-        LibraryNavigator.revealAlbum(title: albumTitle, artist: artist)
+    private func startStation(artist: String) {
+        AppLogger.info("Recap start station: \(artist)", category: .playback)
+        AudioPlayer.shared.startStation(seedArtist: artist)
+        MacToast.show(String(localized: "Station started from \(artist)"), style: .success, in: view.window)
+    }
+
+    private func artistMenu(name: String, index: RecapLibraryIndex, anchor: NSView) -> NSMenu {
+        let menu = NSMenu()
+        let tracks = index.tracks(byArtist: name)
+        menu.addItem(ClosureMenuItem(title: String(localized: "View Artist"), systemImage: "music.microphone") {
+            LibraryNavigator.revealArtist(name)
+        })
+        guard !tracks.isEmpty else { return menu }
+        menu.addItem(.separator())
+        menu.addItem(ClosureMenuItem(title: String(localized: "Play All"), systemImage: "play.fill") {
+            AudioPlayer.shared.play(tracks, startingAt: 0)
+        })
+        menu.addItem(ClosureMenuItem(title: String(localized: "Shuffle All"), systemImage: "shuffle") {
+            AudioPlayer.shared.play(tracks.shuffled(), startingAt: 0)
+        })
+        menu.addItem(ClosureMenuItem(title: String(localized: "Start Station"), systemImage: "dot.radiowaves.left.and.right") {
+            AudioPlayer.shared.startStation(seedArtist: name)
+            MacToast.show(String(localized: "Station started from \(name)"), style: .success, in: anchor.window)
+        })
+        return menu
     }
 
     private func renderImportState(_ state: RecapImportState) {
@@ -663,6 +733,7 @@ final class AppearanceObservingView: NSView {
 final class ClickableStackView: NSStackView {
 
     var clickAction: (() -> Void)?
+    var menuProvider: (() -> NSMenu?)?
 
     override func mouseDown(with event: NSEvent) {
         if clickAction != nil {
@@ -670,6 +741,10 @@ final class ClickableStackView: NSStackView {
         } else {
             super.mouseDown(with: event)
         }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menuProvider?() ?? super.menu(for: event)
     }
 
     override func resetCursorRects() {
