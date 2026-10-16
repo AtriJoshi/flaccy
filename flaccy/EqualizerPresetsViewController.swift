@@ -22,6 +22,8 @@ final class EqualizerPresetsViewController: UIViewController {
     private let outputsScroll = UIScrollView()
     private let outputsStack = UIStackView()
     private let impact = UIImpactFeedbackGenerator(style: .light)
+    private let selection = UISelectionFeedbackGenerator()
+    private let auditioner = EqualizerAuditioner()
 
     private struct Row {
         enum Kind {
@@ -47,6 +49,7 @@ final class EqualizerPresetsViewController: UIViewController {
         overrideUserInterfaceStyle = .dark
         buildLayout()
         NotificationCenter.default.addObserver(self, selector: #selector(stateChanged), name: EqualizerEngine.stateDidChange, object: nil)
+        auditioner.didChange = { [weak self] _ in self?.refreshAuditionedRows() }
         ArtworkPaletteExtractor.palette(
             for: AudioPlayer.shared.currentTrack?.artwork,
             cacheKey: AudioPlayer.shared.currentTrack.map { "\($0.albumTitle)\0\($0.artist)" } ?? "flaccy",
@@ -55,8 +58,50 @@ final class EqualizerPresetsViewController: UIViewController {
         reload()
     }
 
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        endHold()
+    }
+
     @objc private func stateChanged() {
         reload()
+    }
+
+    @objc private func handleRowHold(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            tableView.isScrollEnabled = false
+            navigationController?.isModalInPresentation = true
+            selection.prepare()
+            auditionRow(at: gesture.location(in: tableView))
+        case .changed:
+            auditionRow(at: gesture.location(in: tableView))
+        default:
+            endHold()
+        }
+    }
+
+    private func auditionRow(at point: CGPoint) {
+        guard let indexPath = tableView.indexPathForRow(at: point),
+              case .profile(let profile, _) = rows[indexPath.row].kind,
+              profile.id != auditioner.current?.id else { return }
+        selection.selectionChanged()
+        auditioner.begin(profile)
+    }
+
+    /// Releasing ends the audition and puts back what was in force; choosing stays a tap.
+    private func endHold() {
+        tableView.isScrollEnabled = true
+        navigationController?.isModalInPresentation = false
+        auditioner.end()
+    }
+
+    private func refreshAuditionedRows() {
+        for cell in tableView.visibleCells {
+            guard let row = cell as? EqualizerPresetRowCell, let indexPath = tableView.indexPath(for: cell),
+                  case .profile(let profile, _) = rows[indexPath.row].kind else { continue }
+            row.setAuditioned(profile.id == auditioner.current?.id)
+        }
     }
 
     private func buildLayout() {
@@ -108,6 +153,7 @@ final class EqualizerPresetsViewController: UIViewController {
         tabs.addAction(UIAction { [weak self] _ in
             guard let self, let tab = Tab(rawValue: self.tabs.selectedSegmentIndex) else { return }
             self.selectedTab = tab
+            self.endHold()
             self.reload()
         }, for: .valueChanged)
         tabs.translatesAutoresizingMaskIntoConstraints = false
@@ -120,6 +166,9 @@ final class EqualizerPresetsViewController: UIViewController {
         tableView.register(EqualizerPresetRowCell.self, forCellReuseIdentifier: EqualizerPresetRowCell.reuseIdentifier)
         tableView.register(EqualizerSectionHeaderCell.self, forCellReuseIdentifier: EqualizerSectionHeaderCell.reuseIdentifier)
         tableView.contentInset = UIEdgeInsets(top: 4, left: 0, bottom: 40, right: 0)
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleRowHold(_:)))
+        hold.minimumPressDuration = 0.25
+        tableView.addGestureRecognizer(hold)
 
         outputsScroll.translatesAutoresizingMaskIntoConstraints = false
         outputsScroll.alwaysBounceVertical = true
@@ -527,6 +576,7 @@ extension EqualizerPresetsViewController: UITableViewDataSource, UITableViewDele
                 isCurrent: current,
                 tint: accent
             )
+            cell.setAuditioned(profile.id == auditioner.current?.id)
             return cell
         }
     }
@@ -575,6 +625,7 @@ private final class EqualizerPresetRowCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let tick = UIImageView()
+    private let bars = NowPlayingBarsView()
     private let highlightView = UIView()
     private var points: [Double] = []
     private var tint = EqualizerTheme.fallbackAccent
@@ -615,7 +666,14 @@ private final class EqualizerPresetRowCell: UITableViewCell {
         tick.image = UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .bold))
         tick.setContentHuggingPriority(.required, for: .horizontal)
 
-        let row = UIStackView(arrangedSubviews: [thumb, texts, tick])
+        bars.translatesAutoresizingMaskIntoConstraints = false
+        bars.isHidden = true
+        NSLayoutConstraint.activate([
+            bars.widthAnchor.constraint(equalToConstant: 16),
+            bars.heightAnchor.constraint(equalToConstant: 15),
+        ])
+
+        let row = UIStackView(arrangedSubviews: [thumb, texts, tick, bars])
         row.spacing = 14
         row.alignment = .center
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -651,6 +709,15 @@ private final class EqualizerPresetRowCell: UITableViewCell {
         accessibilityLabel = "\(name), \(subtitle)"
         accessibilityTraits = isCurrent ? [.button, .selected] : .button
         setNeedsLayout()
+    }
+
+    /// Washes the row in the accent and swaps the tick for the moving bars while its preset is being heard.
+    func setAuditioned(_ auditioned: Bool) {
+        highlightView.backgroundColor = auditioned ? tint.withAlphaComponent(0.3) : (current ? tint.withAlphaComponent(0.14) : .clear)
+        tick.isHidden = auditioned || !current
+        bars.isHidden = !auditioned
+        bars.tintColor = tint
+        bars.setAnimating(auditioned && !UIAccessibility.isReduceMotionEnabled)
     }
 
     override func layoutSubviews() {

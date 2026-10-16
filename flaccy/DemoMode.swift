@@ -445,7 +445,7 @@ enum DemoRouter {
         case "queue": player.expandShowingQueue()
         case "lyrics": player.expandShowingLyrics()
         case "paywall": PaywallViewController.presentSheet(from: nav)
-        case "equalizer", "equalizer-advanced", "equalizer-presets", "equalizer-outputs", "equalizer-import":
+        case "equalizer", "equalizer-advanced", "equalizer-presets", "equalizer-outputs", "equalizer-import", "equalizer-preview", "equalizer-preview-cancel":
             player.expand()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { presentEqualizer(route, from: nav) }
         case "streaming":
@@ -462,9 +462,10 @@ enum DemoRouter {
         let engine = EqualizerEngine.shared
         engine.start()
         engine.isDemoSignal = true
-        let isSimple = route == "equalizer"
+        let isPreview = route.hasPrefix("equalizer-preview")
+        let isSimple = route == "equalizer" || isPreview
         engine.seedDemo(
-            activeProfileID: isSimple ? EqualizerPresets.id(forKey: "bassBoost") : "demo.warm",
+            activeProfileID: isPreview ? EqualizerPresets.id(forKey: "rock") : (isSimple ? EqualizerPresets.id(forKey: "bassBoost") : "demo.warm"),
             pretendOutput: isSimple
                 ? EqualizerOutput(id: "wired.headphones", name: "Headphones", kind: .headphones)
                 : EqualizerOutput(id: "bluetooth.demo", name: "AirPods Pro", kind: .bluetooth)
@@ -478,6 +479,11 @@ enum DemoRouter {
         case "equalizer-presets": controller.pushViewController(EqualizerPresetsViewController(startingOn: .presets, accent: accent), animated: false)
         case "equalizer-outputs": controller.pushViewController(EqualizerPresetsViewController(startingOn: .outputs, accent: accent), animated: false)
         case "equalizer-import": controller.pushViewController(EqualizerImportViewController(accent: accent, initialText: EqualizerShots.importSample), animated: false)
+        case "equalizer-preview", "equalizer-preview-cancel":
+            let screen = controller.viewControllers.first as? EqualizerViewController
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                screen?.showAuditionForScreenshot(presetKey: "bassBoost", cancelling: route == "equalizer-preview-cancel")
+            }
         default: break
         }
     }

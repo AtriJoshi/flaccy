@@ -37,6 +37,10 @@ final class EqualizerViewController: UIViewController {
 
     private static let minimumCurveHeight: CGFloat = 262
     private static let maximumCurveHeight: CGFloat = 400
+    private static let holdDuration: TimeInterval = 0.18
+    private static let cancelDistance: CGFloat = 70
+    private static let autoscrollEdge: CGFloat = 44
+    private static let accessibilityPreviewSeconds = 4.0
 
     private let preampValueLabel = UILabel()
     private let autoChip = EqualizerChip(title: "")
@@ -48,6 +52,15 @@ final class EqualizerViewController: UIViewController {
     private let presetsBlock = UIStackView()
     private let presetsRow = UIStackView()
     private let presetsScroll = UIScrollView()
+    private let presetsHintLabel = UILabel()
+    private let hearingPill = EqualizerHearingPill()
+    private let auditioner = EqualizerAuditioner()
+    private var holdPoint = CGPoint.zero
+    private var holdIsCancelling = false
+    private var autoscrollLink: CADisplayLink?
+    private var autoscrollSpeed: CGFloat = 0
+    private var previewTimer: Task<Void, Never>?
+    private var hasAnnouncedAudition = false
 
     private let advancedBlock = UIStackView()
     private let bandChipsRow = UIStackView()
@@ -90,6 +103,7 @@ final class EqualizerViewController: UIViewController {
         curveView.delegate = self
         curveView.spectrumProvider = { [engine] in engine.spectrum() }
         curveView.onFrame = { [weak self] in self?.updateMeter() }
+        auditioner.didChange = { [weak self] profile in self?.auditionChanged(to: profile) }
         NotificationCenter.default.addObserver(self, selector: #selector(stateChanged), name: EqualizerEngine.stateDidChange, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(trackChanged), name: AudioPlayer.trackDidChange, object: nil)
         updatePalette()
@@ -107,6 +121,12 @@ final class EqualizerViewController: UIViewController {
         super.viewWillAppear(animated)
         engine.beginAnalysis(for: self)
         refresh(animated: false)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        endHold(keeping: false)
+        endAccessibilityPreview()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -249,9 +269,14 @@ final class EqualizerViewController: UIViewController {
         hintLabel.textAlignment = .center
         hintLabel.numberOfLines = 2
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        hearingPill.translatesAutoresizingMaskIntoConstraints = false
         curveCard.addSubview(curveView)
         curveCard.addSubview(hintLabel)
+        curveCard.addSubview(hearingPill)
         NSLayoutConstraint.activate([
+            hearingPill.topAnchor.constraint(equalTo: curveCard.topAnchor, constant: 12),
+            hearingPill.trailingAnchor.constraint(equalTo: curveCard.trailingAnchor, constant: -12),
+            hearingPill.leadingAnchor.constraint(greaterThanOrEqualTo: curveCard.leadingAnchor, constant: 12),
             curveView.topAnchor.constraint(equalTo: curveCard.topAnchor),
             curveView.leadingAnchor.constraint(equalTo: curveCard.leadingAnchor),
             curveView.trailingAnchor.constraint(equalTo: curveCard.trailingAnchor),
@@ -330,7 +355,16 @@ final class EqualizerViewController: UIViewController {
         allButton.addAction(UIAction { [weak self] _ in self?.openPresets() }, for: .touchUpInside)
         allButton.accessibilityIdentifier = "equalizer.allPresets"
 
-        let header = UIStackView(arrangedSubviews: [tagLabel(String(localized: "Presets")), UIView(), allButton])
+        presetsHintLabel.text = String(localized: "Hold and slide to hear them")
+        presetsHintLabel.font = .scaled(.caption1, size: 11.5, weight: .regular)
+        presetsHintLabel.adjustsFontForContentSizeCategory = true
+        presetsHintLabel.textColor = UIColor.white.withAlphaComponent(0.42)
+        presetsHintLabel.numberOfLines = 0
+        let titles = UIStackView(arrangedSubviews: [tagLabel(String(localized: "Presets")), presetsHintLabel])
+        titles.axis = .vertical
+        titles.spacing = 2
+
+        let header = UIStackView(arrangedSubviews: [titles, UIView(), allButton])
         header.alignment = .center
         header.isLayoutMarginsRelativeArrangement = true
         header.layoutMargins = UIEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
@@ -343,6 +377,10 @@ final class EqualizerViewController: UIViewController {
         presetsScroll.showsHorizontalScrollIndicator = false
         presetsScroll.clipsToBounds = false
         presetsScroll.addSubview(presetsRow)
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
+        hold.minimumPressDuration = Self.holdDuration
+        hold.allowableMovement = 10_000
+        presetsScroll.addGestureRecognizer(hold)
         NSLayoutConstraint.activate([
             presetsRow.topAnchor.constraint(equalTo: presetsScroll.contentLayoutGuide.topAnchor),
             presetsRow.bottomAnchor.constraint(equalTo: presetsScroll.contentLayoutGuide.bottomAnchor),
@@ -661,6 +699,7 @@ final class EqualizerViewController: UIViewController {
                     self?.impact.impactOccurred()
                     self?.engine.select(profileID: candidate.id)
                 }, for: .touchUpInside)
+                card.onPreviewRequested = { [weak self] in self?.previewForAccessibility(candidate) }
                 presetCards[candidate.id] = card
                 presetsRow.addArrangedSubview(card)
             }
@@ -679,6 +718,7 @@ final class EqualizerViewController: UIViewController {
                 isCurrent: isCurrent,
                 tint: accent
             )
+            card.setHeld(auditioner.current?.id == candidate.id && !holdIsCancelling, animated: false)
         }
         if currentChanged, let card = presetCards[profile.id] {
             lastPresetStyle = style
@@ -687,6 +727,160 @@ final class EqualizerViewController: UIViewController {
             presetsScroll.scrollRectToVisible(target, animated: lastPresetStyle != nil && isViewLoaded && view.window != nil)
         }
     }
+
+    // MARK: Hold to hear
+
+    @objc private func handleHold(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            endAccessibilityPreview()
+            setScrolling(enabled: false)
+            holdIsCancelling = false
+            selection.prepare()
+            trackHold(at: gesture.location(in: presetsBlock))
+        case .changed:
+            trackHold(at: gesture.location(in: presetsBlock))
+        case .ended:
+            endHold(keeping: !holdIsCancelling)
+        case .cancelled, .failed:
+            endHold(keeping: false)
+        default:
+            break
+        }
+    }
+
+    /// Follows the finger: switches the audition to the card under it, and flips to the
+    /// cancelling state once it has slid far enough off the strip.
+    private func trackHold(at point: CGPoint) {
+        holdPoint = point
+        let local = presetsScroll.convert(point, from: presetsBlock)
+        let overshoot = max(-local.y, local.y - presetsScroll.bounds.height, 0)
+        let cancelling = overshoot > Self.cancelDistance
+        if cancelling != holdIsCancelling {
+            holdIsCancelling = cancelling
+            if cancelling { impact.impactOccurred(intensity: 0.7) } else { selection.selectionChanged() }
+            refreshAuditionFeedback()
+        }
+        if !cancelling, let id = presetID(atContentX: local.x), id != auditioner.current?.id,
+           let candidate = engine.allProfiles.first(where: { $0.id == id }) {
+            selection.selectionChanged()
+            auditioner.begin(candidate)
+        }
+        updateAutoscroll(visibleX: local.x - presetsScroll.contentOffset.x)
+    }
+
+    private func presetID(atContentX x: CGFloat) -> String? {
+        let cards = presetsRow.arrangedSubviews
+        let half = presetsRow.spacing / 2
+        guard let hit = cards.first(where: { x < $0.frame.maxX + half }) ?? cards.last else { return nil }
+        return presetCards.first(where: { $0.value === hit })?.key
+    }
+
+    private func setScrolling(enabled: Bool) {
+        presetsScroll.isScrollEnabled = enabled
+        scroll.isScrollEnabled = enabled
+        navigationController?.isModalInPresentation = !enabled
+    }
+
+    /// Ends a hold, keeping the heard preset as one change when asked to, and always
+    /// putting the sound back to what was in force otherwise.
+    private func endHold(keeping: Bool) {
+        stopAutoscroll()
+        let kept = keeping ? auditioner.current : nil
+        setScrolling(enabled: true)
+        holdIsCancelling = false
+        if let kept {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            engine.select(profileID: kept.id)
+        }
+        auditioner.end()
+    }
+
+    private func auditionChanged(to profile: EqualizerProfile?) {
+        curveView.setPreview(profile?.resolvedBands())
+        refreshAuditionFeedback()
+        guard let profile else {
+            hasAnnouncedAudition = false
+            return
+        }
+        guard !hasAnnouncedAudition else { return }
+        hasAnnouncedAudition = true
+        UIAccessibility.post(notification: .announcement, argument: String(localized: "Hearing \(EqualizerCopy.name(of: profile))"))
+    }
+
+    private func refreshAuditionFeedback() {
+        let profile = auditioner.current
+        hearingPill.set(name: profile.map { EqualizerCopy.name(of: $0) }, cancelling: holdIsCancelling, accent: accent)
+        for (id, card) in presetCards {
+            card.setHeld(id == profile?.id && !holdIsCancelling, animated: true)
+        }
+    }
+
+    private func updateAutoscroll(visibleX: CGFloat) {
+        let edge = Self.autoscrollEdge
+        let width = presetsScroll.bounds.width
+        if visibleX < edge {
+            autoscrollSpeed = -min((edge - visibleX) / edge, 1.5) * 12
+        } else if visibleX > width - edge {
+            autoscrollSpeed = min((visibleX - (width - edge)) / edge, 1.5) * 12
+        } else {
+            autoscrollSpeed = 0
+        }
+        if autoscrollSpeed != 0, autoscrollLink == nil {
+            let link = CADisplayLink(target: self, selector: #selector(autoscrollTick))
+            link.add(to: .main, forMode: .common)
+            autoscrollLink = link
+        } else if autoscrollSpeed == 0 {
+            stopAutoscroll()
+        }
+    }
+
+    private func stopAutoscroll() {
+        autoscrollLink?.invalidate()
+        autoscrollLink = nil
+        autoscrollSpeed = 0
+    }
+
+    @objc private func autoscrollTick() {
+        let maximum = max(presetsScroll.contentSize.width - presetsScroll.bounds.width, 0)
+        let offset = min(max(presetsScroll.contentOffset.x + autoscrollSpeed, 0), maximum)
+        guard offset != presetsScroll.contentOffset.x else { return }
+        presetsScroll.contentOffset.x = offset
+        trackHold(at: holdPoint)
+    }
+
+    /// VoiceOver cannot hold and slide, so its Preview action plays the preset for a few
+    /// seconds and puts the sound back.
+    private func previewForAccessibility(_ profile: EqualizerProfile) {
+        endAccessibilityPreview()
+        auditioner.begin(profile)
+        previewTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.accessibilityPreviewSeconds))
+            guard !Task.isCancelled else { return }
+            self?.previewTimer = nil
+            self?.auditioner.end()
+        }
+    }
+
+    private func endAccessibilityPreview() {
+        guard previewTimer != nil else { return }
+        previewTimer?.cancel()
+        previewTimer = nil
+        auditioner.end()
+    }
+
+    #if DEBUG
+    /// Puts the screen in the state a held finger leaves it in, for the screenshot routes.
+    func showAuditionForScreenshot(presetKey: String, cancelling: Bool) {
+        guard let profile = EqualizerPresets.profile(forKey: presetKey) else { return }
+        view.layoutIfNeeded()
+        holdIsCancelling = cancelling
+        auditioner.begin(profile)
+        if let card = presetCards[profile.id] {
+            presetsScroll.scrollRectToVisible(card.frame.insetBy(dx: -24, dy: 0), animated: false)
+        }
+    }
+    #endif
 
     private func thumbnail(for profile: EqualizerProfile) -> [Double] {
         if profile.isBuiltIn, let cached = Self.builtInThumbnails[profile.id] { return cached }
