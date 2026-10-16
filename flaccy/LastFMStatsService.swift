@@ -1,6 +1,6 @@
 import Foundation
 
-extension ChartPeriod {
+nonisolated extension ChartPeriod {
     /// The earliest instant included in this period, measured back from `now`.
     func cutoff(now: Date, calendar: Calendar = .current) -> Date {
         switch self {
