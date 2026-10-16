@@ -2886,7 +2886,10 @@ mod cleanup_tests {
     fn recap_load_reads_a_period_without_the_older_history() {
         let temp = TempDb::open();
         let db = &temp.db;
-        let now = 1_800_000_000;
+        let now = chrono::TimeZone::with_ymd_and_hms(&chrono::Local, 2027, 1, 15, 12, 0, 0)
+            .single()
+            .expect("valid local time")
+            .timestamp();
         let day = 86_400;
         seed_scrobbles(
             db,

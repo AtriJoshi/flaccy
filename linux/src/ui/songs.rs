@@ -162,7 +162,6 @@ struct View {
     chips: RefCell<Option<Rc<ChipBar>>>,
     actions: RefCell<Vec<gtk::Button>>,
     epoch: Cell<u64>,
-    restoring_sort: Cell<bool>,
     applied: Cell<u64>,
 }
 
@@ -237,7 +236,8 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     };
     install_bulk_actions(ui, &selection);
 
-    column_view.append_column(&track_number_column(ui));
+    let track_column = track_number_column(ui);
+    column_view.append_column(&track_column);
     let title_column = string_column(
         ui,
         "Title",
@@ -430,7 +430,6 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         chips: RefCell::new(None),
         actions: RefCell::new(Vec::new()),
         epoch: Cell::new(0),
-        restoring_sort: Cell::new(false),
         applied: Cell::new(0),
     });
 
@@ -676,7 +675,9 @@ impl View {
         }
         self.filter.changed(gtk::FilterChange::Different);
         self.rebind_rows();
-        self.scroll_to_top();
+        if natural_sort {
+            self.scroll_to_top();
+        }
         self.update_status();
     }
 
@@ -696,15 +697,10 @@ impl View {
         }
     }
 
-    /// Re-binds every cell so the Plays column re-reads its count. GTK keeps a
-    /// row's widgets while the row's object is the same one, so the rows are
-    /// swapped for fresh objects holding the same tracks.
+    /// Tells every visible cell to re-read its text, so the Plays column shows
+    /// the count the active chip means.
     fn rebind_rows(&self) {
-        let items: Vec<BoxedAnyObject> = (0..self.store.n_items())
-            .filter_map(|i| self.store.item(i).and_downcast::<BoxedAnyObject>())
-            .map(|boxed| BoxedAnyObject::new(boxed.borrow::<Track>().clone()))
-            .collect();
-        self.store.splice(0, self.store.n_items(), &items);
+        self.ui.core.hub.emit(&AppEvent::SongCellsChanged);
     }
 
     fn scroll_to_top(&self) {
@@ -843,9 +839,6 @@ impl View {
         let view = Rc::clone(self);
         sorter.connect_changed(move |sorter, _| {
             view.scroll_to_top();
-            if view.restoring_sort.get() {
-                return;
-            }
             let Some(sorter) = sorter.downcast_ref::<gtk::ColumnViewSorter>() else {
                 return;
             };
@@ -1135,6 +1128,31 @@ fn watch_now_playing_cell(ui: &Rc<Ui>, widget: &gtk::Widget, item: &gtk::ListIte
     });
 }
 
+/// Re-reads a cell's text when the table announces that what its columns count
+/// has changed (the Plays column switching between all-time and a range), so the
+/// rows keep their objects, their selection and their scroll position.
+fn watch_cell_text(
+    ui: &Rc<Ui>,
+    label: &gtk::Label,
+    item: &gtk::ListItem,
+    text_for: Rc<impl Fn(&Track) -> String + 'static>,
+) {
+    let item_weak = item.downgrade();
+    ui.core.hub.subscribe_widget(label, move |label, event| {
+        if !matches!(event, AppEvent::SongCellsChanged) {
+            return;
+        }
+        let Some(item) = item_weak.upgrade() else {
+            return;
+        };
+        let Some(boxed) = item.item().and_downcast::<BoxedAnyObject>() else {
+            return;
+        };
+        let text = text_for(&boxed.borrow::<Track>());
+        label.set_label(&text);
+    });
+}
+
 fn track_sorter(compare: impl Fn(&Track, &Track) -> Ordering + 'static) -> gtk::CustomSorter {
     gtk::CustomSorter::new(move |a, b| {
         let (Some(a), Some(b)) = (
@@ -1161,6 +1179,8 @@ fn string_column(
 ) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let setup_ui = Rc::clone(ui);
+    let text_for = Rc::new(text_for);
+    let setup_text = Rc::clone(&text_for);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -1171,6 +1191,7 @@ fn string_column(
             .build();
         item.set_child(Some(&label));
         watch_now_playing_cell(&setup_ui, label.upcast_ref::<gtk::Widget>(), item);
+        watch_cell_text(&setup_ui, &label, item, Rc::clone(&setup_text));
         if let Some(menu) = menu.clone() {
             let gesture = gtk::GestureClick::builder()
                 .button(gdk::BUTTON_SECONDARY)
@@ -1190,7 +1211,6 @@ fn string_column(
             label.add_controller(gesture);
         }
     });
-    let text_for = Rc::new(text_for);
     {
         let text_for = Rc::clone(&text_for);
         let bind_ui = Rc::clone(ui);

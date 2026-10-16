@@ -33,6 +33,9 @@ pub enum AppEvent {
     SearchChanged(String),
     /// Ctrl+J: bring the playing song into view in the Songs table.
     LocateCurrent,
+    /// The Songs table changed what its columns count (the Plays column moved
+    /// to or from a time range); every visible cell re-reads its text.
+    SongCellsChanged,
     LyricsToggled(bool),
     QueueChanged,
     Toast(String),

@@ -321,7 +321,8 @@ pub fn persona(rows: &[&ScrobbleRow], clock: &[i64; 24]) -> &'static str {
     let plays = rows.len();
     let diversity = distinct_artists as f64 / plays as f64;
     let night_plays: i64 = (0..6).map(|h| clock[h]).sum::<i64>() + clock[23];
-    let night_ratio = night_plays as f64 / plays.max(1) as f64;
+    let dated_plays: i64 = clock.iter().sum();
+    let night_ratio = night_plays as f64 / dated_plays.max(1) as f64;
     if night_ratio > 0.35 {
         return "Night Owl";
     }
@@ -592,29 +593,40 @@ mod tests {
         )
     }
 
+    fn noon() -> i64 {
+        ts(2026, 6, 15, 12)
+    }
+
+    fn noon_days_ago(days: u32) -> i64 {
+        ts(2026, 6, 15 - days, 12)
+    }
+
     #[test]
     fn streak_counts_consecutive_days_ending_today() {
-        let now = chrono::Utc::now().timestamp();
-        let times = [now, now - 86_400, now - 2 * 86_400, now - 5 * 86_400];
-        assert_eq!(streak_over(&times, now), 3);
+        let times = [noon(), noon_days_ago(1), noon_days_ago(2), noon_days_ago(5)];
+        assert_eq!(streak_over(&times, noon()), 3);
     }
 
     #[test]
     fn streak_zero_when_not_today() {
-        let now = chrono::Utc::now().timestamp();
-        assert_eq!(streak_over(&[now - 3 * 86_400], now), 0);
+        assert_eq!(streak_over(&[noon_days_ago(3)], noon()), 0);
     }
 
     #[test]
     fn streak_counts_a_day_once_however_many_plays_it_holds() {
-        let now = chrono::Utc::now().timestamp();
-        let times = [now, now - 60, now - 120, now - 86_400, now - 86_460];
-        assert_eq!(streak_over(&times, now), 2);
+        let times = [
+            noon(),
+            noon() - 60,
+            noon() - 120,
+            noon_days_ago(1),
+            noon_days_ago(1) - 60,
+        ];
+        assert_eq!(streak_over(&times, noon()), 2);
     }
 
     #[test]
     fn streak_reads_across_rounds_and_stops_at_the_first_gap() {
-        let now = chrono::Utc::now().timestamp();
+        let now = noon();
         let times: Vec<i64> = (0..STREAK_CHUNK as i64 * 2 + 50)
             .map(|i| now - i * 43_200)
             .collect();
@@ -627,7 +639,7 @@ mod tests {
 
     #[test]
     fn streak_ignores_undated_plays_and_a_future_clock() {
-        let now = chrono::Utc::now().timestamp();
+        let now = noon();
         let times = [now + 3 * 86_400, now, 5, 4, 3];
         assert_eq!(streak_over(&times, now), 1);
     }

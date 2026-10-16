@@ -46,7 +46,7 @@ Point flaccy at your music files. It scans the directory structure, sends file p
 - iPhone, Mac (⌥⌘E) and Linux (Ctrl+E); not on Apple Watch
 
 ### Library
-- **Albums, Songs, Artists, Playlists** with search, sorting, and filter chips (Lossless / Hi-Res / Loved)
+- **Albums, Songs, Artists, Playlists** with search, sorting, and quick-pivot chips (Favorites / Lossless / Recently Added / Recently Played / Rediscover) — on Mac and Linux the Songs list adds **Most Played over any time range** (7 days to all time), Play / Shuffle / Save as Playlist for whatever list is on screen, and a live song count and duration
 - **AI organization** — messy folder names and scene releases identified and cleaned automatically (7-day trial, then one-time lifetime purchase via StoreKit)
 - **Popular on every artist page** — Last.fm top tracks intersected with what you own (top 5)
 - **Folder watching** (Mac) — files you add appear instantly, indexed in place from any folder
@@ -54,7 +54,7 @@ Point flaccy at your music files. It scans the directory structure, sends file p
 
 ### Last.fm
 - **Scrobbling** with offline write-ahead queue and automatic retry — identical semantics on every platform
-- **Loved tracks**, **charts by period**, listening clock, streak heatmap
+- **Loved tracks**, **charts by period** (Mac and Linux open on the last 7 days and show how plays and minutes moved against the period before), listening clock, streak heatmap
 - **Recap & Year in Music** — shareable story cards and posters (full-resolution export on Mac)
 - Artist bios, album metadata enrichment, similar-artist discovery
 

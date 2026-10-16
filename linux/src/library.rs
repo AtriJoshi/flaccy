@@ -74,12 +74,13 @@ pub fn format_time(seconds: f64) -> String {
 }
 
 /// "45 min", "3 hr 12 min", "2 d 4 hr": how long a list of songs plays for, in
-/// the largest two units that matter, rounded to the nearest minute.
+/// the largest two units that matter, each truncated rather than rounded (the
+/// Mac's `SongsStatusFormat` reads the same way).
 pub fn format_total_duration(seconds: f64) -> String {
     if !seconds.is_finite() || seconds <= 0.0 {
         return "0 min".to_string();
     }
-    let minutes = (seconds / 60.0).round() as i64;
+    let minutes = (seconds / 60.0).floor() as i64;
     if minutes >= 24 * 60 {
         return format!("{} d {} hr", minutes / (24 * 60), minutes % (24 * 60) / 60);
     }
@@ -817,6 +818,7 @@ mod duration_tests {
         assert_eq!(format_total_duration(0.0), "0 min");
         assert_eq!(format_total_duration(f64::NAN), "0 min");
         assert_eq!(format_total_duration(29.0), "0 min");
+        assert_eq!(format_total_duration(119.0), "1 min");
         assert_eq!(format_total_duration(45.0 * 60.0), "45 min");
         assert_eq!(format_total_duration(3600.0), "1 hr");
         assert_eq!(

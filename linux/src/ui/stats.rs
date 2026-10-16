@@ -30,6 +30,16 @@ const DEFAULT_PERIOD: Period = Period::Week;
 /// again.
 const REMOTE_TTL: Duration = Duration::from_secs(600);
 
+/// How soon to ask again after Last.fm gave nothing usable (offline, a bad
+/// moment), so a dropped connection does not stay "fresh" for the full ten
+/// minutes.
+const REMOTE_RETRY: Duration = Duration::from_secs(60);
+
+/// How long a period's snapshot is trusted without anything having happened to
+/// the history: past this it is redrawn from the database, so a page left open
+/// overnight does not keep yesterday's "last 7 days".
+const SNAPSHOT_TTL: Duration = Duration::from_secs(300);
+
 const REMOTE_LIST_LIMIT: u32 = 10;
 
 type RankedList = Vec<(String, i64)>;
@@ -48,6 +58,21 @@ struct RemoteCharts {
 impl RemoteCharts {
     fn is_fresh(&self) -> bool {
         self.fetched.elapsed() < REMOTE_TTL
+    }
+
+    /// This answer laid over the previous one: a list that did not come back
+    /// this time keeps the Last.fm list already on screen rather than falling
+    /// back to the local numbers.
+    fn over(self, previous: Option<&RemoteCharts>) -> RemoteCharts {
+        let Some(previous) = previous else {
+            return self;
+        };
+        RemoteCharts {
+            artists: self.artists.or_else(|| previous.artists.clone()),
+            albums: self.albums.or_else(|| previous.albums.clone()),
+            tracks: self.tracks.or_else(|| previous.tracks.clone()),
+            fetched: self.fetched,
+        }
     }
 
     fn apply(&self, data: &mut RecapData) {
@@ -70,12 +95,13 @@ impl RemoteCharts {
 struct Page {
     ui: Rc<Ui>,
     period: Cell<Period>,
-    snapshots: RefCell<HashMap<Period, Rc<RecapData>>>,
+    snapshots: RefCell<HashMap<Period, (Rc<RecapData>, Instant)>>,
     remote: RefCell<HashMap<Period, RemoteCharts>>,
     loading: RefCell<HashSet<Period>>,
     remote_loading: RefCell<HashSet<Period>>,
     epoch: Cell<u64>,
     announced_local_only: Cell<bool>,
+    import_signed_in: Cell<Option<bool>>,
     stack: gtk::Stack,
     toggles: Vec<(Period, gtk::ToggleButton)>,
     busy: gtk::Box,
@@ -168,6 +194,7 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         remote_loading: RefCell::new(HashSet::new()),
         epoch: Cell::new(0),
         announced_local_only: Cell::new(false),
+        import_signed_in: Cell::new(None),
         stack: stack.clone(),
         toggles,
         busy,
@@ -289,10 +316,19 @@ impl Page {
     /// asks for it and leaves the page as it is until the answer lands.
     fn present(self: &Rc<Self>) {
         let period = self.period.get();
-        if self.snapshots.borrow().contains_key(&period) {
-            self.render();
-        } else {
-            self.load_local(period);
+        let age = self
+            .snapshots
+            .borrow()
+            .get(&period)
+            .map(|(_, taken)| taken.elapsed());
+        match age {
+            Some(age) => {
+                self.render();
+                if age > SNAPSHOT_TTL {
+                    self.load_local(period);
+                }
+            }
+            None => self.load_local(period),
         }
         self.update_busy();
     }
@@ -340,7 +376,9 @@ impl Page {
                     page.load_local(period);
                 }
             } else if let Some(data) = data {
-                page.snapshots.borrow_mut().insert(period, Rc::new(data));
+                page.snapshots
+                    .borrow_mut()
+                    .insert(period, (Rc::new(data), Instant::now()));
                 if wanted {
                     page.render();
                 }
@@ -363,7 +401,12 @@ impl Page {
 
     fn render(self: &Rc<Self>) {
         let period = self.period.get();
-        let Some(snapshot) = self.snapshots.borrow().get(&period).cloned() else {
+        let Some(snapshot) = self
+            .snapshots
+            .borrow()
+            .get(&period)
+            .map(|(data, _)| Rc::clone(data))
+        else {
             return;
         };
         if !snapshot.has_history {
@@ -372,7 +415,10 @@ impl Page {
         }
         self.stack.set_visible_child_name("stats");
         replace_child(&self.tiles, &tiles_row(&snapshot, period));
-        replace_child(&self.import, &import_row(&self.ui));
+        let signed_in = self.ui.core.session.borrow().is_some();
+        if self.import_signed_in.replace(Some(signed_in)) != Some(signed_in) {
+            replace_child(&self.import, &import_row(&self.ui));
+        }
         replace_child(&self.heatmap, &heatmap_widget(&snapshot));
         replace_child(&self.clock, &clock_widget(&snapshot));
         self.fill_lists();
@@ -383,7 +429,7 @@ impl Page {
     /// laid over it when they have arrived.
     fn current(&self) -> Option<(RecapData, Period)> {
         let period = self.period.get();
-        let mut data = (*self.snapshots.borrow().get(&period)?.clone()).clone();
+        let mut data = (*self.snapshots.borrow().get(&period)?.0).clone();
         if let Some(remote) = self.remote.borrow().get(&period) {
             remote.apply(&mut data);
         }
@@ -455,7 +501,8 @@ impl Page {
             let charts = rx.recv().await.ok().flatten();
             page.remote_loading.borrow_mut().remove(&period);
             if let Some(charts) = charts {
-                page.remote.borrow_mut().insert(period, charts);
+                let merged = charts.over(page.remote.borrow().get(&period));
+                page.remote.borrow_mut().insert(period, merged);
                 if page.period.get() == period {
                     page.fill_lists();
                 }
@@ -492,7 +539,7 @@ fn fetch_remote_charts(session: &crate::config::Session, period: Period) -> Opti
         "charts",
         &format!("charts backfill: Last.fm ({api_period})"),
     );
-    Some(RemoteCharts {
+    let mut charts = RemoteCharts {
         artists: usable_list("artists", artists),
         albums: usable_list("albums", albums).map(|albums| {
             albums
@@ -507,7 +554,11 @@ fn fetch_remote_charts(session: &crate::config::Session, period: Period) -> Opti
                 .collect()
         }),
         fetched: Instant::now(),
-    })
+    };
+    if charts.artists.is_none() && charts.albums.is_none() && charts.tracks.is_none() {
+        charts.fetched = Instant::now() - (REMOTE_TTL - REMOTE_RETRY);
+    }
+    Some(charts)
 }
 
 /// A fetched list when it is worth showing; `None` for a failure (logged) or an
@@ -827,17 +878,7 @@ fn heatmap_widget(data: &Rc<RecapData>) -> gtk::Widget {
             }
         });
     }
-    {
-        let weak = area.downgrade();
-        adw::StyleManager::default().connect_dark_notify(move |_| {
-            if let Some(area) = weak.upgrade() {
-                area.queue_draw();
-            }
-        });
-    }
-    if let Some(controller) = crate::theme::ThemeController::current() {
-        controller.connect_changed_widget(&area, |area| area.queue_draw());
-    }
+    redraw_on_theme_change(&area);
     area.set_has_tooltip(true);
     {
         let data = Rc::clone(data);
@@ -878,6 +919,28 @@ fn heatmap_widget(data: &Rc<RecapData>) -> gtk::Widget {
     scroll.upcast()
 }
 
+/// Repaints a hand-drawn chart when the light/dark setting or the palette
+/// changes, and lets go of the global dark-mode handler with the chart: the
+/// page redraws its charts on every update, so handlers left behind would pile
+/// up for as long as the app runs.
+fn redraw_on_theme_change(area: &gtk::DrawingArea) {
+    let weak = area.downgrade();
+    let handler = adw::StyleManager::default().connect_dark_notify(move |_| {
+        if let Some(area) = weak.upgrade() {
+            area.queue_draw();
+        }
+    });
+    let handler = RefCell::new(Some(handler));
+    area.connect_destroy(move |_| {
+        if let Some(handler) = handler.borrow_mut().take() {
+            adw::StyleManager::default().disconnect(handler);
+        }
+    });
+    if let Some(controller) = crate::theme::ThemeController::current() {
+        controller.connect_changed_widget(area, |area| area.queue_draw());
+    }
+}
+
 fn month_label(month: u32) -> &'static str {
     match month {
         1 => "Jan",
@@ -914,17 +977,7 @@ fn clock_widget(data: &Rc<RecapData>) -> gtk::Widget {
     clock.set_draw_func(move |area, cr, width, height| {
         draw_listening_clock(area, cr, width as f64, height as f64, &buckets);
     });
-    {
-        let weak = clock.downgrade();
-        adw::StyleManager::default().connect_dark_notify(move |_| {
-            if let Some(clock) = weak.upgrade() {
-                clock.queue_draw();
-            }
-        });
-    }
-    if let Some(controller) = crate::theme::ThemeController::current() {
-        controller.connect_changed_widget(&clock, |clock| clock.queue_draw());
-    }
+    redraw_on_theme_change(&clock);
     clock.upcast()
 }
 
