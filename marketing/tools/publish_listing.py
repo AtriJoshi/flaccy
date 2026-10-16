@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Pushes listing text and screenshots to an editable App Store Connect version.
+"""Superseded by `midgar listing` (Midgar decision D13); kept until this app's store flow moves to it. See ops/runbooks/store-commands.md in guitaripod/midgar-platform.
+
+Pushes listing text and screenshots to an editable App Store Connect version.
 
   publish_listing.py --platform ios|mac --app APP_ID --version-id VERSION_ID --app-info APP_INFO_ID
                      [--stage DIR] [--device-type IPHONE_67] [--skip-text] [--dry-run]
