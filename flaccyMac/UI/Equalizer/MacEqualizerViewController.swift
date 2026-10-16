@@ -3,10 +3,11 @@ import FlaccyCore
 import UniformTypeIdentifiers
 
 /// The equalizer window's content: the same curve and the same rules as the
-/// iPhone, laid out the way a Mac instrument is. A strip across the top holds
-/// the switch, the preset menu, the output this profile follows, Compare and
-/// the mode; a preamp rail with level meters sits beside the curve; and under
-/// it a row of ten band cells (Simple) or a table of parametric bands
+/// iPhone, laid out the way a Mac instrument is. A deck of every preset fills
+/// the left column: pointing at one plays it, clicking keeps it. A strip across
+/// the top of the rest holds the switch, the output this profile follows,
+/// Compare and the mode; a preamp rail with level meters sits beside the curve;
+/// and under it a row of ten band cells (Simple) or a table of parametric bands
 /// (Advanced). Everything edits through `EqualizerEngine`, and every gesture
 /// is one undo step.
 final class MacEqualizerViewController: NSViewController {
@@ -16,7 +17,9 @@ final class MacEqualizerViewController: NSViewController {
     private let curveView = MacEqualizerCurveView()
     private let enableSwitch = NSSwitch()
     private let enableLabel = NSTextField(labelWithString: "")
-    private let presetPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let deck = MacEqualizerDeck()
+    private let profileTitle = NSTextField(labelWithString: "")
+    private let previewPill = MacEqualizerPreviewPill()
     private let saveButton = NSButton()
     private let outputButton = NSButton()
     private let compareButton = MacHoldButton()
@@ -45,6 +48,10 @@ final class MacEqualizerViewController: NSViewController {
     private var undoBase: EqualizerState?
     private var guardActive = false
     private var lowerHeight: NSLayoutConstraint?
+    private var auditionID: String?
+    private var auditionGeneration = 0
+    private var escapeMonitor: Any?
+    private var observedWindow: NSWindow?
 
     private var profile: EqualizerProfile { engine.profileInForce }
     private var mode: EqualizerPlotMode { profile.kind == .graphic ? .simple : .advanced }
@@ -53,6 +60,15 @@ final class MacEqualizerViewController: NSViewController {
     private var topInset: NSLayoutConstraint?
 
     private var container: NSView { zoomHost.content }
+
+    private static let hoverPreviewKey = "flaccy.mac.equalizer.hoverPreview"
+    private static let dwellSeconds = 0.09
+    private static let leaveGraceSeconds = 0.16
+    private static let spokenAuditionSeconds = 4.0
+
+    private var hoverPreviewOn: Bool {
+        UserDefaults.standard.object(forKey: Self.hoverPreviewKey) as? Bool ?? true
+    }
 
     override func loadView() {
         zoomHost.wantsLayer = true
@@ -65,6 +81,7 @@ final class MacEqualizerViewController: NSViewController {
         curveView.delegate = self
         curveView.spectrumProvider = { [engine] in engine.spectrum() }
         curveView.onFrame = { [weak self] in self?.updateMeter() }
+        wireDeck()
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(stateChanged), name: EqualizerEngine.stateDidChange, object: nil)
         center.addObserver(self, selector: #selector(paletteChanged), name: .flaccyNowPlayingPaletteChanged, object: nil)
@@ -81,6 +98,13 @@ final class MacEqualizerViewController: NSViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         view.window?.makeFirstResponder(curveView)
+        observeWindowForAudition()
+        deck.revealCurrent()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        endAudition()
     }
 
     override func viewDidDisappear() {
@@ -114,6 +138,7 @@ final class MacEqualizerViewController: NSViewController {
         container.addSubview(backdrop)
 
         let top = makeTopBar()
+        let deckCard = makeDeckCard()
         let rail = makePreampRail()
         let curveCard = makeCurveCard()
         let lower = makeLowerCard()
@@ -135,12 +160,17 @@ final class MacEqualizerViewController: NSViewController {
         rail.setContentHuggingPriority(.required, for: .horizontal)
         curveCard.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        for view in [top, middle, lower, status] {
+        container.addSubview(deckCard)
+        for view in [top, middle, lower] {
             view.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(view)
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24).isActive = true
+            view.leadingAnchor.constraint(equalTo: deckCard.trailingAnchor, constant: 16).isActive = true
             view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24).isActive = true
         }
+        status.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(status)
+        status.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24).isActive = true
+        status.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24).isActive = true
         let topAnchorInset = top.topAnchor.constraint(equalTo: container.topAnchor, constant: 36)
         topInset = topAnchorInset
         NotificationCenter.default.addObserver(self, selector: #selector(zoomChanged), name: .flaccyInterfaceScaleChanged, object: nil)
@@ -152,13 +182,17 @@ final class MacEqualizerViewController: NSViewController {
             backdrop.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             backdrop.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             topAnchorInset,
+            deckCard.topAnchor.constraint(equalTo: top.topAnchor),
+            deckCard.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 24),
+            deckCard.widthAnchor.constraint(equalToConstant: 236),
+            deckCard.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -14),
             middle.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 14),
             lower.topAnchor.constraint(equalTo: middle.bottomAnchor, constant: 14),
             status.topAnchor.constraint(equalTo: lower.bottomAnchor, constant: 14),
             status.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
             top.heightAnchor.constraint(equalToConstant: 30),
             status.heightAnchor.constraint(equalToConstant: 16),
-            curveCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
+            curveCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 340),
         ])
         lowerHeight = lower.heightAnchor.constraint(equalToConstant: 168)
         lowerHeight?.isActive = true
@@ -170,14 +204,6 @@ final class MacEqualizerViewController: NSViewController {
         enableSwitch.setAccessibilityLabel(EqualizerCopy.title)
         enableLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
         enableLabel.textColor = .white.withAlphaComponent(0.7)
-
-        presetPopUp.target = self
-        presetPopUp.action = #selector(presetChosen(_:))
-        presetPopUp.bezelStyle = .rounded
-        presetPopUp.font = .systemFont(ofSize: 13.5, weight: .semibold)
-        presetPopUp.translatesAutoresizingMaskIntoConstraints = false
-        presetPopUp.widthAnchor.constraint(equalToConstant: 230).isActive = true
-        presetPopUp.setAccessibilityLabel(String(localized: "Preset"))
 
         saveButton.title = String(localized: "Save…")
         saveButton.bezelStyle = .rounded
@@ -202,7 +228,7 @@ final class MacEqualizerViewController: NSViewController {
         modeControl.translatesAutoresizingMaskIntoConstraints = false
         modeControl.widthAnchor.constraint(equalToConstant: 190).isActive = true
 
-        let leading = NSStackView(views: [enableSwitch, enableLabel, presetPopUp, saveButton, outputButton])
+        let leading = NSStackView(views: [enableSwitch, enableLabel, saveButton, outputButton])
         leading.orientation = .horizontal
         leading.spacing = 10
         leading.alignment = .centerY
@@ -223,6 +249,28 @@ final class MacEqualizerViewController: NSViewController {
         let card = MacLiquidGlass.surface(hosting: content, cornerRadius: radius)
         card.translatesAutoresizingMaskIntoConstraints = false
         return card
+    }
+
+    private func makeDeckCard() -> NSView {
+        deck.translatesAutoresizingMaskIntoConstraints = false
+        deck.footerMenu = makeDeckFooterMenu()
+        deck.setHoverPreview(hoverPreviewOn)
+        return glassCard(hosting: deck)
+    }
+
+    private func makeDeckFooterMenu() -> NSMenu {
+        let menu = NSMenu()
+        let entries: [(String, Selector)] = [
+            (String(localized: "Export as Text…"), #selector(exportProfile)),
+            (String(localized: "Copy as Text"), #selector(copyProfile)),
+            (String(localized: "Find Headphones on AutoEq"), #selector(openAutoEq)),
+        ]
+        for (title, action) in entries {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
     }
 
     private func makePreampRail() -> NSView {
@@ -284,12 +332,30 @@ final class MacEqualizerViewController: NSViewController {
         hintLabel.alignment = .center
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        profileTitle.font = .systemFont(ofSize: 17, weight: .bold)
+        profileTitle.textColor = .white
+        profileTitle.lineBreakMode = .byTruncatingTail
+        profileTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        previewPill.translatesAutoresizingMaskIntoConstraints = false
+        previewPill.setContentHuggingPriority(.required, for: .horizontal)
+        previewPill.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        let titleRow = NSStackView(views: [profileTitle, NSView(), previewPill])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 10
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+
         let holder = NSView()
         holder.translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(titleRow)
         holder.addSubview(curveView)
         holder.addSubview(hintLabel)
         NSLayoutConstraint.activate([
-            curveView.topAnchor.constraint(equalTo: holder.topAnchor),
+            titleRow.topAnchor.constraint(equalTo: holder.topAnchor, constant: 14),
+            titleRow.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 20),
+            titleRow.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -16),
+            titleRow.heightAnchor.constraint(equalToConstant: 26),
+            curveView.topAnchor.constraint(equalTo: titleRow.bottomAnchor, constant: 4),
             curveView.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
             curveView.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
             hintLabel.topAnchor.constraint(equalTo: curveView.bottomAnchor, constant: -6),
@@ -437,7 +503,10 @@ final class MacEqualizerViewController: NSViewController {
             ? String(localized: "Drag a point, or type a value. The curve passes through every point.")
             : String(localized: "Drag a node · scroll over it to change Q · double-click empty space to add a band")
 
-        rebuildPresetMenu()
+        profileTitle.stringValue = EqualizerCopy.name(of: profile)
+        previewPill.setAccent(accent)
+        deck.sync(userProfiles: engine.state.userProfiles, currentID: profile.id, accent: accent)
+        endAuditionIfPresetVanished()
         updateOutputButton()
         updatePreamp(profile: profile)
         updateStatus(profile: profile, running: running)
@@ -449,48 +518,6 @@ final class MacEqualizerViewController: NSViewController {
         let count = mode == .simple ? GraphicSolver.centres.count : max(profile.bands.count, 1)
         selectedIndex = min(max(selectedIndex, 0), count - 1)
         return selectedIndex
-    }
-
-    private func rebuildPresetMenu() {
-        let menu = NSMenu()
-        func header(_ title: String) {
-            menu.addItem(NSMenuItem.sectionHeader(title: title))
-        }
-        func entry(_ profile: EqualizerProfile) {
-            let item = NSMenuItem(title: EqualizerCopy.name(of: profile), action: nil, keyEquivalent: "")
-            item.representedObject = profile.id
-            menu.addItem(item)
-        }
-        header(String(localized: "Bit-perfect"))
-        entry(EqualizerPresets.flat)
-        if !engine.state.userProfiles.isEmpty {
-            header(String(localized: "Yours"))
-            engine.state.userProfiles.forEach(entry)
-        }
-        header(String(localized: "Tune"))
-        EqualizerPresets.tuneKeys.compactMap(EqualizerPresets.profile(forKey:)).forEach(entry)
-        header(String(localized: "Genres"))
-        EqualizerPresets.genreKeys.compactMap(EqualizerPresets.profile(forKey:)).forEach(entry)
-        menu.addItem(.separator())
-        let more: [(String, Selector)] = [
-            (String(localized: "Import from Text…"), #selector(importProfile)),
-            (String(localized: "Export as Text…"), #selector(exportProfile)),
-            (String(localized: "Copy as Text"), #selector(copyProfile)),
-            (String(localized: "Find Headphones on AutoEq"), #selector(openAutoEq)),
-        ]
-        for (title, action) in more {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-        }
-        presetPopUp.menu = menu
-        for item in menu.items where item.representedObject != nil {
-            item.target = self
-            item.action = #selector(presetChosen(_:))
-        }
-        if let index = menu.items.firstIndex(where: { ($0.representedObject as? String) == profile.id }) {
-            presetPopUp.selectItem(at: index)
-        }
     }
 
     private func updateOutputButton() {
@@ -570,6 +597,157 @@ final class MacEqualizerViewController: NSViewController {
             statusLabel.toolTip = reduced ? String(localized: "Peak guard is catching overs. Lower the preamp or return to Auto.") : nil
         }
     }
+
+    private func wireDeck() {
+        deck.onPointed = { [weak self] id in self?.deckPointed(at: id) }
+        deck.onLeft = { [weak self] in self?.deckLeft() }
+        deck.onKeep = { [weak self] id in self?.keepPreset(id) }
+        deck.onCancel = { [weak self] in self?.cancelAudition() }
+        deck.onAuditionBriefly = { [weak self] id in self?.auditionBriefly(id) }
+        deck.onHoverPreviewChanged = { [weak self] on in self?.hoverPreviewChanged(on) }
+        deck.onImport = { [weak self] in self?.importProfile() }
+        deck.onRowAction = { [weak self] action, id in self?.performRowAction(action, id: id) }
+    }
+
+    private func performRowAction(_ action: MacDeckRowAction, id: String) {
+        guard let target = engine.state.userProfiles.first(where: { $0.id == id }) else { return }
+        switch action {
+        case .rename: promptRename(id)
+        case .export: export(target)
+        case .copy: copyAsText(target)
+        case .delete: confirmDelete(id)
+        }
+    }
+
+    private func hoverPreviewChanged(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: Self.hoverPreviewKey)
+        deck.setHoverPreview(on)
+        if !on { endAudition() }
+    }
+
+    /// The pointer or keyboard focus has come to a preset. While one is already
+    /// playing as a preview the switch is at once, so a sweep down the list
+    /// plays each in turn; otherwise the pointer has to rest a moment first.
+    private func deckPointed(at id: String) {
+        guard hoverPreviewOn else { return }
+        auditionGeneration += 1
+        if auditionID != nil {
+            beginAudition(id)
+            return
+        }
+        let generation = auditionGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dwellSeconds) { [weak self] in
+            guard let self, self.auditionGeneration == generation else { return }
+            self.beginAudition(id)
+        }
+    }
+
+    /// The pointer left a preset. The preview ends after a short grace unless
+    /// it reaches another preset first.
+    private func deckLeft() {
+        auditionGeneration += 1
+        let generation = auditionGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.leaveGraceSeconds) { [weak self] in
+            guard let self, self.auditionGeneration == generation else { return }
+            self.endAudition()
+        }
+    }
+
+    /// VoiceOver cannot hover, so its Audition action plays a preset for a few seconds.
+    private func auditionBriefly(_ id: String) {
+        beginAudition(id)
+        let generation = auditionGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spokenAuditionSeconds) { [weak self] in
+            guard let self, self.auditionGeneration == generation else { return }
+            self.endAudition()
+        }
+    }
+
+    private func beginAudition(_ id: String) {
+        guard auditionID != id, let candidate = engine.allProfiles.first(where: { $0.id == id }) else { return }
+        engine.beginAudition(candidate)
+        auditionID = id
+        curveView.setPreview(candidate.resolvedBands())
+        deck.setHearing(id)
+        previewPill.show(EqualizerCopy.name(of: candidate))
+        installEscapeMonitor()
+    }
+
+    private func endAudition() {
+        auditionGeneration += 1
+        guard auditionID != nil else { return }
+        auditionID = nil
+        engine.endAudition()
+        curveView.setPreview(nil)
+        deck.setHearing(nil)
+        previewPill.show(nil)
+        removeEscapeMonitor()
+    }
+
+    private func cancelAudition() {
+        endAudition()
+        view.window?.makeFirstResponder(curveView)
+    }
+
+    private func endAuditionIfPresetVanished() {
+        guard let id = auditionID, !engine.allProfiles.contains(where: { $0.id == id }) else { return }
+        endAudition()
+    }
+
+    private func installEscapeMonitor() {
+        guard escapeMonitor == nil else { return }
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53, self?.view.window === event.window, self?.auditionID != nil else { return event }
+            self?.cancelAudition()
+            return nil
+        }
+    }
+
+    private func removeEscapeMonitor() {
+        guard let monitor = escapeMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        escapeMonitor = nil
+    }
+
+    private func observeWindowForAudition() {
+        guard let window = view.window, window !== observedWindow else { return }
+        let center = NotificationCenter.default
+        if let previous = observedWindow {
+            center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: previous)
+            center.removeObserver(self, name: NSWindow.willCloseNotification, object: previous)
+        }
+        observedWindow = window
+        center.addObserver(self, selector: #selector(windowStoppedListening), name: NSWindow.didResignKeyNotification, object: window)
+        center.addObserver(self, selector: #selector(windowStoppedListening), name: NSWindow.willCloseNotification, object: window)
+    }
+
+    @objc private func windowStoppedListening() {
+        endAudition()
+    }
+
+#if DEBUG
+    /// Starts an audition without a pointer, for the debug screenshot.
+    func auditionForCapture(profileID: String) {
+        beginAudition(profileID)
+        deck.reveal(profileID)
+    }
+
+    /// The preset being auditioned, for the debug exercise.
+    var auditionedPresetID: String? { auditionID }
+
+    /// Whether the curve is drawing a previewed line, for the debug exercise.
+    var curveIsPreviewing: Bool { curveView.isPreviewing }
+
+    /// Runs the deck's own pointer callbacks as a hovering pointer would.
+    func exercisePointer(at id: String?) {
+        if let id { deckPointed(at: id) } else { deckLeft() }
+    }
+
+    /// Runs the deck's click callback.
+    func exerciseKeep(_ id: String) {
+        keepPreset(id)
+    }
+#endif
 
     // MARK: Editing and undo
 
@@ -656,17 +834,13 @@ final class MacEqualizerViewController: NSViewController {
         finishEditing()
     }
 
-    @objc private func presetChosen(_ sender: Any?) {
-        let id: String?
-        if let item = sender as? NSMenuItem {
-            id = item.representedObject as? String
-        } else {
-            id = presetPopUp.selectedItem?.representedObject as? String
-        }
-        guard let id else { return }
+    private func keepPreset(_ id: String) {
+        endAudition()
         beginEditing()
         engine.select(profileID: id)
         finishEditing()
+        refresh(animated: false)
+        view.window?.makeFirstResponder(curveView)
     }
 
     @objc private func modeChanged() {
@@ -761,6 +935,14 @@ final class MacEqualizerViewController: NSViewController {
     }
 
     @objc private func exportProfile() {
+        export(profile)
+    }
+
+    @objc private func copyProfile() {
+        copyAsText(profile)
+    }
+
+    private func export(_ profile: EqualizerProfile) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = "\(EqualizerCopy.name(of: profile)).txt"
@@ -772,10 +954,45 @@ final class MacEqualizerViewController: NSViewController {
         }
     }
 
-    @objc private func copyProfile() {
+    private func copyAsText(_ profile: EqualizerProfile) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(engine.exportText(for: profile), forType: .string)
         if let window = view.window { MacToast.show(String(localized: "Copied to the clipboard"), in: window) }
+    }
+
+    private func promptRename(_ id: String) {
+        guard let target = engine.state.userProfiles.first(where: { $0.id == id }), let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Rename Preset")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = target.name
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Rename"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+            guard response == .alertFirstButtonReturn, !name.isEmpty else { return }
+            self?.beginEditing()
+            self?.engine.rename(profileID: id, to: name)
+            self?.finishEditing()
+        }
+        alert.window.makeFirstResponder(field)
+    }
+
+    private func confirmDelete(_ id: String) {
+        guard let target = engine.state.userProfiles.first(where: { $0.id == id }), let window = view.window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(localized: "Delete \u{201C}\(target.name)\u{201D}?")
+        alert.informativeText = String(localized: "This removes the preset. Anything that used it goes back to Flat.")
+        alert.addButton(withTitle: String(localized: "Delete"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.beginEditing()
+            self?.engine.delete(profileID: id)
+            self?.finishEditing()
+        }
     }
 
     @objc private func openAutoEq() {

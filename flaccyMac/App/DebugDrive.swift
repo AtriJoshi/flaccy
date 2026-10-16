@@ -217,7 +217,7 @@ enum DebugDrive {
             let engine = EqualizerEngine.shared
             engine.start()
             engine.isDemoSignal = true
-            let isSimple = scene == "simple"
+            let isSimple = scene != "advanced"
             engine.seedDemo(
                 activeProfileID: isSimple ? EqualizerPresets.id(forKey: "rock") : "demo.warm",
                 pretendOutput: EqualizerOutput(
@@ -228,10 +228,17 @@ enum DebugDrive {
             )
             let controller = MacEqualizerWindowController.shared
             controller.show()
-            controller.window?.setContentSize(NSSize(width: 1080 * MacInterfaceScale.current, height: 700 * MacInterfaceScale.current))
+            controller.window?.setContentSize(NSSize(width: 1280 * MacInterfaceScale.current, height: 760 * MacInterfaceScale.current))
             reassertWindowSizeIfRequested(controller.window)
             controller.window?.center()
+            if scene == "hover", let screen = controller.contentViewController as? MacEqualizerViewController {
+                await exerciseDeck(screen, engine: engine)
+            }
             try? await Task.sleep(for: .seconds(3))
+            if scene == "presets", let screen = controller.contentViewController as? MacEqualizerViewController {
+                screen.auditionForCapture(profileID: EqualizerPresets.id(forKey: "bassBoost"))
+                try? await Task.sleep(for: .seconds(1))
+            }
             capture(window: controller.window, name: "flaccy-shot-equalizer-\(scene)")
             return
         case .paywall:
@@ -487,6 +494,47 @@ enum DebugDrive {
         } catch {
             AppLogger.error("DebugDrive: sheet capture write failed: \(error.localizedDescription)", category: .general)
         }
+    }
+
+    /// Drives the equalizer deck's pointer callbacks through the screen's real
+    /// timing and logs PASS/FAIL per expectation: a pointer that rests plays a
+    /// preset, a sweep switches at once, leaving ends it after the grace, and a
+    /// click keeps one as a single undo step.
+    private static func exerciseDeck(_ screen: MacEqualizerViewController, engine: EqualizerEngine) async {
+        func report(_ expectation: String, _ passed: Bool) {
+            AppLogger.info("DeckExercise \(passed ? "PASS" : "FAIL"): \(expectation)", category: .general)
+        }
+        let treble = EqualizerPresets.id(forKey: "trebleBoost")
+        let vocal = EqualizerPresets.id(forKey: "vocal")
+        let bass = EqualizerPresets.id(forKey: "bassBoost")
+        let inForce = engine.profileInForce.id
+        screen.exercisePointer(at: treble)
+        try? await Task.sleep(for: .milliseconds(30))
+        report("a pointer that has not rested 90 ms plays nothing yet", screen.auditionedPresetID == nil)
+        try? await Task.sleep(for: .milliseconds(200))
+        report("after resting it plays the preset, the engine auditions it and the curve previews", screen.auditionedPresetID == treble && engine.auditioned?.id == treble && screen.curveIsPreviewing)
+        report("auditioning leaves the saved profile alone", engine.profileInForce.id == inForce)
+        screen.exercisePointer(at: vocal)
+        report("while one plays the next switches at once", screen.auditionedPresetID == vocal && engine.auditioned?.id == vocal)
+        screen.exercisePointer(at: nil)
+        try? await Task.sleep(for: .milliseconds(60))
+        report("the preview survives inside the 160 ms leave grace", screen.auditionedPresetID == vocal)
+        screen.exercisePointer(at: bass)
+        try? await Task.sleep(for: .milliseconds(250))
+        report("entering another preset inside the grace cancels the end", screen.auditionedPresetID == bass)
+        screen.exercisePointer(at: nil)
+        try? await Task.sleep(for: .milliseconds(300))
+        report("leaving the deck puts back what was playing", screen.auditionedPresetID == nil && engine.auditioned == nil && !screen.curveIsPreviewing && engine.profileInForce.id == inForce)
+        screen.exercisePointer(at: bass)
+        try? await Task.sleep(for: .milliseconds(200))
+        screen.exerciseKeep(bass)
+        report("clicking keeps the preset and ends the audition", engine.profileInForce.id == bass && engine.auditioned == nil && screen.auditionedPresetID == nil)
+        controllerUndo(screen)?.undo()
+        report("one undo puts back the previous profile", engine.profileInForce.id == inForce)
+    }
+
+    private static func controllerUndo(_ screen: MacEqualizerViewController) -> UndoManager? {
+        screen.view.window?.undoManager
     }
 
     private static func capture(window: NSWindow?, name: String) {

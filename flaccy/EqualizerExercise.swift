@@ -49,6 +49,26 @@ enum EqualizerExercise {
         let dry = await settledPeak()
         report("dry 220 Hz tone reads \(format(dry)) dB (expected about -20)", abs(dry + 20) < 2.5)
 
+        var previewProfile = EqualizerProfile.parametric(
+            id: "audition-exercise",
+            name: "Audition",
+            bands: [EqualizerBand(type: .bell, frequency: 220, gain: 9, q: 1)]
+        )
+        previewProfile.isAutoPreamp = false
+        previewProfile.manualPreamp = 0
+        engine.beginAudition(previewProfile)
+        let previewed = await settledPeak()
+        report(
+            "auditioning a +9 dB bell lifts the tone by \(format(previewed - dry)) dB while the saved state stays off",
+            abs((previewed - dry) - 9) < levelToleranceDecibels && !engine.state.isEnabled && !engine.isRunning
+        )
+        engine.endAudition()
+        let afterPreview = await settledPeak()
+        report(
+            "ending the audition returns the tone to \(format(afterPreview)) dB and the engine to passthrough",
+            abs(afterPreview - dry) < levelToleranceDecibels && engine.auditioned == nil && !engine.isRunning
+        )
+
         engine.edit { profile in
             profile.kind = .parametric
             profile.bands = [EqualizerBand(type: .bell, frequency: 220, gain: 9, q: 1)]
