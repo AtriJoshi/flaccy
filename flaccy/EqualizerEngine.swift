@@ -30,6 +30,7 @@ final class EqualizerEngine {
     private(set) var state: EqualizerState
     private(set) var output: EqualizerOutput?
     private(set) var isComparing = false
+    private(set) var auditioned: EqualizerProfile?
 
     private let store = EqualizerStore()
     private let box = EqualizerConfigBox()
@@ -157,8 +158,9 @@ final class EqualizerEngine {
             .sorted { ($0.id == outputID ? 0 : 1, $0.name) < ($1.id == outputID ? 0 : 1, $1.name) }
     }
 
-    /// Copies the profile in force into the other kind, leaving the original untouched, and makes the copy the one in force.
-    @discardableResult
+    /// Copies the profile in force into the other kind, leaving the original
+    /// untouched, and makes the copy the one in force. Switching back and forth
+    /// lands on the copy already made rather than adding another to the list.
     func convertInForce(to kind: EqualizerKind) -> EqualizerProfile {
         let source = profileInForce
         guard source.kind != kind else { return source }
@@ -173,7 +175,16 @@ final class EqualizerEngine {
             copy.targets = GraphicSolver.targets(approximating: source.resolvedBands())
             copy.bands = []
         }
-        copy.name = EqualizerCopy.convertedName(base: EqualizerCopy.name(of: source), to: kind)
+        copy.name = EqualizerCopy.convertedName(base: EqualizerCopy.baseName(of: EqualizerCopy.name(of: source)), to: kind)
+        if let existing = state.userProfiles.first(where: { profile in
+            var probe = copy
+            probe.id = profile.id
+            return profile == probe
+        }) {
+            state.select(profileID: existing.id, forOutput: outputID)
+            commit(reason: "convert \(kind.rawValue)")
+            return existing
+        }
         state.userProfiles.append(copy)
         state.select(profileID: copy.id, forOutput: outputID)
         commit(reason: "convert \(kind.rawValue)")
@@ -225,6 +236,22 @@ final class EqualizerEngine {
         EqualizerProfileText.write(profile)
     }
 
+    /// Lets the person hear `profile` without choosing it. Nothing is saved and
+    /// the saved state is not touched; each tap's kernel ramps to the previewed
+    /// curve with its own preamp, so presets are compared at the level they
+    /// would really play at, and `endAudition` puts back whatever was there,
+    /// bit-perfect passthrough included.
+    func beginAudition(_ profile: EqualizerProfile) {
+        auditioned = profile
+        publish(reason: "audition on")
+    }
+
+    func endAudition() {
+        guard auditioned != nil else { return }
+        auditioned = nil
+        publish(reason: "audition off")
+    }
+
     func beginCompare() {
         guard !isComparing, isRunning else { return }
         isComparing = true
@@ -262,7 +289,7 @@ final class EqualizerEngine {
     func spectrum() -> [Float]? {
         #if DEBUG
         if isDemoSignal {
-            let profile = profileInForce
+            let profile = auditioned ?? profileInForce
             let bands = isComparing ? [] : profile.resolvedBands()
             return EqualizerDemoSignal.spectrum(time: Date.timeIntervalSinceReferenceDate, bands: bands, preampDecibels: isComparing ? 0 : profile.preamp())
         }
@@ -309,7 +336,12 @@ final class EqualizerEngine {
     }
 
     private func publish(reason: String) {
-        let running = state.effectiveProfile(forOutput: outputID)
+        let running: EqualizerProfile?
+        if let auditioned {
+            running = auditioned.isFlat ? nil : auditioned
+        } else {
+            running = state.effectiveProfile(forOutput: outputID)
+        }
         var bands: [EqualizerBand] = []
         var preamp = 0.0
         if let running {
@@ -325,7 +357,7 @@ final class EqualizerEngine {
             preampDecibels: preamp,
             peakGuard: state.isPeakGuardOn
         ))
-        guard !reason.hasPrefix("edit") else {
+        guard !reason.hasPrefix("edit"), !reason.hasPrefix("audition") else {
             refreshAttachments()
             return
         }

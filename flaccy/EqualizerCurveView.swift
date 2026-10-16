@@ -94,6 +94,15 @@ final class EqualizerCurveView: UIView {
         setNeedsDisplay()
     }
 
+    func setPreview(_ bands: [EqualizerBand]?) {
+        model.setPreview(bands, snap: UIAccessibility.isReduceMotionEnabled)
+        setNeedsDisplay()
+    }
+
+    var isPreviewing: Bool {
+        model.isPreviewing
+    }
+
     private var plot: CGRect {
         bounds.inset(by: plotInsets)
     }
@@ -125,7 +134,7 @@ final class EqualizerCurveView: UIView {
             isEnabled: content.isEnabled,
             isComparing: content.isComparing
         )
-        EqualizerPlotRenderer.draw(in: context, bounds: bounds, plot: plot, model: model, style: style)
+        EqualizerPlotRenderer.draw(in: context, bounds: bounds, plot: plot, model: model, style: style, preview: model.previewPoints(in: plot))
     }
 
     // MARK: Touch

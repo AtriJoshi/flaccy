@@ -18,19 +18,23 @@ enum EqualizerPlotRenderer {
         var isComparing = false
     }
 
-    static func draw(in context: CGContext, bounds: CGRect, plot: CGRect, model: EqualizerPlotModel, style: Style) {
+    /// `preview` is the curve of a preset being auditioned, already placed on
+    /// the plot (see `EqualizerPlotModel.curvePoints`). It is drawn as the line
+    /// being heard, with the curve in force left behind as a thin dashed
+    /// reference and the nodes stepped back.
+    static func draw(in context: CGContext, bounds: CGRect, plot: CGRect, model: EqualizerPlotModel, style: Style, preview: [CGPoint]? = nil) {
         drawGrid(in: context, plot: plot, style: style)
 
         context.saveGState()
-        context.setAlpha(style.isEnabled ? 1 : 0.45)
+        context.setAlpha(style.isEnabled || preview != nil ? 1 : 0.45)
         drawSpectrum(in: context, plot: plot, model: model)
         if model.content.mode == .advanced { drawSelectedBand(in: context, plot: plot, model: model, style: style) }
-        drawCurve(in: context, plot: plot, model: model, style: style)
+        drawCurve(in: context, plot: plot, model: model, style: style, preview: preview)
         context.restoreGState()
 
         if model.content.mode == .simple { drawActiveColumn(in: context, plot: plot, model: model, style: style) }
         context.saveGState()
-        context.setAlpha(style.isEnabled ? 1 : 0.5)
+        context.setAlpha(preview != nil ? 0.22 : (style.isEnabled ? 1 : 0.5))
         drawNodes(in: context, plot: plot, model: model, style: style)
         context.restoreGState()
         if model.isDragging { drawBubble(in: context, bounds: bounds, plot: plot, model: model, style: style) }
@@ -118,10 +122,34 @@ enum EqualizerPlotRenderer {
         context.fillPath()
     }
 
-    private static func drawCurve(in context: CGContext, plot: CGRect, model: EqualizerPlotModel, style: Style) {
+    private static func drawCurve(in context: CGContext, plot: CGRect, model: EqualizerPlotModel, style: Style, preview: [CGPoint]?) {
+        let kept = model.curvePoints(style.isEnabled ? model.resolvedBands : [], in: plot)
+        if let preview {
+            drawReferenceCurve(kept, in: context)
+            drawHeroCurve(preview, in: context, plot: plot, style: style, comparing: false)
+        } else {
+            drawHeroCurve(kept, in: context, plot: plot, style: style, comparing: style.isComparing && style.isEnabled)
+        }
+    }
+
+    private static func drawReferenceCurve(_ points: [CGPoint], in context: CGContext) {
+        let line = CGMutablePath()
+        for (index, point) in points.enumerated() {
+            index == 0 ? line.move(to: point) : line.addLine(to: point)
+        }
+        context.saveGState()
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.setLineWidth(1.6)
+        context.setLineDash(phase: 0, lengths: [6, 5])
+        context.setStrokeColor(white(0.42))
+        context.addPath(line)
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private static func drawHeroCurve(_ points: [CGPoint], in context: CGContext, plot: CGRect, style: Style, comparing: Bool) {
         let zero = plot.minY + plot.height / 2
-        let points = model.curvePoints(style.isEnabled ? model.resolvedBands : [], in: plot)
-        let comparing = style.isComparing && style.isEnabled
 
         if comparing {
             context.setStrokeColor(white(0.5))

@@ -40,7 +40,7 @@ Point flaccy at your music files. It scans the directory structure, sends file p
 
 ### Equalizer
 - **Drag the curve** and hear it change (Simple: ten ISO bands, the curve passes through every point you place), or switch to **Advanced** for up to ten bells, shelves, high-pass, low-pass and notch filters with adjustable Q and a live spectrum behind the curve
-- **16 presets**, your own saved profiles, and **import and export of Equalizer APO and AutoEq text** to tune for your headphones
+- **16 presets you can hear before you keep them** — point at one on the Mac and Linux (or hold and slide across the strip on iPhone) and it plays at once, level-matched, with its curve drawn over yours; click to keep it — plus your own saved profiles, and **import and export of Equalizer APO and AutoEq text** to tune for your headphones
 - **A profile per output** — AirPods, a wired DAC and the speakers each keep their own setting and switch when the route does
 - **Automatic headroom** so boosts never clip, a **level-matched Hold to compare**, undo for every gesture, and no processing at all while it is off or flat (bit-perfect)
 - iPhone, Mac (⌥⌘E) and Linux (Ctrl+E); not on Apple Watch

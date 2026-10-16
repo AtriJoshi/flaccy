@@ -2,7 +2,8 @@
 
 Lossless music player. GTK4/libadwaita, gapless GStreamer playback, a built-in equalizer, MPRIS, Last.fm scrobbling.
 
-Equalizer (Ctrl+E): drag the curve or switch to Advanced for up to ten bands, 16 presets,
+Equalizer (Ctrl+E): drag the curve or switch to Advanced for up to ten bands, 16 presets
+always in view beside the curve (hover one to hear it, click to keep it),
 Equalizer APO / AutoEq import, a profile per output (it follows your default sink) and a
 level-matched Hold to compare. With it off or flat the audio passes through untouched.
 

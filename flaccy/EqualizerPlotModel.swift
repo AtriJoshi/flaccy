@@ -43,6 +43,9 @@ final class EqualizerPlotModel {
     private(set) var displayTargets = Array(repeating: 0.0, count: GraphicSolver.centres.count)
     private(set) var resolvedBands: [EqualizerBand] = []
     private(set) var spectrumBins: [Float] = []
+    private(set) var previewBands: [EqualizerBand]?
+    private var previewFrom: [EqualizerBand] = []
+    private var previewProgress = 1.0
     var isDragging = false
 
     static let spectrumFloorDecibels: Float = -78
@@ -51,6 +54,7 @@ final class EqualizerPlotModel {
     private static let easing = 0.34
     private static let settleThreshold = 0.02
     private static let spectrumFall: Float = 2.2
+    private static let previewStep = 1.0 / (0.16 * 30)
 
     /// Replaces the content. In Simple mode the drawn targets glide to the new
     /// ones unless `snap` is set, as it is when the mode itself changed.
@@ -61,6 +65,34 @@ final class EqualizerPlotModel {
             displayTargets = new.targets
         }
         refreshResolvedBands()
+    }
+
+    var isPreviewing: Bool {
+        previewBands != nil
+    }
+
+    /// Shows the curve of a preset being auditioned as the line being heard,
+    /// gliding from whatever was on screen; nil goes back to the curve in force.
+    func setPreview(_ bands: [EqualizerBand]?, snap: Bool) {
+        guard let bands else {
+            previewBands = nil
+            previewProgress = 1
+            return
+        }
+        previewFrom = previewBands ?? (content.isEnabled ? resolvedBands : [])
+        previewBands = bands
+        previewProgress = snap ? 1 : 0
+    }
+
+    /// The previewed curve placed on the plot, part-way from the one before it
+    /// while the glide plays.
+    func previewPoints(in plot: CGRect) -> [CGPoint]? {
+        guard let previewBands else { return nil }
+        let target = curvePoints(previewBands, in: plot)
+        guard previewProgress < 1 else { return target }
+        let from = curvePoints(previewFrom, in: plot)
+        let eased = CGFloat(previewProgress * previewProgress * (3 - 2 * previewProgress))
+        return zip(from, target).map { CGPoint(x: $1.x, y: $0.y + ($1.y - $0.y) * eased) }
     }
 
     /// One animation frame. Returns true when the drawn curve moved.
@@ -89,6 +121,10 @@ final class EqualizerPlotModel {
             }
         }
         if moved { refreshResolvedBands() }
+        if previewProgress < 1 {
+            previewProgress = min(previewProgress + Self.previewStep, 1)
+            moved = true
+        }
         if !freezeSpectrum { advanceSpectrum(spectrum) }
         return moved
     }

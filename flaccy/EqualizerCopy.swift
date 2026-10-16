@@ -118,6 +118,24 @@ enum EqualizerCopy {
         String(format: "%.2f", value)
     }
 
+    /// A profile's name without the "(Simple)" or "(Advanced)" a conversion
+    /// added, however many times it was converted, so a copy of a copy keeps one suffix.
+    static func baseName(of name: String) -> String {
+        let suffixes = Set([
+            convertedName(base: "", to: .parametric),
+            convertedName(base: "", to: .graphic),
+            " (Advanced)",
+            " (Simple)",
+        ])
+        var base = name.trimmingCharacters(in: .whitespaces)
+        while let suffix = suffixes.first(where: { base.hasSuffix($0) }) {
+            let rest = String(base.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
+            guard !rest.isEmpty else { break }
+            base = rest
+        }
+        return base
+    }
+
     static func convertedName(base: String, to kind: EqualizerKind) -> String {
         switch kind {
         case .parametric: return String(localized: "\(base) (Advanced)")

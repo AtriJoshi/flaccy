@@ -71,6 +71,15 @@ final class MacEqualizerCurveView: NSView {
         needsDisplay = true
     }
 
+    func setPreview(_ bands: [EqualizerBand]?) {
+        model.setPreview(bands, snap: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        needsDisplay = true
+    }
+
+    var isPreviewing: Bool {
+        model.isPreviewing
+    }
+
     private var plot: CGRect {
         CGRect(
             x: plotInsets.left,
@@ -98,7 +107,7 @@ final class MacEqualizerCurveView: NSView {
             isEnabled: content.isEnabled,
             isComparing: content.isComparing
         )
-        EqualizerPlotRenderer.draw(in: context, bounds: bounds, plot: plot, model: model, style: style)
+        EqualizerPlotRenderer.draw(in: context, bounds: bounds, plot: plot, model: model, style: style, preview: model.previewPoints(in: plot))
         if window?.firstResponder === self, let ring = focusRingRect() {
             context.setStrokeColor(NSColor.keyboardFocusIndicatorColor.cgColor)
             context.setLineWidth(2)
