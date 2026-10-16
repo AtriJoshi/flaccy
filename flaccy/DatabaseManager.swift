@@ -1923,7 +1923,11 @@ nonisolated final class DatabaseManager: Sendable {
 
     func scrobbleYears() throws -> [Int] {
         try dbQueue.read { db in
-            try Int.fetchAll(db, sql: "SELECT DISTINCT CAST(strftime('%Y', timestamp) AS INTEGER) FROM scrobbles ORDER BY 1 DESC")
+            try Int.fetchAll(
+                db,
+                sql: "SELECT DISTINCT CAST(strftime('%Y', timestamp) AS INTEGER) FROM scrobbles WHERE timestamp >= ? ORDER BY 1 DESC",
+                arguments: [LastFMStatsService.firstDatedScrobble]
+            )
         }
     }
 
