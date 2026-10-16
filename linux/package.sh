@@ -9,22 +9,20 @@ PKG="flaccy-linux-x86_64"
 TARBALL="$PKG.tar.gz"
 
 KEYS_FILE="${FLACCY_KEYS_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/flaccy/build-keys.env}"
-if [[ -z "${FLACCY_LASTFM_KEY:-}" || -z "${FLACCY_LASTFM_SECRET:-}" ]] && [[ -f "$KEYS_FILE" ]]; then
+if [[ -z "${FLACCY_LASTFM_KEY:-}" ]] && [[ -f "$KEYS_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$KEYS_FILE"
   set +a
 fi
 
-for name in FLACCY_LASTFM_KEY FLACCY_LASTFM_SECRET; do
-  value="${!name:-}"
-  # A placeholder builds a release that shows the scrobbling UI and then fails
-  # every signed call with "Invalid method signature" — refuse to ship one.
-  if [[ ! "$value" =~ ^[0-9a-fA-F]{32}$ ]] || [[ -z "${value//${value:0:1}/}" ]]; then
-    echo "error: $name must be a real 32-character hex credential (set it, or put it in $KEYS_FILE)" >&2
-    exit 1
-  fi
-done
+value="${FLACCY_LASTFM_KEY:-}"
+# A placeholder builds a release that shows the scrobbling UI and then fails
+# every call at Last.fm — refuse to ship one.
+if [[ ! "$value" =~ ^[0-9a-fA-F]{32}$ ]] || [[ -z "${value//${value:0:1}/}" ]]; then
+  echo "error: FLACCY_LASTFM_KEY must be a real 32-character hex credential (set it, or put it in $KEYS_FILE)" >&2
+  exit 1
+fi
 
 echo "Syncing sources to $REMOTE:$REMOTE_DIR..."
 rsync -a --delete --exclude target \
@@ -33,7 +31,7 @@ rsync -a --delete --exclude target \
   "$REMOTE:$REMOTE_DIR/"
 
 echo "Building release on $REMOTE..."
-ssh "$REMOTE" "FLACCY_LASTFM_KEY='$FLACCY_LASTFM_KEY' FLACCY_LASTFM_SECRET='$FLACCY_LASTFM_SECRET' bash -s" <<'REMOTE_BUILD'
+ssh "$REMOTE" "FLACCY_LASTFM_KEY='$FLACCY_LASTFM_KEY' bash -s" <<'REMOTE_BUILD'
 set -euo pipefail
 cd ~/Dev/flaccy-linux
 cargo build --release

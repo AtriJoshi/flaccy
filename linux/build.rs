@@ -1,16 +1,17 @@
 use std::path::PathBuf;
 
-/// Compile-time Last.fm credentials. They reach `option_env!` in `src/lastfm.rs`
+/// Compile-time Last.fm API key. It reaches `option_env!` in `src/lastfm.rs`
 /// from the environment (the release path, see `package.sh`) or, for local
 /// builds, from a keys file kept outside the repository — so a working copy
 /// never has to carry a secret and a plain `cargo build` still produces a
-/// binary with the scrobbling surface intact.
+/// binary with the scrobbling surface intact. The shared secret is not a build
+/// input at all: flaccy-api signs the requests.
 ///
 /// Anything that isn't a real credential is blanked rather than passed through:
 /// a placeholder compiles into a binary that *looks* authenticated and then
-/// fails every signed call with "Invalid method signature", which is far worse
-/// than an honest build with no keys at all.
-const CREDENTIALS: [&str; 2] = ["FLACCY_LASTFM_KEY", "FLACCY_LASTFM_SECRET"];
+/// fails every call at Last.fm, which is far worse than an honest build with no
+/// key at all.
+const CREDENTIALS: [&str; 1] = ["FLACCY_LASTFM_KEY"];
 
 fn main() {
     println!("cargo:rerun-if-env-changed=FLACCY_KEYS_FILE");
@@ -71,7 +72,7 @@ fn read_key(path: &std::path::Path, name: &str) -> Option<String> {
     None
 }
 
-/// Last.fm issues 32-character hex API keys and shared secrets. A run of one
+/// Last.fm issues 32-character hex API keys. A run of one
 /// repeated character (`0000…`) is the placeholder shape that shipped a
 /// silently unscrobbable build once already.
 fn looks_like_credential(value: &str) -> bool {

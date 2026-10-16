@@ -56,14 +56,15 @@ cargo build --release
 
 Requires Rust 1.85+, gtk4/libadwaita/gstreamer development headers.
 
-Last.fm scrobbling needs its API credentials at build time. Either export `FLACCY_LASTFM_KEY` and `FLACCY_LASTFM_SECRET`, or drop them in `~/.config/flaccy/build-keys.env` (`FLACCY_KEYS_FILE` overrides the path) so every local build picks them up without the keys ever touching the working copy:
+Last.fm scrobbling needs the public API key at build time. Either export `FLACCY_LASTFM_KEY`, or drop it in `~/.config/flaccy/build-keys.env` (`FLACCY_KEYS_FILE` overrides the path) so every local build picks it up without the key ever touching the working copy:
 
 ```sh
 FLACCY_LASTFM_KEY=<32 hex>
-FLACCY_LASTFM_SECRET=<32 hex>
 ```
 
-Without them the app works fine and the scrobbling UI is hidden. A value that isn't a real 32-character hex credential is treated the same way rather than compiled in — a placeholder would otherwise build an app that offers scrobbling and then fails every submission with "Invalid method signature".
+There is no secret to build with: requests are signed by flaccy-api (`POST /v1/lastfm/sign`, keyed by an anonymous device id kept in `~/.config/flaccy/device-id`), so scrobbling needs network access to it.
+
+Without the key the app works fine and the scrobbling UI is hidden. A value that isn't a real 32-character hex credential is treated the same way rather than compiled in — a placeholder would otherwise build an app that offers scrobbling and then fails every submission.
 
 ## Uninstall
 

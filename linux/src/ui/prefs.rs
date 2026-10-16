@@ -844,7 +844,7 @@ fn begin_auth(ui: &Rc<Ui>, pending_token: &Rc<RefCell<Option<String>>>, refresh:
     glib::spawn_future_local(async move {
         match rx.recv().await {
             Ok(Ok(token)) => {
-                let key = lastfm::credentials().map(|(key, _)| key).unwrap_or("");
+                let key = lastfm::api_key().unwrap_or("");
                 let url = lastfm::auth_url(key, &token);
                 *pending_token.borrow_mut() = Some(token);
                 refresh();

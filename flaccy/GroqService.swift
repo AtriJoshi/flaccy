@@ -61,9 +61,11 @@ final class GroqService: MetadataClassifying {
 
     static let shared: MetadataClassifying = GroqService()
 
-    nonisolated private static let endpoint = URL(string: "https://flaccy-api.midgarcorp.cc/v1/metadata")!
+    nonisolated static let apiBaseURL = URL(string: "https://flaccy-api.midgarcorp.cc")!
 
-    nonisolated private static let deviceIdentifier: String = {
+    nonisolated private static let endpoint = apiBaseURL.appendingPathComponent("v1/metadata")
+
+    nonisolated static let deviceIdentifier: String = {
         let key = "flaccy.deviceIdentifier"
         if let existing = UserDefaults.standard.string(forKey: key) { return existing }
         let fresh = UUID().uuidString

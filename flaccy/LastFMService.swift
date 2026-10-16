@@ -1,5 +1,4 @@
 import AuthenticationServices
-import CryptoKit
 import Foundation
 import Security
 
@@ -132,8 +131,8 @@ final class LastFMService {
     static let authDidChange = Notification.Name("LastFMServiceAuthDidChange")
 
     nonisolated private static let apiKey = Secrets.lastFMApiKey
-    nonisolated private static let apiSecret = Secrets.lastFMApiSecret
     nonisolated private static let baseURL = "https://ws.audioscrobbler.com/2.0/"
+    nonisolated private static let signEndpoint = GroqService.apiBaseURL.appendingPathComponent("v1/lastfm/sign")
     private static let sessionKeyKey = "lastfm_session_key"
     private static let usernameKey = "lastfm_username"
 
@@ -1133,7 +1132,7 @@ final class LastFMService {
         httpMethod: String
     ) async throws -> Data {
         var signedParams = params
-        signedParams["api_sig"] = Self.generateSignature(params: params)
+        signedParams["api_sig"] = try await requestSignature(for: params)
         signedParams["format"] = "json"
 
         if httpMethod == "GET" {
@@ -1206,13 +1205,28 @@ final class LastFMService {
         }
     }
 
-    nonisolated private static func generateSignature(params: [String: String]) -> String {
-        let filtered = params.filter { $0.key != "format" }
-        let sorted = filtered.sorted { $0.key < $1.key }
-        let concatenated = sorted.map { "\($0.key)\($0.value)" }.joined()
-        let sigString = concatenated + apiSecret
-        let digest = Insecure.MD5.hash(data: Data(sigString.utf8))
-        return digest.map { String(format: "%02hhx", $0) }.joined()
+    /// Asks flaccy-api for the `api_sig` of `params`. Last.fm's shared secret
+    /// lives only on that Worker, so no build of the app can leak it, and a
+    /// refusal (quota, outage, offline) throws like any failed Last.fm call:
+    /// scrobbles stay pending and are retried.
+    nonisolated private func requestSignature(for params: [String: String]) async throws -> String {
+        var request = URLRequest(url: Self.signEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(GroqService.deviceIdentifier, forHTTPHeaderField: "X-Device-ID")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["params": params])
+
+        let (data, response) = try await urlSession.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw LastFMError.invalidResponse
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw LastFMError.apiError("signing failed (HTTP \(http.statusCode))")
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let signature = json["api_sig"] as? String
+        else { throw LastFMError.invalidResponse }
+        return signature
     }
 
     nonisolated private static func extractLargestImage(from imageArray: Any?) -> String? {

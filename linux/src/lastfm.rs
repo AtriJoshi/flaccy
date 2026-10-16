@@ -1,15 +1,15 @@
-use md5::{Digest, Md5};
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub const API_KEY: Option<&str> = option_env!("FLACCY_LASTFM_KEY");
-pub const API_SECRET: Option<&str> = option_env!("FLACCY_LASTFM_SECRET");
 const BASE_URL: &str = "https://ws.audioscrobbler.com/2.0/";
+const SIGN_URL: &str = "https://flaccy-api.midgarcorp.cc/v1/lastfm/sign";
 
 /// A credential the build actually stamped in, as opposed to a blank or a
 /// placeholder. `build.rs` filters these too, but the check lives here as well
-/// so a binary built by any other route can't offer a scrobbling UI that signs
-/// every request with a dud and fails at Last.fm instead of at the door.
+/// so a binary built by any other route can't offer a scrobbling UI that sends
+/// every request with a dud key and fails at Last.fm instead of at the door.
 fn usable(value: Option<&str>) -> Option<&str> {
     let value = value?.trim();
     let first = *value.as_bytes().first()?;
@@ -19,18 +19,63 @@ fn usable(value: Option<&str>) -> Option<&str> {
     Some(value)
 }
 
-pub fn credentials() -> Option<(&'static str, &'static str)> {
-    Some((usable(API_KEY)?, usable(API_SECRET)?))
+pub fn api_key() -> Option<&'static str> {
+    usable(API_KEY)
 }
 
 pub fn keys_available() -> bool {
-    credentials().is_some()
+    api_key().is_some()
+}
+
+/// Sixteen random bytes in a UUID's shape: flaccy-api rate-limits per device and
+/// accepts only a v4 UUID in `X-Device-ID`.
+fn new_device_id() -> String {
+    let mut bytes: [u8; 16] = rand::random();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// The anonymous per-install identifier flaccy-api counts quota against,
+/// created on first use and kept in the config directory so it survives
+/// restarts. If the file can't be written the id lasts for the process only.
+fn device_id() -> &'static str {
+    static DEVICE_ID: OnceLock<String> = OnceLock::new();
+    DEVICE_ID.get_or_init(|| {
+        let path = crate::config::config_dir().join("device-id");
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            let existing = existing.trim();
+            if is_device_id(existing) {
+                return existing.to_string();
+            }
+        }
+        let fresh = new_device_id();
+        let _ = std::fs::create_dir_all(crate::config::config_dir());
+        let _ = std::fs::write(&path, &fresh);
+        fresh
+    })
+}
+
+fn is_device_id(value: &str) -> bool {
+    let groups: Vec<&str> = value.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(group, len)| group.len() == len && group.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
 #[derive(Clone)]
 pub struct LastFmClient {
     pub api_key: String,
-    pub api_secret: String,
     pub session_key: Option<String>,
 }
 
@@ -50,10 +95,8 @@ pub enum BatchOutcome {
 
 impl LastFmClient {
     pub fn new(session_key: Option<String>) -> Option<Self> {
-        let (key, secret) = credentials()?;
         Some(Self {
-            api_key: key.to_string(),
-            api_secret: secret.to_string(),
+            api_key: api_key()?.to_string(),
             session_key,
         })
     }
@@ -64,33 +107,40 @@ impl LastFmClient {
             .build()
     }
 
-    fn signature(&self, params: &BTreeMap<String, String>) -> String {
-        let mut concatenated = String::new();
-        for (key, value) in params {
-            if key == "format" {
-                continue;
+    /// Asks flaccy-api for the `api_sig` of `params`. Last.fm's shared secret
+    /// lives only on that Worker, so no build of the player can leak it.
+    fn signature(&self, params: &BTreeMap<String, String>) -> Result<String, String> {
+        let response = Self::agent()
+            .post(SIGN_URL)
+            .set("X-Device-ID", device_id())
+            .send_json(serde_json::json!({ "params": params }));
+        let json: serde_json::Value = match response {
+            Ok(resp) => resp.into_json().map_err(|e| format!("{e}"))?,
+            Err(ureq::Error::Status(code, _)) => {
+                return Err(format!("signing failed (HTTP {code})"));
             }
-            concatenated.push_str(key);
-            concatenated.push_str(value);
-        }
-        concatenated.push_str(&self.api_secret);
-        let digest = Md5::digest(concatenated.as_bytes());
-        digest.iter().map(|b| format!("{:02x}", b)).collect()
+            Err(e) => return Err(format!("{e}")),
+        };
+        json["api_sig"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| format!("no api_sig in response: {json}"))
     }
 
-    fn signed_query(&self, params: &BTreeMap<String, String>) -> String {
-        let signature = self.signature(params);
+    fn signed_query(&self, params: &BTreeMap<String, String>) -> Result<String, String> {
+        let signature = self.signature(params)?;
         let mut all = params.clone();
         all.insert("api_sig".to_string(), signature);
         all.insert("format".to_string(), "json".to_string());
-        all.iter()
+        Ok(all
+            .iter()
             .map(|(k, v)| format!("{}={}", percent_encode(k), percent_encode(v)))
             .collect::<Vec<_>>()
-            .join("&")
+            .join("&"))
     }
 
     fn signed_get(&self, params: BTreeMap<String, String>) -> Result<serde_json::Value, String> {
-        let url = format!("{}?{}", BASE_URL, self.signed_query(&params));
+        let url = format!("{}?{}", BASE_URL, self.signed_query(&params)?);
         let response = Self::agent().get(&url).call().map_err(|e| format!("{e}"))?;
         let text = response.into_string().map_err(|e| format!("{e}"))?;
         serde_json::from_str(&text).map_err(|e| format!("{e}"))
@@ -100,7 +150,7 @@ impl LastFmClient {
     /// limit) is retried with exponential backoff (1s/2s/4s) up to three extra
     /// attempts before the response is returned as-is.
     fn signed_post(&self, params: BTreeMap<String, String>) -> Result<serde_json::Value, String> {
-        let body = self.signed_query(&params);
+        let body = self.signed_query(&params)?;
         let mut attempt = 0;
         loop {
             let response = Self::agent()
@@ -689,6 +739,16 @@ mod tests {
         assert_eq!(percent_encode("a+b&c=d"), "a%2Bb%26c%3Dd");
         assert_eq!(percent_encode("hello world"), "hello%20world");
         assert_eq!(percent_encode("a.b-c_d~e"), "a.b-c_d~e");
+    }
+
+    #[test]
+    fn generated_device_ids_are_v4_uuids_flaccy_api_accepts() {
+        let id = new_device_id();
+        assert!(is_device_id(&id));
+        assert_eq!(id.as_bytes()[14], b'4');
+        assert!(matches!(id.as_bytes()[19], b'8' | b'9' | b'a' | b'b'));
+        assert_ne!(id, new_device_id());
+        assert!(!is_device_id("not-a-uuid"));
     }
 
     #[test]

@@ -101,7 +101,7 @@ flaccy.xcodeproj        Xcode project (iOS + Mac + Watch targets)
 git clone https://github.com/guitaripod/flaccy.git
 cd flaccy
 cp flaccy/Secrets.swift.example flaccy/Secrets.swift
-# Edit Secrets.swift with your Last.fm API key (optional — app works without it)
+# Edit Secrets.swift with your Last.fm API key (optional — app works without it; the shared secret is never in the app, flaccy-api signs requests)
 open flaccy.xcodeproj
 ```
 
@@ -120,7 +120,7 @@ cargo build --release
 
 Requires Rust 1.85+, GTK 4.18+, libadwaita ≥ 1.7, and GStreamer (base + good + `gst-libav` for AAC/M4A/ALAC). Without `gst-libav` FLAC and MP3 play but AAC/M4A won't — flaccy toasts the missing codec. Optional: `yt-dlp` + `ffmpeg` for Downloads and music videos, `ollama` to break ties when picking a video.
 
-Building without `FLACCY_LASTFM_KEY`/`FLACCY_LASTFM_SECRET` env vars just hides scrobbling. Keys can also live in `~/.config/flaccy/build-keys.env` (`FLACCY_KEYS_FILE` overrides the path) so every local build picks them up without touching the working copy. See [linux/README.md](linux/README.md).
+Building without the `FLACCY_LASTFM_KEY` env var just hides scrobbling (Last.fm requests are signed by flaccy-api, so there is no secret to supply). The key can also live in `~/.config/flaccy/build-keys.env` (`FLACCY_KEYS_FILE` overrides the path) so every local build picks it up without touching the working copy. See [linux/README.md](linux/README.md).
 
 ## Stack
 
