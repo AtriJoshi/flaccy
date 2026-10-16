@@ -728,8 +728,6 @@ final class EqualizerViewController: UIViewController {
         }
     }
 
-    // MARK: Hold to hear
-
     @objc private func handleHold(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
         case .began:
