@@ -8,6 +8,8 @@
 //! no GStreamer for the `flaccy` binary crate.
 
 pub mod album_credit;
+pub mod artwork_framing;
+pub mod artwork_local;
 pub mod enrichment_job;
 pub mod equalizer;
 pub mod import_plan;
