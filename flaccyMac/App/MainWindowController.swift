@@ -46,6 +46,9 @@ final class MainWindowController: NSWindowController {
             self, selector: #selector(focusSearchField), name: .flaccyFocusSearch, object: nil
         )
         NotificationCenter.default.addObserver(
+            self, selector: #selector(clearSearchField), name: .flaccyClearSearch, object: nil
+        )
+        NotificationCenter.default.addObserver(
             self, selector: #selector(interfaceScaleChanged), name: .flaccyInterfaceScaleChanged, object: nil
         )
     }
@@ -103,6 +106,11 @@ final class MainWindowController: NSWindowController {
 
     @objc private func searchFieldChanged(_ sender: NSSearchField) {
         LibrarySearchState.update(sender.stringValue)
+    }
+
+    @objc private func clearSearchField() {
+        searchItem?.searchField.stringValue = ""
+        LibrarySearchState.update("")
     }
 
     private func installSpaceKeyMonitor() {

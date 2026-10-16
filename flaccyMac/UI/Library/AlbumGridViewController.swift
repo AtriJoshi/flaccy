@@ -517,6 +517,13 @@ final class LibraryEmptyStateView: NSView {
         buttons.isHidden = true
     }
 
+    func showNoMatches(for filterTitle: String) {
+        icon.image = NSImage(systemSymbolName: "line.3.horizontal.decrease.circle", accessibilityDescription: nil)
+        title.stringValue = String(localized: "No Results")
+        subtitle.stringValue = String(localized: "No songs match \u{201C}\(filterTitle)\u{201D} yet.")
+        buttons.isHidden = true
+    }
+
     func setLoading(_ loading: Bool) {
         if loading {
             spinner.startAnimation(nil)

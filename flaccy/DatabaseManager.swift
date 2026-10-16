@@ -202,6 +202,7 @@ nonisolated final class DatabaseManager: Sendable {
     static let shared = DatabaseManager()
 
     private let dbQueue: DatabaseQueue
+    private let scrobbleRevisionCounter = RevisionCounter()
 
     private init() {
         do {
@@ -1214,6 +1215,7 @@ nonisolated final class DatabaseManager: Sendable {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
+        scrobbleRevisionCounter.bump()
     }
     #endif
 
@@ -1348,6 +1350,7 @@ nonisolated final class DatabaseManager: Sendable {
         try dbQueue.write { db in
             try scrobble.insert(db)
         }
+        scrobbleRevisionCounter.bump()
     }
 
     /// Inserts a whole batch in one transaction, so a Last.fm page costs one
@@ -1359,6 +1362,14 @@ nonisolated final class DatabaseManager: Sendable {
                 try scrobble.insert(db)
             }
         }
+        scrobbleRevisionCounter.bump()
+    }
+
+    /// Changes whenever a scrobble is added or the table is emptied, so a
+    /// cache built from the scrobbles can tell in one integer compare whether
+    /// it has gone stale.
+    var scrobbleRevision: Int {
+        scrobbleRevisionCounter.value
     }
 
     /// Identity of every stored scrobble (`timestamp NUL lowercased title`),
@@ -1762,6 +1773,23 @@ nonisolated final class DatabaseManager: Sendable {
         }
     }
 
+    /// Appends many tracks in the order given inside one transaction, so saving
+    /// a long list as a playlist is a single commit rather than one per song.
+    func addTracksToPlaylist(playlistId: Int64, trackFileURLs: [String]) throws {
+        guard !trackFileURLs.isEmpty else { return }
+        try dbQueue.write { db in
+            var position = (try Int.fetchOne(
+                db,
+                sql: "SELECT COALESCE(MAX(position), -1) FROM playlistTracks WHERE playlistId = ?",
+                arguments: [playlistId]
+            ) ?? -1) + 1
+            for trackFileURL in trackFileURLs {
+                try PlaylistTrackRecord(playlistId: playlistId, trackFileURL: trackFileURL, position: position).insert(db)
+                position += 1
+            }
+        }
+    }
+
     func removeTrackFromPlaylist(id: Int64) throws {
         try dbQueue.write { db in
             _ = try PlaylistTrackRecord.deleteOne(db, id: id)
@@ -1932,6 +1960,94 @@ nonisolated final class DatabaseManager: Sendable {
         }
     }
 
+    /// Play count and total listened seconds for a window, in one aggregate
+    /// that decodes no rows.
+    func scrobbleTotals(from: Date, to: Date) throws -> (plays: Int, seconds: Int) {
+        try dbQueue.read { db in
+            let window = Self.scrobbleWindow(from: from, to: to)
+            let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS plays, COALESCE(SUM(duration), 0) AS seconds FROM scrobbles \(window.clause)
+            """, arguments: window.arguments)
+            return (plays: row?["plays"] ?? 0, seconds: row?["seconds"] ?? 0)
+        }
+    }
+
+    /// Plays and listened seconds per artist name for a window. The result is
+    /// as long as the number of distinct artists, which is small next to the
+    /// scrobble table, and its sums are the window's totals.
+    func scrobbleArtistCounts(from: Date, to: Date) throws -> [(artist: String, count: Int, seconds: Int)] {
+        try dbQueue.read { db in
+            let window = Self.scrobbleWindow(from: from, to: to)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT artist, COUNT(*) AS c, COALESCE(SUM(duration), 0) AS s FROM scrobbles \(window.clause)
+                GROUP BY artist
+            """, arguments: window.arguments)
+            return rows.map { (artist: $0["artist"], count: $0["c"], seconds: $0["s"]) }
+        }
+    }
+
+    func scrobbleTopAlbums(from: Date, to: Date, limit: Int) throws -> [(album: String, artist: String, count: Int)] {
+        try dbQueue.read { db in
+            let window = Self.scrobbleWindow(from: from, to: to)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT albumTitle, artist, COUNT(*) AS c FROM scrobbles \(window.clause)
+                GROUP BY albumTitle, artist
+                ORDER BY c DESC, albumTitle ASC, artist ASC
+                LIMIT \(limit)
+            """, arguments: window.arguments)
+            return rows.map { (album: $0["albumTitle"], artist: $0["artist"], count: $0["c"]) }
+        }
+    }
+
+    func scrobbleTopTracks(from: Date, to: Date, limit: Int) throws -> [(title: String, artist: String, count: Int)] {
+        try dbQueue.read { db in
+            let window = Self.scrobbleWindow(from: from, to: to)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT trackTitle, artist, COUNT(*) AS c FROM scrobbles \(window.clause)
+                GROUP BY trackTitle, artist
+                ORDER BY c DESC, trackTitle ASC, artist ASC
+                LIMIT \(limit)
+            """, arguments: window.arguments)
+            return rows.map { (title: $0["trackTitle"], artist: $0["artist"], count: $0["c"]) }
+        }
+    }
+
+    /// Plays per track for a window, one row per distinct title and artist.
+    func scrobbleTrackCounts(from: Date, to: Date) throws -> [(title: String, artist: String, count: Int)] {
+        try dbQueue.read { db in
+            let window = Self.scrobbleWindow(from: from, to: to)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT trackTitle, artist, COUNT(*) AS c FROM scrobbles \(window.clause)
+                GROUP BY trackTitle, artist
+            """, arguments: window.arguments)
+            return rows.map { (title: $0["trackTitle"], artist: $0["artist"], count: $0["c"]) }
+        }
+    }
+
+    /// Plays grouped into quarter-hour buckets of Unix time (`seconds / 900`).
+    /// Every UTC offset in use is a multiple of fifteen minutes, so a bucket
+    /// never straddles a local hour or day and the clock, the heatmap and the
+    /// streak can all be derived from this one narrow result.
+    func scrobbleQuarterHourCounts(from: Date, to: Date) throws -> [(bucket: Int, count: Int)] {
+        try dbQueue.read { db in
+            let window = Self.scrobbleWindow(from: from, to: to)
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT CAST(strftime('%s', timestamp) AS INTEGER) / 900 AS b, COUNT(*) AS c FROM scrobbles \(window.clause)
+                GROUP BY b
+            """, arguments: window.arguments)
+            return rows.map { (bucket: $0["b"], count: $0["c"]) }
+        }
+    }
+
+    /// The `WHERE` for a half-open time window, or nothing at all when the
+    /// window is the whole table: a bounded clause sends SQLite through the
+    /// timestamp index and back to the table for every row, which is slower
+    /// than reading the table straight through when every row qualifies.
+    private static func scrobbleWindow(from: Date, to: Date) -> (clause: String, arguments: StatementArguments) {
+        if from == .distantPast, to == .distantFuture { return ("", StatementArguments()) }
+        return ("WHERE timestamp >= ? AND timestamp < ?", [from, to])
+    }
+
     /// The paywall's proof of what the library holds, read in one statement
     /// that touches no BLOB column. The codec predicate is `Track.isLossless`
     /// rewritten as SQL over the same `Track.losslessCodecs`.
@@ -2031,5 +2147,25 @@ nonisolated final class DatabaseManager: Sendable {
                 try record.insert(db)
             }
         }
+    }
+}
+
+/// A counter several threads can bump and read, used to version caches built
+/// from a table the database owns.
+nonisolated final class RevisionCounter: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func bump() {
+        lock.lock()
+        count += 1
+        lock.unlock()
     }
 }

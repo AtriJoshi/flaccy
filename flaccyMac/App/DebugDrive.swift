@@ -10,6 +10,7 @@ import FlaccyCore
 enum DebugDrive {
 
     static func runIfRequested(window: NSWindow?) {
+        DebugStatsDrive.runIfRequested()
         if let target = value(after: "--dump-log") {
             Task {
                 try? await Task.sleep(for: .seconds(8))
@@ -30,6 +31,11 @@ enum DebugDrive {
         if CommandLine.arguments.contains("--exercise-library") {
             Task {
                 await exerciseLibrary(window: window)
+            }
+        }
+        if CommandLine.arguments.contains("--exercise-songs") {
+            Task {
+                await exerciseSongs(window: window)
             }
         }
         if CommandLine.arguments.contains("--exercise-import") {
@@ -71,6 +77,8 @@ enum DebugDrive {
         case settings(paneIndex: Int)
         case paywall
         case equalizer(String)
+        case stats(ChartPeriod)
+        case songs(SongsTableViewModel.Filter, ChartPeriod?)
     }
 
     private static func plannedShot() -> Shot? {
@@ -83,6 +91,10 @@ enum DebugDrive {
         if CommandLine.arguments.contains("--shot-queue-deep") { return .queuePanel(deep: true) }
         if CommandLine.arguments.contains("--shot-queue") { return .queuePanel(deep: false) }
         if let scene = value(after: "--shot-equalizer") { return .equalizer(scene) }
+        if let period = value(after: "--shot-stats") { return .stats(ChartPeriod(rawValue: period) ?? .week) }
+        if let filter = value(after: "--shot-songs").flatMap(SongsTableViewModel.Filter.init(rawValue:)) {
+            return .songs(filter, value(after: "--songs-range").flatMap(ChartPeriod.init(rawValue:)))
+        }
         if let pane = value(after: "--shot-settings") { return .settings(paneIndex: Int(pane) ?? 0) }
         if let name = value(after: "--shot-section") {
             let section: SidebarSection? = switch name {
@@ -241,6 +253,35 @@ enum DebugDrive {
             }
             capture(window: controller.window, name: "flaccy-shot-equalizer-\(scene)")
             return
+        case .stats(let period):
+            await seedRecentListeningIfRequested()
+            NotificationCenter.default.post(
+                name: .flaccyShowSection, object: nil,
+                userInfo: [SectionNotificationKey.section: SidebarSection.charts.rawValue]
+            )
+            try? await Task.sleep(for: .seconds(3))
+            if let charts: ChartsViewController = findController(in: window?.contentViewController) {
+                charts.selectPeriodForCapture(period)
+            }
+            try? await Task.sleep(for: .seconds(3))
+            if CommandLine.arguments.contains("--scroll-bottom"),
+               let charts: ChartsViewController = findController(in: window?.contentViewController) {
+                charts.scrollToBottomForCapture()
+                try? await Task.sleep(for: .seconds(1))
+            }
+            name = "flaccy-shot-stats-\(period.rawValue)"
+        case .songs(let filter, let range):
+            await seedRecentListeningIfRequested()
+            NotificationCenter.default.post(
+                name: .flaccyShowSection, object: nil,
+                userInfo: [SectionNotificationKey.section: SidebarSection.songs.rawValue]
+            )
+            try? await Task.sleep(for: .seconds(3))
+            if let songs: SongsTableViewController = findController(in: window?.contentViewController) {
+                songs.selectFilterForCapture(filter, range: range)
+            }
+            try? await Task.sleep(for: .seconds(2))
+            name = "flaccy-shot-songs-\(filter.rawValue)"
         case .paywall:
             (NSApp.delegate as? MacAppDelegate)?.presentPaywall()
             try? await Task.sleep(for: .seconds(3))
@@ -333,6 +374,100 @@ enum DebugDrive {
             "DebugDrive: stack exercise complete — depth \(stack.stack.count), rootHidden=\(root.view.isHidden), rootAlpha=\(root.view.alphaValue)",
             category: .general
         )
+    }
+
+    /// Drives the Songs table the way a person would: pivots to a chip that
+    /// hides the playing song, asks to jump to it (once with a search also
+    /// hiding it), and saves the visible list as a playlist, logging PASS or
+    /// FAIL for each expectation.
+    private static func exerciseSongs(window: NSWindow?) async {
+        let resultsURL = URL(fileURLWithPath: NSTemporaryDirectory() + "songs-exercise.txt")
+        try? "".write(to: resultsURL, atomically: true, encoding: .utf8)
+        func report(_ expectation: String, _ passed: Bool) {
+            let line = "SongsExercise \(passed ? "PASS" : "FAIL"): \(expectation)"
+            AppLogger.info(line, category: .general)
+            let existing = (try? String(contentsOf: resultsURL, encoding: .utf8)) ?? ""
+            try? (existing + line + "\n").write(to: resultsURL, atomically: true, encoding: .utf8)
+        }
+        var attempts = 0
+        while Library.shared.albums.isEmpty, attempts < 40 {
+            try? await Task.sleep(for: .milliseconds(500))
+            attempts += 1
+        }
+        await seedRecentListeningIfRequested()
+        startHeroPlayback()
+        try? await Task.sleep(for: .seconds(2))
+        guard let playing = AudioPlayer.shared.currentTrack?.fileURL.path else {
+            report("a song is playing", false)
+            return
+        }
+        NotificationCenter.default.post(
+            name: .flaccyShowSection, object: nil,
+            userInfo: [SectionNotificationKey.section: SidebarSection.songs.rawValue]
+        )
+        try? await Task.sleep(for: .seconds(3))
+        guard let songs: SongsTableViewController = findController(in: window?.contentViewController) else {
+            report("the songs table is on screen", false)
+            return
+        }
+        let pivots: [(SongsTableViewModel.Filter, ChartPeriod?)] = [
+            (.favorites, nil), (.rediscover, nil), (.mostPlayed, .week), (.recentlyPlayed, nil), (.lossless, nil),
+        ]
+        var hidden = false
+        for (filter, range) in pivots {
+            songs.selectFilterForCapture(filter, range: range)
+            try? await Task.sleep(for: .seconds(1))
+            if !songs.visibleTrackPathsForExercise.contains(playing) {
+                hidden = true
+                break
+            }
+        }
+        report("a chip hides the playing song (\(songs.filterForExercise.rawValue))", hidden)
+
+        (NSApp.delegate as? MacAppDelegate)?.jumpToCurrentSong(nil)
+        try? await Task.sleep(for: .seconds(2))
+        report("jump switches the chip to All", songs.filterForExercise == .all)
+        report("jump selects the playing song's row", songs.selectedTrackPathForExercise == playing)
+
+        LibrarySearchState.update("zzzz-no-such-song")
+        try? await Task.sleep(for: .seconds(1))
+        report("a search that matches nothing empties the list", songs.visibleTrackPathsForExercise.isEmpty)
+        (NSApp.delegate as? MacAppDelegate)?.jumpToCurrentSong(nil)
+        try? await Task.sleep(for: .seconds(2))
+        report("jump clears the search that hid the song", LibrarySearchState.query.isEmpty)
+        report("jump selects the row after clearing the search", songs.selectedTrackPathForExercise == playing)
+
+        songs.selectFilterForCapture(.recentlyAdded, range: nil)
+        try? await Task.sleep(for: .seconds(1))
+        let visible = songs.visibleTrackPathsForExercise
+        let tracks = Library.shared.allTracks
+        let ordered = visible.compactMap { path in tracks.first { $0.fileURL.path == path } }
+        if let playlist = try? DatabaseManager.shared.createPlaylist(name: "Exercise \(UUID().uuidString.prefix(6))"),
+           let id = playlist.id {
+            PlaylistActions.add(ordered, toPlaylist: id, named: playlist.name, in: nil)
+            let saved = (try? DatabaseManager.shared.fetchPlaylistTracks(playlistId: id)) ?? []
+            let savedPaths = saved.sorted { $0.position < $1.position }.map(\.trackFileURL)
+            let expected = ordered.map { LibraryPathResolver.relativePath(for: $0.fileURL) }
+            report("saving \(ordered.count) visible songs keeps their order", savedPaths == expected && !expected.isEmpty)
+        } else {
+            report("a playlist can be created", false)
+        }
+        report("status line reads \(songs.statusLineForExercise)", !songs.statusLineForExercise.isEmpty)
+        report("done", true)
+    }
+
+    private static func seedRecentListeningIfRequested() async {
+        guard DebugStatsDrive.wantsRecentListening else { return }
+        await DebugStatsDrive.seedRecentListening()
+    }
+
+    private static func findController<T: NSViewController>(in root: NSViewController?) -> T? {
+        guard let root else { return nil }
+        if let match = root as? T { return match }
+        for child in root.children {
+            if let match: T = findController(in: child) { return match }
+        }
+        return nil
     }
 
     private static func findStack(window: NSWindow?) -> ContentStackController? {

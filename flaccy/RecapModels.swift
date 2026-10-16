@@ -15,6 +15,10 @@ nonisolated struct RecapData: Sendable {
     var streak: Int
     var heatmap: [Date: Int]
     var persona: String
+    var calendarHeatmap: [Date: Int]? = nil
+    var previousPlays: Int? = nil
+    var previousMinutes: Int? = nil
+    var previousSpanDays: Int? = nil
 
     var hasScrobbles: Bool { totalPlays > 0 }
 

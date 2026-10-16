@@ -32,7 +32,7 @@ enum PlaylistActions {
         return menu
     }
 
-    static func promptForNewPlaylist(adding tracks: [Track], in window: NSWindow?) {
+    static func promptForNewPlaylist(adding tracks: [Track], suggestedName: String = "", in window: NSWindow?) {
         let alert = NSAlert()
         alert.messageText = String(localized: "New Playlist")
         alert.informativeText = tracks.isEmpty
@@ -45,6 +45,7 @@ enum PlaylistActions {
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
         field.placeholderString = String(localized: "Playlist name")
+        field.stringValue = suggestedName
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
 
@@ -75,12 +76,10 @@ enum PlaylistActions {
 
     static func add(_ tracks: [Track], toPlaylist id: Int64, named name: String, in window: NSWindow?) {
         do {
-            for track in tracks {
-                try DatabaseManager.shared.addTrackToPlaylist(
-                    playlistId: id,
-                    trackFileURL: LibraryPathResolver.relativePath(for: track.fileURL)
-                )
-            }
+            try DatabaseManager.shared.addTracksToPlaylist(
+                playlistId: id,
+                trackFileURLs: tracks.map { LibraryPathResolver.relativePath(for: $0.fileURL) }
+            )
             AppLogger.info("Added \(tracks.count) track(s) to playlist \(name)", category: .database)
             MacToast.show(
                 tracks.count == 1

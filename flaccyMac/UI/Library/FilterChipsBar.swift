@@ -1,16 +1,37 @@
 import AppKit
 
+/// One selectable capsule: a stable id, the words on it and its glyph. A chip
+/// that carries `hasMenu` shows a chevron and offers a menu of its own.
+struct FilterChip: Equatable {
+    let id: String
+    var title: String
+    let icon: String
+    var hasMenu = false
+
+    init(id: String, title: String, icon: String, hasMenu: Bool = false) {
+        self.id = id
+        self.title = title
+        self.icon = icon
+        self.hasMenu = hasMenu
+    }
+
+    init(filter: LibraryFilter) {
+        self.init(id: filter.rawValue, title: filter.displayName, icon: filter.icon)
+    }
+}
+
 /// Horizontal row of quick-pivot filter chips mirroring the iOS
 /// FilterChipsView: one selected capsule, hover brightening, adaptive colors
 /// that hold up in both appearances.
 final class FilterChipsBar: NSView {
 
     var onSelect: ((LibraryFilter) -> Void)?
+    var onSelectChip: ((String) -> Void)?
+    var menuProvider: ((String) -> NSMenu?)?
 
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
     private var buttons: [ChipButton] = []
-    private var selected: LibraryFilter = .all
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -49,34 +70,53 @@ final class FilterChipsBar: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(filters: [LibraryFilter], selected: LibraryFilter) {
-        self.selected = selected
+        configure(chips: filters.map(FilterChip.init(filter:)), selected: selected.rawValue)
+    }
+
+    func configure(chips: [FilterChip], selected: String) {
         buttons.forEach { $0.removeFromSuperview() }
-        buttons = filters.map { filter in
-            let button = ChipButton(filter: filter)
-            button.isChosen = filter == selected
-            button.onClick = { [weak self] in self?.choose(filter) }
+        buttons = chips.map { chip in
+            let button = ChipButton(chip: chip)
+            button.isChosen = chip.id == selected
+            button.onClick = { [weak self] in self?.choose(chip.id) }
+            button.menuProvider = { [weak self] in self?.menuProvider?(chip.id) }
             return button
         }
         buttons.forEach { stack.addArrangedSubview($0) }
     }
 
-    func setSelected(_ filter: LibraryFilter) {
-        selected = filter
-        for button in buttons {
-            button.isChosen = button.filter == filter
+    /// Rewords chips in place, so a chip whose title carries a setting
+    /// ("Most Played · 7D") can change without the bar being rebuilt.
+    func update(chips: [FilterChip]) {
+        for chip in chips {
+            buttons.first { $0.chip.id == chip.id }?.apply(chip)
         }
     }
 
-    private func choose(_ filter: LibraryFilter) {
-        setSelected(filter)
-        onSelect?(filter)
+    func setSelected(_ filter: LibraryFilter) {
+        setSelected(id: filter.rawValue)
+    }
+
+    func setSelected(id: String) {
+        for button in buttons {
+            button.isChosen = button.chip.id == id
+        }
+    }
+
+    private func choose(_ id: String) {
+        setSelected(id: id)
+        onSelectChip?(id)
+        if let filter = LibraryFilter(rawValue: id) {
+            onSelect?(filter)
+        }
     }
 }
 
 private final class ChipButton: NSControl {
 
-    let filter: LibraryFilter
+    private(set) var chip: FilterChip
     var onClick: (() -> Void)?
+    var menuProvider: (() -> NSMenu?)?
 
     var isChosen = false {
         didSet { applyColors() }
@@ -84,22 +124,24 @@ private final class ChipButton: NSControl {
 
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private let chevron = NSImageView()
     private var isHovered = false
 
-    init(filter: LibraryFilter) {
-        self.filter = filter
+    private static let chevronHitWidth: CGFloat = 26
+
+    init(chip: FilterChip) {
+        self.chip = chip
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 13
         layer?.cornerCurve = .continuous
 
-        iconView.image = NSImage(systemSymbolName: filter.icon, accessibilityDescription: nil)
         iconView.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
-
-        label.stringValue = filter.displayName
         label.font = .systemFont(ofSize: 11.5, weight: .semibold)
+        chevron.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)
+        chevron.symbolConfiguration = .init(pointSize: 8, weight: .bold)
 
-        let stack = NSStackView(views: [iconView, label])
+        let stack = NSStackView(views: [iconView, label, chevron])
         stack.orientation = .horizontal
         stack.spacing = 5
         stack.edgeInsets = NSEdgeInsets(top: 5, left: 11, bottom: 5, right: 11)
@@ -113,11 +155,19 @@ private final class ChipButton: NSControl {
         ])
 
         setAccessibilityRole(.button)
-        setAccessibilityLabel(String(localized: "Filter: \(filter.displayName)"))
-        applyColors()
+        apply(chip)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func apply(_ chip: FilterChip) {
+        self.chip = chip
+        iconView.image = NSImage(systemSymbolName: chip.icon, accessibilityDescription: nil)
+        label.stringValue = chip.title
+        chevron.isHidden = !chip.hasMenu
+        setAccessibilityLabel(String(localized: "Filter: \(chip.title)"))
+        applyColors()
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -141,9 +191,17 @@ private final class ChipButton: NSControl {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else { return }
+        if chip.hasMenu, point.x > bounds.width - Self.chevronHitWidth, let menu = menuProvider?() {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: self)
+        } else {
             onClick?()
         }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        chip.hasMenu ? menuProvider?() : nil
     }
 
     override func resetCursorRects() {
@@ -161,11 +219,13 @@ private final class ChipButton: NSControl {
                 layer?.backgroundColor = NSColor.labelColor.cgColor
                 label.textColor = .windowBackgroundColor
                 iconView.contentTintColor = .windowBackgroundColor
+                chevron.contentTintColor = .windowBackgroundColor
             } else {
                 let base = NSColor.labelColor.withAlphaComponent(isHovered ? 0.16 : 0.09)
                 layer?.backgroundColor = base.cgColor
                 label.textColor = .labelColor
                 iconView.contentTintColor = .secondaryLabelColor
+                chevron.contentTintColor = .secondaryLabelColor
             }
         }
     }

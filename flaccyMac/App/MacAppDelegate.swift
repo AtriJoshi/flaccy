@@ -353,6 +353,22 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         Task { _ = await LovedTracksService.shared.toggleLove(track: track) }
     }
 
+    @objc func jumpToCurrentSong(_ sender: Any?) {
+        guard AudioPlayer.shared.currentTrack != nil else {
+            AppLogger.info("Jump to current song: nothing is playing", category: .ui)
+            MacToast.show(String(localized: "Nothing playing"), style: .info, in: mainWindowController?.window)
+            return
+        }
+        NotificationCenter.default.post(
+            name: .flaccyShowSection,
+            object: nil,
+            userInfo: [SectionNotificationKey.section: SidebarSection.songs.rawValue]
+        )
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .flaccyJumpToCurrentSong, object: nil)
+        }
+    }
+
     @objc func increaseVolume(_ sender: Any?) {
         AudioPlayer.shared.volume = min(1, AudioPlayer.shared.volume + 0.0625)
     }
@@ -685,15 +701,13 @@ extension MacAppDelegate {
     }
 
     private func ChartsViewModelSnapshotForDrive() -> RecapData? {
-        let stats = LastFMStatsService.shared
+        let metrics = LastFMStatsService.shared.recapMetrics(period: .allTime)
         return RecapData(
             userInfo: nil, period: .allTime,
-            totalPlays: stats.totalPlays(), totalMinutes: stats.totalMinutes(),
-            topArtists: stats.topArtists(period: .allTime, limit: 10),
-            topAlbums: stats.topAlbums(period: .allTime, limit: 9),
-            topTracks: stats.topTracks(period: .allTime, limit: 10),
-            listeningClock: stats.listeningClock(), streak: stats.currentStreakDays(),
-            heatmap: stats.dayHeatmap(), persona: stats.persona()
+            totalPlays: metrics.totalPlays, totalMinutes: metrics.totalMinutes,
+            topArtists: metrics.topArtists, topAlbums: metrics.topAlbums, topTracks: metrics.topTracks,
+            listeningClock: metrics.listeningClock, streak: metrics.streakDays,
+            heatmap: metrics.heatmap, persona: metrics.persona
         )
     }
 }
