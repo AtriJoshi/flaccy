@@ -1100,26 +1100,64 @@ button.eq-capsule.running {
   box-shadow: 0 0 14px alpha(@accent_bg_color, 0.5);
 }
 
-.eq-presets {
+.eq-deck-header {
+  padding: 12px 8px 0 16px;
+}
+
+.eq-deck-hint {
+  font-size: 11.5px;
+  opacity: 0.5;
+  padding: 0 16px 8px 16px;
+}
+
+.eq-deck .eq-section {
+  padding-left: 16px;
+}
+
+.eq-deck-list {
   background: transparent;
 }
 
-.eq-presets > row {
-  border-radius: 10px;
-  margin: 1px 6px;
+.eq-deck-list > row.eq-deck-row {
+  border-radius: 12px;
+  margin: 1px 8px;
   padding: 0;
+  transition:
+    background-color 120ms ease,
+    box-shadow 160ms ease;
 }
 
-.eq-presets > row:hover {
-  background-color: alpha(@window_fg_color, 0.07);
-}
-
-.eq-presets > row.eq-preset-current {
-  background-color: alpha(@accent_bg_color, 0.18);
-}
-
-.eq-preset-row {
+.eq-deck-content {
   padding: 5px 8px;
+}
+
+.eq-deck-list > row.eq-deck-row:hover {
+  background-color: alpha(@window_fg_color, 0.08);
+}
+
+.eq-deck-list > row.eq-deck-row.current {
+  background-color: alpha(@accent_bg_color, 0.13);
+  box-shadow: inset 3px 0 0 @accent_bg_color;
+}
+
+.eq-deck-list > row.eq-deck-row.hearing {
+  background-color: alpha(@accent_bg_color, 0.26);
+  box-shadow:
+    inset 0 0 0 1px alpha(@accent_bg_color, 0.7),
+    0 0 18px alpha(@accent_bg_color, 0.32);
+}
+
+.eq-deck-thumb {
+  color: @accent_color;
+}
+
+.eq-deck-footer {
+  padding: 4px 6px;
+}
+
+.eq-hover-toggle:checked {
+  color: @accent_color;
+  background-color: alpha(@accent_bg_color, 0.2);
 }
 
 .eq-preset-name {
@@ -1136,8 +1174,22 @@ button.eq-capsule.running {
   color: @accent_color;
 }
 
-.eq-presets-footer {
-  padding: 4px;
+.eq-title-row {
+  padding: 12px 18px 0 20px;
+}
+
+.eq-profile-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.eq-preview-pill {
+  background-color: alpha(@accent_bg_color, 0.22);
+  box-shadow: inset 0 0 0 1px alpha(@accent_bg_color, 0.55);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .eq-detected {

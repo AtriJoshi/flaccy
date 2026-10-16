@@ -22,7 +22,7 @@ use crate::ui::Ui;
 use adw::prelude::*;
 use flaccy_shared::equalizer::biquad::BiquadMath;
 use flaccy_shared::equalizer::plot_model::{PlotMode, Point};
-use flaccy_shared::equalizer::profile::EqualizerBand;
+use flaccy_shared::equalizer::profile::{EqualizerBand, EqualizerKind};
 use flaccy_shared::equalizer::spectrum::SpectrumAnalyzer;
 use gtk::{gdk, glib};
 use std::rc::Rc;
@@ -101,7 +101,10 @@ pub fn spectrum(time: f64, bands: &[EqualizerBand], preamp_decibels: f64) -> Vec
 }
 
 pub fn spectrum_for(engine: &EqEngine) -> Vec<f32> {
-    let running = engine.running_profile();
+    let running = match engine.auditioning() {
+        Some(profile) => (!profile.is_flat()).then_some(profile),
+        None => engine.running_profile(),
+    };
     let (bands, preamp) = match &running {
         Some(profile) => (profile.resolved_bands(), profile.preamp()),
         None => (Vec::new(), 0.0),
@@ -168,7 +171,7 @@ pub fn open(ui: &Rc<Ui>, mode: &str) {
     super::present(ui);
     let mode = mode.to_string();
     glib::timeout_add_local_once(Duration::from_millis(900), move || match mode.as_str() {
-        "presets" => screen.preset_button.popup(),
+        "presets" => screen.begin_audition("builtin.bassBoost"),
         "outputs" => screen.output_button.popup(),
         "import" => import::present(&screen, Some(STUDIO_REFERENCE)),
         _ => {}
@@ -261,6 +264,38 @@ pub fn drive(ui: &Rc<Ui>) {
         screen.window_key_released(gdk::Key::space);
         report("releasing Space ends it", !engine.is_comparing());
 
+        let kept = engine.profile_in_force().id;
+        screen.begin_audition("builtin.bassBoost");
+        report(
+            "pointing at a preset previews it without choosing it",
+            engine.auditioning().is_some_and(|profile| profile.id == "builtin.bassBoost")
+                && engine.profile_in_force().id == kept
+                && screen.curve.is_previewing(),
+        );
+        screen.end_audition();
+        report(
+            "leaving the deck puts back what was in force",
+            engine.auditioning().is_none() && !screen.curve.is_previewing() && engine.profile_in_force().id == kept,
+        );
+        screen.begin_audition("builtin.bassBoost");
+        screen.choose_profile("builtin.bassBoost");
+        report(
+            "clicking a previewed preset keeps it",
+            engine.profile_in_force().id == "builtin.bassBoost" && engine.auditioning().is_none(),
+        );
+        screen.undo();
+        report("choosing a preset is one undo step", engine.profile_in_force().id == kept);
+
+        screen.deck.focus_preset("builtin.vocal");
+        pause(300).await;
+        report(
+            "keyboard focus on a preset previews it",
+            engine.auditioning().is_some_and(|profile| profile.id == "builtin.vocal"),
+        );
+        screen.curve.area.grab_focus();
+        pause(400).await;
+        report("moving focus away ends the preview", engine.auditioning().is_none() && !screen.curve.is_previewing());
+
         screen.band_event(BandEvent::SetTarget {
             index: 3,
             value: copy::parse_number("+3.5").unwrap_or(f64::NAN),
@@ -270,6 +305,17 @@ pub fn drive(ui: &Rc<Ui>) {
         report("a typed value past the range is held at +12 dB", near(target(&screen, 3), 12.0));
         screen.undo();
         screen.undo();
+
+        let before_conversions = engine.state().user_profiles.len();
+        engine.select("builtin.flat");
+        for kind in [EqualizerKind::Parametric, EqualizerKind::Graphic, EqualizerKind::Parametric, EqualizerKind::Graphic] {
+            engine.convert_in_force(kind);
+        }
+        report(
+            "switching a profile between Simple and Advanced again and again keeps one copy of each",
+            engine.state().user_profiles.len() == before_conversions + 2,
+        );
+        engine.select("builtin.rock");
 
         screen.mode_chosen(true);
         pause(150).await;

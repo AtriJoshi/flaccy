@@ -1,18 +1,17 @@
-//! The preset list: every built-in curve with a thumbnail of what it does,
-//! the person's own profiles with rename, delete and export, and the way into
-//! import. Saving the curve in force as a new preset lives here too.
+//! What the deck lists and what can be done to a profile: the sections in the
+//! order the screens show them, a thumbnail curve for each, and rename, delete,
+//! export and copy for the person's own. Saving the curve in force as a new
+//! preset lives here too.
 
-use super::curve::plot_accent;
-use super::{copy, import, render, Screen};
+use super::{copy, Screen};
 use adw::prelude::*;
 use flaccy_shared::equalizer::biquad::BiquadMath;
 use flaccy_shared::equalizer::presets::EqualizerPresets;
 use flaccy_shared::equalizer::profile::EqualizerProfile;
 use gtk::{gio, glib};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 const THUMBNAIL_POINTS: usize = 40;
-const THUMBNAIL_SIZE: (i32, i32) = (44, 22);
 
 /// The sections of the list in the order the screens show them.
 pub fn sections(user: &[EqualizerProfile]) -> Vec<(&'static str, Vec<EqualizerProfile>)> {
@@ -35,178 +34,11 @@ pub fn thumbnail_curve(profile: &EqualizerProfile) -> Vec<f64> {
     BiquadMath::curve(&profile.resolved_bands(), THUMBNAIL_POINTS)
 }
 
-fn subtitle(profile: &EqualizerProfile) -> String {
+pub(super) fn subtitle(profile: &EqualizerProfile) -> String {
     match EqualizerPresets::key_for_id(&profile.id) {
         Some(key) => copy::preset_subtitle(key).to_string(),
         None => copy::kind_subtitle(profile.kind, profile.bands.len()),
     }
-}
-
-fn thumbnail(curve: Vec<f64>, is_current: bool) -> gtk::DrawingArea {
-    let area = gtk::DrawingArea::builder()
-        .content_width(THUMBNAIL_SIZE.0)
-        .content_height(THUMBNAIL_SIZE.1)
-        .valign(gtk::Align::Center)
-        .build();
-    area.set_draw_func(move |_, cr, width, height| {
-        let dark = adw::StyleManager::default().is_dark();
-        let ink = if dark { (1.0, 1.0, 1.0) } else { (0.09, 0.09, 0.13) };
-        let (color, alpha) = if is_current { (plot_accent(dark), 1.0) } else { (ink, 0.7) };
-        render::draw_thumbnail(cr, width as f64, height as f64, &curve, color, alpha, false, ink);
-    });
-    area
-}
-
-pub fn build_popover(weak: Weak<Screen>) -> (gtk::Popover, gtk::ListBox) {
-    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build();
-    list.add_css_class("eq-presets");
-    list.update_property(&[gtk::accessible::Property::Label("Presets")]);
-    {
-        let weak = weak.clone();
-        list.connect_row_activated(move |_, row| {
-            let Some(screen) = weak.upgrade() else { return };
-            let id = screen.preset_ids.borrow().get(row.index() as usize).cloned().flatten();
-            if let Some(id) = id {
-                screen.choose_profile(&id);
-            }
-        });
-    }
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .min_content_height(380)
-        .max_content_height(520)
-        .propagate_natural_height(true)
-        .min_content_width(360)
-        .child(&list)
-        .build();
-
-    let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    footer.add_css_class("eq-presets-footer");
-    let entries: [(&str, fn(&Rc<Screen>)); 4] = [
-        ("Import from Text…", |screen| import::present(screen, None)),
-        ("Export as Text…", |screen| screen.export_profile(screen.profile())),
-        ("Copy as Text", |screen| screen.copy_profile(&screen.profile())),
-        ("Find Headphones on AutoEq", |screen| {
-            gtk::UriLauncher::new(copy::AUTOEQ_URL).launch(
-                Some(&screen.window),
-                None::<&gio::Cancellable>,
-                |_| {},
-            );
-        }),
-    ];
-    for (title, action) in entries {
-        let button = gtk::Button::with_label(title);
-        button.add_css_class("flat");
-        if let Some(label) = button.child().and_then(|child| child.downcast::<gtk::Label>().ok()) {
-            label.set_xalign(0.0);
-        }
-        let weak = weak.clone();
-        button.connect_clicked(move |button| {
-            if let Some(screen) = weak.upgrade() {
-                if let Some(popover) = button.ancestor(gtk::Popover::static_type()) {
-                    popover.downcast_ref::<gtk::Popover>().map(|p| p.popdown());
-                }
-                action(&screen);
-            }
-        });
-        footer.append(&button);
-    }
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    content.set_size_request(340, -1);
-    content.append(&scroll);
-    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    content.append(&footer);
-    let popover = gtk::Popover::builder().child(&content).build();
-    popover.add_css_class("eq-popover");
-    {
-        let weak = weak.clone();
-        popover.connect_show(move |_| {
-            if let Some(screen) = weak.upgrade() {
-                rebuild(&screen);
-            }
-        });
-    }
-    (popover, list)
-}
-
-fn header_row(title: &str) -> gtk::ListBoxRow {
-    let label = gtk::Label::builder().label(title).xalign(0.0).build();
-    label.add_css_class("eq-caption");
-    label.add_css_class("eq-section");
-    let row = gtk::ListBoxRow::new();
-    row.set_child(Some(&label));
-    row.set_activatable(false);
-    row.set_selectable(false);
-    row
-}
-
-fn profile_row(profile: &EqualizerProfile, is_current: bool) -> gtk::ListBoxRow {
-    let names = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    names.set_hexpand(true);
-    let name = gtk::Label::builder().label(&profile.name).xalign(0.0).build();
-    name.add_css_class("eq-preset-name");
-    let note = gtk::Label::builder().label(subtitle(profile)).xalign(0.0).build();
-    note.add_css_class("eq-preset-note");
-    names.append(&name);
-    names.append(&note);
-
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    content.add_css_class("eq-preset-row");
-    content.append(&thumbnail(thumbnail_curve(profile), is_current));
-    content.append(&names);
-    if is_current {
-        let tick = gtk::Image::from_icon_name("object-select-symbolic");
-        tick.add_css_class("eq-preset-tick");
-        content.append(&tick);
-    }
-    if !profile.is_built_in() {
-        let menu = gio::Menu::new();
-        for (title, action) in [
-            ("Rename…", "eqw.rename"),
-            ("Export as Text…", "eqw.export"),
-            ("Copy as Text", "eqw.copy"),
-            ("Delete", "eqw.delete"),
-        ] {
-            let item = gio::MenuItem::new(Some(title), None);
-            item.set_action_and_target_value(Some(action), Some(&profile.id.to_variant()));
-            menu.append_item(&item);
-        }
-        let more = gtk::MenuButton::builder()
-            .icon_name("view-more-symbolic")
-            .menu_model(&menu)
-            .valign(gtk::Align::Center)
-            .build();
-        more.add_css_class("flat");
-        more.add_css_class("circular");
-        more.update_property(&[gtk::accessible::Property::Label(&format!("More for {}", profile.name))]);
-        content.append(&more);
-    }
-    let row = gtk::ListBoxRow::new();
-    row.set_child(Some(&content));
-    if is_current {
-        row.add_css_class("eq-preset-current");
-    }
-    row.update_property(&[gtk::accessible::Property::Label(&profile.name)]);
-    row
-}
-
-pub fn rebuild(screen: &Screen) {
-    let list = &screen.preset_list;
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
-    let current = screen.profile().id;
-    let mut ids = Vec::new();
-    for (title, profiles) in sections(&screen.engine.state().user_profiles) {
-        list.append(&header_row(title));
-        ids.push(None);
-        for profile in profiles {
-            list.append(&profile_row(&profile, profile.id == current));
-            ids.push(Some(profile.id));
-        }
-    }
-    *screen.preset_ids.borrow_mut() = ids;
 }
 
 pub fn install_actions(screen: &Rc<Screen>) {
@@ -221,6 +53,21 @@ pub fn install_actions(screen: &Rc<Screen>) {
         });
         screen.actions.add_action(&action);
     };
+    let plain_action = |name: &str, handler: fn(&Rc<Screen>)| {
+        let action = gio::SimpleAction::new(name, None);
+        let weak = Rc::downgrade(screen);
+        action.connect_activate(move |_, _| {
+            if let Some(screen) = weak.upgrade() {
+                handler(&screen);
+            }
+        });
+        screen.actions.add_action(&action);
+    };
+    plain_action("export-current", |screen| screen.export_profile(screen.profile()));
+    plain_action("copy-current", |screen| screen.copy_profile(&screen.profile()));
+    plain_action("autoeq", |screen| {
+        gtk::UriLauncher::new(copy::AUTOEQ_URL).launch(Some(&screen.window), None::<&gio::Cancellable>, |_| {});
+    });
     string_action("rename", |screen, id| screen.prompt_rename(id));
     string_action("delete", |screen, id| screen.confirm_delete(id));
     string_action("export", |screen, id| {
@@ -280,15 +127,6 @@ pub fn prompt_save(screen: &Rc<Screen>) {
 }
 
 impl Screen {
-    /// Picks a profile from the list: the equalizer turns on, as choosing one asks to hear it.
-    pub(super) fn choose_profile(self: &Rc<Self>, id: &str) {
-        self.begin_gesture();
-        self.engine.select(id);
-        self.finish_gesture();
-        self.preset_popover.popdown();
-        self.refresh(false);
-    }
-
     pub(super) fn prompt_rename(self: &Rc<Self>, id: &str) {
         let Some(profile) = self.engine.state().profile_with_id(id) else {
             return;
@@ -307,7 +145,6 @@ impl Screen {
             screen.refresh(false);
         });
         dialog.present(Some(&self.window));
-        self.preset_popover.popdown();
     }
 
     pub(super) fn confirm_delete(self: &Rc<Self>, id: &str) {
@@ -333,7 +170,6 @@ impl Screen {
             }
         });
         dialog.present(Some(&self.window));
-        self.preset_popover.popdown();
     }
 
     pub(super) fn copy_profile(&self, profile: &EqualizerProfile) {
@@ -367,6 +203,7 @@ impl Screen {
 
 #[cfg(test)]
 mod tests {
+    use super::super::render;
     use super::*;
 
     #[test]

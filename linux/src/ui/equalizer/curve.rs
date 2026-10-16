@@ -12,6 +12,7 @@ use flaccy_shared::equalizer::graphic::GraphicSolver;
 use flaccy_shared::equalizer::interaction::{PlotAction, PlotInteraction};
 use flaccy_shared::equalizer::plot::EqualizerPlot;
 use flaccy_shared::equalizer::plot_model::{PlotContent, PlotMode, PlotModel, Point, Rect};
+use flaccy_shared::equalizer::profile::EqualizerBand;
 use gtk::{gdk, glib};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -21,6 +22,8 @@ const FRAME_INTERVAL: f64 = 1.0 / 30.0;
 const IDLE_FRAMES_BEFORE_PARKING: u32 = 45;
 /// How often a parked curve looks for audio to start drawing again.
 const PARKED_POLL_MS: u64 = 300;
+/// How long the previewed curve takes to glide from the one before it.
+const PREVIEW_MORPH_SECONDS: f64 = 0.16;
 const WHEEL_Q_PER_NOTCH: f64 = 6.0;
 const GAIN_STEP: f64 = 0.5;
 const COARSE_GAIN_STEP: f64 = 2.0;
@@ -47,6 +50,9 @@ pub struct CurveView {
     model: RefCell<PlotModel>,
     interaction: RefCell<PlotInteraction>,
     hover: Cell<Option<usize>>,
+    preview: RefCell<Option<Vec<EqualizerBand>>>,
+    preview_from: RefCell<Vec<EqualizerBand>>,
+    preview_morph: Cell<f64>,
     handler: RefCell<Option<Handler>>,
     spectrum: RefCell<Option<SpectrumSource>>,
     driver: FrameDriver,
@@ -196,6 +202,9 @@ impl CurveView {
             model: RefCell::new(PlotModel::new()),
             interaction: RefCell::new(PlotInteraction::new()),
             hover: Cell::new(None),
+            preview: RefCell::new(None),
+            preview_from: RefCell::new(Vec::new()),
+            preview_morph: Cell::new(1.0),
             handler: RefCell::new(None),
             spectrum: RefCell::new(None),
             driver: FrameDriver::default(),
@@ -269,6 +278,61 @@ impl CurveView {
         self.wake();
     }
 
+    /// Shows the curve of a preset being auditioned as the line being heard,
+    /// gliding from whatever was on screen; `None` goes back to the curve in force.
+    pub fn set_preview(self: &Rc<Self>, bands: Option<Vec<EqualizerBand>>) {
+        let reduce_motion = !gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations());
+        match bands {
+            Some(target) => {
+                let from = self.preview.borrow().clone().unwrap_or_else(|| self.kept_bands());
+                *self.preview_from.borrow_mut() = from;
+                *self.preview.borrow_mut() = Some(target);
+                self.preview_morph.set(if reduce_motion { 1.0 } else { 0.0 });
+            }
+            None => {
+                if self.preview.borrow_mut().take().is_none() {
+                    return;
+                }
+                self.preview_morph.set(1.0);
+            }
+        }
+        self.area.queue_draw();
+        self.wake();
+    }
+
+    pub fn is_previewing(&self) -> bool {
+        self.preview.borrow().is_some()
+    }
+
+    fn kept_bands(&self) -> Vec<EqualizerBand> {
+        let model = self.model.borrow();
+        if model.content().is_enabled {
+            model.resolved_bands().to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The previewed curve placed on the plot, part-way from the one before it
+    /// while the glide plays.
+    fn preview_points(&self, plot: Rect) -> Option<Vec<Point>> {
+        let target = self.preview.borrow().clone()?;
+        let model = self.model.borrow();
+        let to = model.curve_points(&target, plot, 160);
+        let progress = self.preview_morph.get();
+        if progress >= 1.0 {
+            return Some(to);
+        }
+        let from = model.curve_points(&self.preview_from.borrow(), plot, 160);
+        let eased = progress * progress * (3.0 - 2.0 * progress);
+        Some(
+            from.iter()
+                .zip(&to)
+                .map(|(from, to)| Point { x: to.x, y: from.y + (to.y - from.y) * eased })
+                .collect(),
+        )
+    }
+
     /// The plot rectangle inside the canvas, with room for the axis labels.
     fn plot_rect(&self) -> Rect {
         let k = crate::ui::ui_scale::current();
@@ -295,9 +359,11 @@ impl CurveView {
 
     fn paint(&self, cr: &gtk::cairo::Context, width: i32, is_enabled: bool, is_comparing: bool) {
         let plot = self.plot_rect();
+        let preview = self.preview_points(plot);
         let model = self.model.borrow();
         let has_focus = self.area.has_focus() && self.area.is_focus();
         let frame = PlotFrame {
+            preview: preview.as_deref(),
             width: width as f64,
             plot,
             model: &model,
@@ -532,8 +598,14 @@ impl CurveView {
             .model
             .borrow_mut()
             .step(fresh.as_deref(), source.is_none() || reduce_motion);
+        let gliding = self.preview_morph.get() < 1.0;
+        if gliding {
+            let step = FRAME_INTERVAL / PREVIEW_MORPH_SECONDS;
+            self.preview_morph.set((self.preview_morph.get() + step).min(1.0));
+        }
         let signature: f32 = self.model.borrow().spectrum_bins().iter().sum();
         let changed = signature != self.spectrum_signature.replace(signature);
+        let moved = moved || gliding;
         if moved || changed {
             self.area.queue_draw();
         }

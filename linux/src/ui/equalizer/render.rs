@@ -6,7 +6,7 @@
 
 use flaccy_shared::equalizer::graphic::GraphicSolver;
 use flaccy_shared::equalizer::plot::EqualizerPlot;
-use flaccy_shared::equalizer::plot_model::{PlotMode, PlotModel, Rect};
+use flaccy_shared::equalizer::plot_model::{PlotMode, PlotModel, Point, Rect};
 use gtk::cairo::{self, Context, FontSlant, FontWeight, LinearGradient, RadialGradient};
 use std::f64::consts::PI;
 
@@ -136,6 +136,10 @@ pub struct PlotFrame<'a> {
     pub style: Style,
     pub hover: Option<usize>,
     pub shows_focus: bool,
+    /// The curve of a preset being auditioned, already placed on the plot. It
+    /// is drawn as the line being heard, with the curve in force left behind
+    /// as a thin dashed reference.
+    pub preview: Option<&'a [Point]>,
 }
 
 pub fn draw(cr: &Context, frame: &PlotFrame) {
@@ -148,9 +152,9 @@ pub fn draw(cr: &Context, frame: &PlotFrame) {
     if model.content().mode == PlotMode::Advanced {
         draw_selected_band(cr, plot, model);
     }
-    draw_curve(cr, plot, model, &style);
+    draw_curve(cr, plot, model, &style, frame.preview);
     let _ = cr.pop_group_to_source();
-    let _ = cr.paint_with_alpha(if style.is_enabled { 1.0 } else { 0.45 });
+    let _ = cr.paint_with_alpha(if style.is_enabled || frame.preview.is_some() { 1.0 } else { 0.45 });
     let _ = cr.restore();
 
     if model.content().mode == PlotMode::Simple {
@@ -160,7 +164,13 @@ pub fn draw(cr: &Context, frame: &PlotFrame) {
     cr.push_group();
     draw_nodes(cr, plot, model, &style, frame.hover);
     let _ = cr.pop_group_to_source();
-    let _ = cr.paint_with_alpha(if style.is_enabled { 1.0 } else { 0.5 });
+    let _ = cr.paint_with_alpha(if frame.preview.is_some() {
+        0.22
+    } else if style.is_enabled {
+        1.0
+    } else {
+        0.5
+    });
     let _ = cr.restore();
     if model.is_dragging {
         draw_bubble(cr, frame);
@@ -267,11 +277,39 @@ fn draw_selected_band(cr: &Context, plot: Rect, model: &PlotModel) {
     let _ = cr.fill();
 }
 
-fn draw_curve(cr: &Context, plot: Rect, model: &PlotModel, style: &Style) {
-    let zero = plot.min_y() + plot.height / 2.0;
+fn draw_curve(cr: &Context, plot: Rect, model: &PlotModel, style: &Style, preview: Option<&[Point]>) {
     let bands = if style.is_enabled { model.resolved_bands().to_vec() } else { Vec::new() };
-    let points = model.curve_points(&bands, plot, 160);
-    let comparing = style.is_comparing && style.is_enabled;
+    let kept = model.curve_points(&bands, plot, 160);
+    match preview {
+        Some(points) => {
+            draw_reference_curve(cr, &kept, style);
+            draw_hero_curve(cr, plot, points, style, false);
+        }
+        None => draw_hero_curve(cr, plot, &kept, style, style.is_comparing && style.is_enabled),
+    }
+}
+
+/// The curve in force while another is being auditioned: a thin dashed line
+/// the previewed curve can be read against.
+fn draw_reference_curve(cr: &Context, points: &[Point], style: &Style) {
+    cr.set_line_cap(cairo::LineCap::Round);
+    cr.set_line_join(cairo::LineJoin::Round);
+    cr.set_line_width(1.6);
+    cr.set_dash(&[6.0, 5.0], 0.0);
+    source(cr, style.ink, 0.42);
+    for (index, point) in points.iter().enumerate() {
+        if index == 0 {
+            cr.move_to(point.x, point.y);
+        } else {
+            cr.line_to(point.x, point.y);
+        }
+    }
+    let _ = cr.stroke();
+    cr.set_dash(&[], 0.0);
+}
+
+fn draw_hero_curve(cr: &Context, plot: Rect, points: &[Point], style: &Style, comparing: bool) {
+    let zero = plot.min_y() + plot.height / 2.0;
 
     if comparing {
         source(cr, style.ink, 0.5);
@@ -285,7 +323,7 @@ fn draw_curve(cr: &Context, plot: Rect, model: &PlotModel, style: &Style) {
 
     for (above, color) in [(true, style.accent), (false, CUT)] {
         cr.move_to(plot.min_x(), zero);
-        for point in &points {
+        for point in points {
             cr.line_to(point.x, if above { point.y.min(zero) } else { point.y.max(zero) });
         }
         cr.line_to(plot.max_x(), zero);

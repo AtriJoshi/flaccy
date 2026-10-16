@@ -130,7 +130,8 @@ impl Screen {
             }
         }
 
-        self.preset_label.set_text(&profile.name);
+        self.profile_label.set_text(&profile.name);
+        self.deck.sync(self, &self.weak);
         self.compare_button.set_label(if self.engine.is_comparing() {
             "Hearing original"
         } else {

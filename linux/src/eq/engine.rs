@@ -27,6 +27,19 @@ const CUSTOM_PROFILE_NAME: &str = "Custom";
 /// The meter and the spectrum read nothing once the element has been silent this long.
 const STALE_AFTER_MILLISECONDS: f64 = 1_000.0;
 
+/// A profile's name without the "(Simple)" or "(Advanced)" a conversion added,
+/// however many times it was converted, so a copy of a copy keeps one suffix.
+fn base_profile_name(name: &str) -> String {
+    let mut base = name.trim();
+    loop {
+        let stripped = [" (Simple)", " (Advanced)"].iter().find_map(|suffix| base.strip_suffix(suffix));
+        match stripped {
+            Some(rest) if !rest.trim().is_empty() => base = rest.trim_end(),
+            _ => return base.to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImportOutcome {
     Imported {
@@ -60,6 +73,7 @@ pub struct EqEngine {
     output: RefCell<Option<Output>>,
     output_reported: Cell<bool>,
     comparing: Cell<bool>,
+    audition: RefCell<Option<EqualizerProfile>>,
     analysis_demand: Cell<usize>,
     version: Cell<u64>,
     analyzer: RefCell<Option<(f64, SpectrumAnalyzer)>>,
@@ -82,6 +96,7 @@ impl EqEngine {
             output: RefCell::new(None),
             output_reported: Cell::new(false),
             comparing: Cell::new(false),
+            audition: RefCell::new(None),
             analysis_demand: Cell::new(0),
             version: Cell::new(0),
             analyzer: RefCell::new(None),
@@ -254,7 +269,8 @@ impl EqEngine {
     }
 
     /// Copies the profile in force into the other kind, leaving the original
-    /// untouched, and makes the copy the one in force.
+    /// untouched, and makes the copy the one in force. Switching back and forth
+    /// lands on the copy already made rather than adding another to the list.
     pub fn convert_in_force(&self, kind: EqualizerKind) -> EqualizerProfile {
         let source = self.profile_in_force();
         if source.kind == kind {
@@ -263,20 +279,36 @@ impl EqEngine {
         let mut copy = source.clone();
         copy.id = new_id();
         copy.kind = kind;
+        let base = base_profile_name(&source.name);
         match kind {
             EqualizerKind::Parametric => {
                 copy.bands = source.resolved_bands();
                 copy.targets = vec![0.0; GraphicSolver::CENTRES.len()];
-                copy.name = format!("{} (Advanced)", source.name);
+                copy.name = format!("{base} (Advanced)");
             }
             EqualizerKind::Graphic => {
                 copy.targets = GraphicSolver::targets_approximating(&source.resolved_bands());
                 copy.bands = Vec::new();
-                copy.name = format!("{} (Simple)", source.name);
+                copy.name = format!("{base} (Simple)");
             }
         }
-        self.adopt(copy.clone(), "convert");
-        copy
+        let existing = self.state.borrow().user_profiles.iter().find(|profile| {
+            let mut probe = copy.clone();
+            probe.id = profile.id.clone();
+            **profile == probe
+        }).cloned();
+        match existing {
+            Some(existing) => {
+                let output = self.output_id();
+                self.state.borrow_mut().select(&existing.id, output.as_deref());
+                self.commit("convert");
+                existing
+            }
+            None => {
+                self.adopt(copy.clone(), "convert");
+                copy
+            }
+        }
     }
 
     /// Puts the saved state back exactly as it was, for undo and redo.
@@ -333,6 +365,28 @@ impl EqEngine {
 
     pub fn export_text(&self, profile: &EqualizerProfile) -> String {
         EqualizerProfileText::write(profile)
+    }
+
+    /// The profile being previewed, if one is: what the person hears while
+    /// the saved state still says something else.
+    pub fn auditioning(&self) -> Option<EqualizerProfile> {
+        self.audition.borrow().clone()
+    }
+
+    /// Lets the person hear `profile` without choosing it. Nothing is saved
+    /// and the saved state is not touched; the element ramps to the previewed
+    /// curve with its own preamp, so presets are compared at the level they
+    /// would really play at, and `end_audition` puts back whatever was there,
+    /// bit-perfect passthrough included.
+    pub fn begin_audition(&self, profile: EqualizerProfile) {
+        *self.audition.borrow_mut() = Some(profile);
+        self.publish("audition on");
+    }
+
+    pub fn end_audition(&self) {
+        if self.audition.borrow_mut().take().is_some() {
+            self.publish("audition off");
+        }
     }
 
     pub fn begin_compare(&self) {
@@ -420,7 +474,7 @@ impl EqEngine {
     }
 
     fn publish(&self, reason: &str) {
-        let running = self.running_profile();
+        let running = self.auditioning().or_else(|| self.running_profile());
         let mut bands: Vec<EqualizerBand> = Vec::new();
         let mut preamp = 0.0;
         if let Some(running) = &running {
@@ -440,7 +494,7 @@ impl EqEngine {
             preamp_db: preamp,
             peak_guard: self.state.borrow().is_peak_guard_on,
         });
-        if reason.starts_with("edit") {
+        if reason.starts_with("edit") || reason.starts_with("audition") {
             return;
         }
         crate::logger::info(
@@ -495,5 +549,23 @@ impl EqEngine {
         }
         state.output_names.insert(output.id.clone(), output.name.clone());
         self.store.save(&state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conversion_suffixes_collapse_to_the_name_they_started_from() {
+        assert_eq!(base_profile_name("Flat"), "Flat");
+        assert_eq!(base_profile_name("Flat (Advanced)"), "Flat");
+        assert_eq!(base_profile_name("Flat (Advanced) (Simple) (Advanced)"), "Flat");
+        assert_eq!(base_profile_name("Warm Detail (Simple)"), "Warm Detail");
+    }
+
+    #[test]
+    fn a_name_that_is_only_a_suffix_is_left_alone() {
+        assert_eq!(base_profile_name("(Advanced)"), "(Advanced)");
     }
 }

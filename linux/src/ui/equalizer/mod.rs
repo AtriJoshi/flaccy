@@ -7,6 +7,7 @@
 mod bands;
 mod copy;
 mod curve;
+mod deck;
 pub mod demo;
 mod edit;
 mod import;
@@ -24,6 +25,7 @@ use crate::ui::Ui;
 use adw::prelude::*;
 use bands::{BandEvent, BandTable, SimpleStrip};
 use curve::{CurveEvent, CurveView};
+use deck::Deck;
 use flaccy_shared::equalizer::state::EqualizerState;
 use gtk::{gdk, gio, glib};
 use meter::MeterBar;
@@ -42,11 +44,13 @@ pub struct Screen {
     curve: Rc<CurveView>,
     enable_switch: gtk::Switch,
     enable_label: gtk::Label,
-    preset_button: gtk::MenuButton,
-    preset_label: gtk::Label,
-    preset_popover: gtk::Popover,
-    preset_list: gtk::ListBox,
-    preset_ids: RefCell<Vec<Option<String>>>,
+    weak: Weak<Screen>,
+    deck: Rc<Deck>,
+    profile_label: gtk::Label,
+    preview_pill: gtk::Revealer,
+    pill_label: gtk::Label,
+    audition_id: RefCell<Option<String>>,
+    audition_generation: Cell<u64>,
     output_button: gtk::MenuButton,
     output_icon: gtk::Image,
     output_label: gtk::Label,
@@ -185,7 +189,7 @@ impl Screen {
         let engine = Rc::clone(&ui.core.eq);
         let (width, height) = {
             let config = ui.core.config.borrow();
-            (config.eq_window_width.max(860), config.eq_window_height.max(600))
+            (config.eq_window_width.max(980), config.eq_window_height.max(640))
         };
         let window = adw::Window::builder()
             .title(copy::TITLE)
@@ -196,7 +200,7 @@ impl Screen {
         if let Some(application) = ui.window.application() {
             window.set_application(Some(&application));
         }
-        window.set_size_request(860, 600);
+        window.set_size_request(980, 640);
         window.add_css_class("flaccy-window");
         window.add_css_class("eq-window");
 
@@ -218,22 +222,7 @@ impl Screen {
             });
         }
 
-        let preset_label = gtk::Label::builder()
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(gtk::pango::EllipsizeMode::End)
-            .build();
-        let preset_content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        preset_content.append(&preset_label);
-        preset_content.append(&gtk::Image::from_icon_name("pan-down-symbolic"));
-        let (preset_popover, preset_list) = presets::build_popover(weak.clone());
-        let preset_button = gtk::MenuButton::builder()
-            .popover(&preset_popover)
-            .child(&preset_content)
-            .width_request(230)
-            .build();
-        preset_button.add_css_class("eq-preset-button");
-        preset_button.update_property(&[gtk::accessible::Property::Label("Preset")]);
+        let deck = Deck::build(weak.clone(), ui.core.config.borrow().eq_hover_preview);
 
         let save_button = gtk::Button::with_label("Save…");
         {
@@ -327,9 +316,8 @@ impl Screen {
         for widget in [
             enable_switch.upcast_ref::<gtk::Widget>(),
             enable_label.upcast_ref(),
-            preset_button.upcast_ref(),
-            save_button.upcast_ref(),
             output_button.upcast_ref(),
+            save_button.upcast_ref(),
             spacer.upcast_ref(),
             compare_button.upcast_ref(),
             mode_group.upcast_ref(),
@@ -407,7 +395,32 @@ impl Screen {
         }
         let hint_label = gtk::Label::builder().halign(gtk::Align::Center).margin_bottom(10).build();
         hint_label.add_css_class("eq-hint");
+        let profile_label = gtk::Label::builder()
+            .xalign(0.0)
+            .hexpand(true)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build();
+        profile_label.add_css_class("eq-profile-name");
+        let pill_label = gtk::Label::new(None);
+        let pill_bars = crate::ui::controls::build_equalizer_indicator();
+        crate::ui::controls::drive_equalizer(&pill_bars, true);
+        pill_bars.set_tooltip_text(None);
+        let pill = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        pill.add_css_class("eq-preview-pill");
+        pill.append(&pill_bars);
+        pill.append(&pill_label);
+        let preview_pill = gtk::Revealer::builder()
+            .transition_type(gtk::RevealerTransitionType::Crossfade)
+            .transition_duration(140)
+            .child(&pill)
+            .halign(gtk::Align::End)
+            .build();
+        let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        title_row.add_css_class("eq-title-row");
+        title_row.append(&profile_label);
+        title_row.append(&preview_pill);
         let curve_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        curve_box.append(&title_row);
         curve_box.append(&curve.area);
         curve_box.append(&hint_label);
         let curve_card = card(&curve_box);
@@ -451,17 +464,25 @@ impl Screen {
         status.append(&status_label);
         status.append(&keys_label);
 
-        let root = gtk::Box::builder()
+        let workspace = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(14)
-            .margin_start(24)
+            .hexpand(true)
+            .build();
+        for widget in [top.upcast_ref::<gtk::Widget>(), middle.upcast_ref(), lower_card.upcast_ref(), status.upcast_ref()] {
+            workspace.append(widget);
+        }
+        deck.widget.set_margin_bottom(0);
+        let root = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(16)
+            .margin_start(20)
             .margin_end(24)
             .margin_top(6)
             .margin_bottom(12)
             .build();
-        for widget in [top.upcast_ref::<gtk::Widget>(), middle.upcast_ref(), lower_card.upcast_ref(), status.upcast_ref()] {
-            root.append(widget);
-        }
+        root.append(&deck.widget);
+        root.append(&workspace);
 
         let header = adw::HeaderBar::builder()
             .title_widget(&adw::WindowTitle::new(copy::TITLE, ""))
@@ -486,11 +507,13 @@ impl Screen {
             curve,
             enable_switch,
             enable_label,
-            preset_button,
-            preset_label,
-            preset_popover,
-            preset_list,
-            preset_ids: RefCell::new(Vec::new()),
+            weak,
+            deck,
+            profile_label,
+            preview_pill,
+            pill_label,
+            audition_id: RefCell::new(None),
+            audition_generation: Cell::new(0),
             output_button,
             output_icon,
             output_label,
@@ -560,6 +583,16 @@ impl Screen {
                 }
             }
         });
+        self.window.connect_is_active_notify({
+            let weak = weak.clone();
+            move |window| {
+                if !window.is_active() {
+                    if let Some(screen) = weak.upgrade() {
+                        screen.end_audition();
+                    }
+                }
+            }
+        });
         self.window.connect_unmap({
             let weak = weak.clone();
             move |_| {
@@ -605,6 +638,7 @@ impl Screen {
             }
         });
         self.refresh(false);
+        self.deck.reveal_current();
     }
 
     fn hidden(&self) {
@@ -613,6 +647,7 @@ impl Screen {
             self.engine.end_analysis();
         }
         self.curve.stop_frames();
+        self.end_audition();
         self.engine.end_compare();
         self.comparing_with_space.set(false);
     }

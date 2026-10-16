@@ -152,6 +152,21 @@ async fn full_exercise(core: &Rc<AppCore>) {
     let dry = settled_peak(&eq).await;
     report(&format!("dry 220 Hz tone reads {dry:.1} dB (expected about -20)"), (dry + 20.0).abs() < 2.5);
 
+    let mut preview = EqualizerProfile::parametric("audition-exercise", "Audition", Vec::new());
+    bell(220.0)(&mut preview);
+    eq.begin_audition(preview);
+    let previewed = settled_peak(&eq).await;
+    report(
+        &format!("auditioning a +9 dB bell lifts the tone by {:.1} dB while the saved state stays off", previewed - dry),
+        ((previewed - dry) - 9.0).abs() < LEVEL_TOLERANCE_DECIBELS && !eq.is_running(),
+    );
+    eq.end_audition();
+    let after_preview = settled_peak(&eq).await;
+    report(
+        &format!("ending the audition returns the tone to {after_preview:.1} dB and the element to passthrough"),
+        (after_preview - dry).abs() < LEVEL_TOLERANCE_DECIBELS && !eq.shared().current().is_engaged,
+    );
+
     eq.edit(bell(220.0));
     let engaged = eq.is_running() && eq.shared().current().is_engaged && is_processing_now(&eq).await;
     report("the element is engaged and processing with a +9 dB bell at 220 Hz", engaged);
