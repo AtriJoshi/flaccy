@@ -12,5 +12,6 @@ pub mod enrichment_job;
 pub mod equalizer;
 pub mod import_plan;
 pub mod library_debut;
+pub mod library_filter;
 pub mod library_surface;
 pub mod load_progress;
