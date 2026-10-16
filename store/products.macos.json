@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "subscriptionGroups": [
+    {
+      "referenceName": "Flaccy Pro",
+      "localizations": {
+        "en-US": {
+          "name": "Flaccy Pro"
+        },
+        "pl": {
+          "name": "Flaccy Pro"
+        }
+      },
+      "subscriptions": [
+        {
+          "productId": "com.midgarcorp.flaccy.mac.pro.yearly",
+          "referenceName": "Pro Yearly (Mac)",
+          "duration": "ONE_YEAR",
+          "groupLevel": 1,
+          "familySharable": false,
+          "price": {
+            "territory": "USA",
+            "amount": "7.99"
+          },
+          "introductoryOffers": [],
+          "localizations": {
+            "en-US": {
+              "name": "Flaccy Pro Yearly",
+              "description": "Everything in Flaccy for a year."
+            },
+            "pl": {
+              "name": "Flaccy Pro rocznie",
+              "description": "Wszystko z Flaccy na cały rok."
+            }
+          },
+          "reviewScreenshotMd5": "3049072d7e3649447cbf9903da9683f6",
+          "reviewNote": ""
+        }
+      ]
+    }
+  ],
+  "inAppPurchases": [
+    {
+      "productId": "com.midgarcorp.flaccy.mac.lifetime",
+      "type": "NON_CONSUMABLE",
+      "referenceName": "Flaccy Lifetime (macOS)",
+      "price": {
+        "territory": "USA",
+        "amount": "12.99"
+      },
+      "localizations": {
+        "en-US": {
+          "name": "Flaccy Lifetime",
+          "description": "Unlimited playback forever. One purchase, no sub."
+        },
+        "pl": {
+          "name": "Flaccy: dostęp dożywotni",
+          "description": "Odtwarzanie bez limitu, na zawsze."
+        }
+      },
+      "reviewScreenshotMd5": "c0e1edf761039f0e28d2ce02c6fc37f5"
+    },
+    {
+      "productId": "com.midgarcorp.flaccy.mac.lifetime.welcome",
+      "type": "NON_CONSUMABLE",
+      "referenceName": "Flaccy Lifetime (Mac) · Welcome Back",
+      "price": {
+        "territory": "USA",
+        "amount": "8.99"
+      },
+      "localizations": {
+        "en-US": {
+          "name": "Flaccy Lifetime · Welcome Back",
+          "description": "Unlimited playback forever. One purchase, no sub."
+        },
+        "pl": {
+          "name": "Flaccy: dostęp dożywotni, wróć",
+          "description": "Odtwarzanie bez limitu, na zawsze."
+        }
+      },
+      "reviewScreenshotMd5": "8d604ae854a3bc783c57d3a80d06f3a3"
+    }
+  ]
+}

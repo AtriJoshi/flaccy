@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "subscriptionGroups": [
+    {
+      "referenceName": "Flaccy Pro",
+      "localizations": {
+        "en-US": {
+          "name": "Flaccy Pro"
+        },
+        "pl": {
+          "name": "Flaccy Pro"
+        }
+      },
+      "subscriptions": [
+        {
+          "productId": "com.midgarcorp.flaccy.pro.yearly",
+          "referenceName": "Flaccy Pro Yearly (iOS)",
+          "duration": "ONE_YEAR",
+          "groupLevel": 1,
+          "familySharable": false,
+          "price": {
+            "territory": "USA",
+            "amount": "7.99"
+          },
+          "introductoryOffers": [],
+          "localizations": {
+            "en-US": {
+              "name": "Flaccy Pro Yearly",
+              "description": "Everything in Flaccy for a year."
+            },
+            "pl": {
+              "name": "Flaccy Pro rocznie",
+              "description": "Wszystko z Flaccy na cały rok."
+            }
+          },
+          "reviewScreenshotMd5": "c1b49d3e2af9d66953b6944b33ae6e68",
+          "reviewNote": ""
+        }
+      ]
+    }
+  ],
+  "inAppPurchases": [
+    {
+      "productId": "com.midgarcorp.flaccy.lifetime",
+      "type": "NON_CONSUMABLE",
+      "referenceName": "Flaccy Lifetime (iOS)",
+      "price": {
+        "territory": "USA",
+        "amount": "12.99"
+      },
+      "localizations": {
+        "en-US": {
+          "name": "Flaccy Lifetime",
+          "description": "Unlock every feature — library, scrobbling, forever."
+        },
+        "pl": {
+          "name": "Flaccy: dostęp dożywotni",
+          "description": "Odblokuj wszystkie funkcje na zawsze."
+        }
+      },
+      "reviewScreenshotMd5": "0231505d9f2e248e077f7ed26b8c1ff0"
+    },
+    {
+      "productId": "com.midgarcorp.flaccy.lifetime.welcome",
+      "type": "NON_CONSUMABLE",
+      "referenceName": "Flaccy Lifetime (iOS) · Welcome Back",
+      "price": {
+        "territory": "USA",
+        "amount": "8.99"
+      },
+      "localizations": {
+        "en-US": {
+          "name": "Flaccy Lifetime · Welcome Back",
+          "description": "Unlock every feature — library, scrobbling, forever."
+        },
+        "pl": {
+          "name": "Flaccy: dostęp dożywotni, wróć",
+          "description": "Odblokuj wszystkie funkcje na zawsze."
+        }
+      },
+      "reviewScreenshotMd5": "a5d19ccdb58d83855e3b1f806a74c565"
+    }
+  ]
+}
