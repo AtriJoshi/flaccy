@@ -405,7 +405,8 @@ enum ScreenshotSeeder {
             syncedLyrics: synced,
             plainLyrics: nil,
             instrumental: false,
-            fetchedAt: Date()
+            fetchedAt: Date(),
+            revision: LyricsResolution.revision
         )
         try? db.saveLyrics(record)
     }

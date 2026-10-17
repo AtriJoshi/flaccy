@@ -203,7 +203,7 @@ enum DemoMode {
         for (title, artist, synced) in lyrics {
             try? db.saveLyrics(LyricsRecord(
                 trackTitle: title, artist: artist, syncedLyrics: synced, plainLyrics: nil,
-                instrumental: false, fetchedAt: Date()
+                instrumental: false, fetchedAt: Date(), revision: LyricsResolution.revision
             ))
         }
     }

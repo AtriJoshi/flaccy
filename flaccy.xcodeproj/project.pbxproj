@@ -25,6 +25,7 @@
 		478E50131E6B77A8B4AF41AA /* DatabaseManagerEnrichmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC9F81336EF2EA6C29BCB75 /* DatabaseManagerEnrichmentTests.swift */; };
 		47C108E909F602CC3BC5C55E /* WatchAudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A48061B3D4D070C0DFBDD081 /* WatchAudioPlayer.swift */; };
 		4F58D87C8BBF3BF010F432C9 /* ReviewPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E099532A0CFCF0716CE93EA0 /* ReviewPromptTests.swift */; };
+		D5A1C0DE5E1F4A7B9C3D2E11 /* LyricsResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5A1C0DE5E1F4A7B9C3D2E10 /* LyricsResolutionTests.swift */; };
 		50BEB44FADCAA9D797A91704 /* WatchDebutSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F6FCCE5EDC0CE6A41801DC /* WatchDebutSummaryView.swift */; };
 		56441F1ED2C997DF680CB514 /* DatabaseMigrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3369536B42081BFE72734D8C /* DatabaseMigrationTests.swift */; };
 		58E7B926A17BE908BB392DDD /* flaccyWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 714CC32EDD5BF636A0B806F2 /* flaccyWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -151,6 +152,7 @@
 		D32EB40ABEF2CB5616D1E4B4 /* ScanProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ScanProgressView.swift; path = Views/ScanProgressView.swift; sourceTree = "<group>"; };
 		D8B5871FABA46552868150ED /* ArtworkView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ArtworkView.swift; path = Support/ArtworkView.swift; sourceTree = "<group>"; };
 		E099532A0CFCF0716CE93EA0 /* ReviewPromptTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReviewPromptTests.swift; sourceTree = "<group>"; };
+		D5A1C0DE5E1F4A7B9C3D2E10 /* LyricsResolutionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LyricsResolutionTests.swift; sourceTree = "<group>"; };
 		EE372FF8D9E59243F094AD34 /* DatabaseManagerCustomCoverTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DatabaseManagerCustomCoverTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -403,6 +405,7 @@
 				511100719681E94BDBEE8F7E /* DuplicateSongsTests.swift */,
 				2345B7E4BAEDE325F04044E7 /* EqualizerAuditionTests.swift */,
 				B07FCB50D51F15EFCCBC9400 /* EqualizerPlotInteractionTests.swift */,
+				D5A1C0DE5E1F4A7B9C3D2E10 /* LyricsResolutionTests.swift */,
 				2BC93FD93BF0668E5FAB60B9 /* RecapLibraryIndexTests.swift */,
 				E099532A0CFCF0716CE93EA0 /* ReviewPromptTests.swift */,
 				7A11D6AB4B359459F2A134BE /* SampleDownloadPolicyTests.swift */,
@@ -712,6 +715,7 @@
 				7A33B49E32E7741B5D80995F /* EqualizerPlotInteractionTests.swift in Sources */,
 				07136CEB9F09E969F08BA8E3 /* RecapLibraryIndexTests.swift in Sources */,
 				4F58D87C8BBF3BF010F432C9 /* ReviewPromptTests.swift in Sources */,
+				D5A1C0DE5E1F4A7B9C3D2E11 /* LyricsResolutionTests.swift in Sources */,
 				D6309126852DBD86A5BE9D73 /* SampleDownloadPolicyTests.swift in Sources */,
 				DEBFCA3AEBF542E7A1F351A6 /* TrialReminderSchedulerTests.swift in Sources */,
 			);

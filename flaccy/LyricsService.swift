@@ -1,18 +1,26 @@
 import AVFoundation
 import Foundation
+import FlaccyCore
 
-nonisolated struct LyricLine: Sendable {
-    let time: TimeInterval
-    let text: String
-}
+/// One track's lyrics together with the listener's own timing correction.
+nonisolated struct Lyrics: Sendable {
+    var document: LyricsDocument
+    var offsetMs: Int = 0
 
-nonisolated struct LyricsResult: Sendable {
-    let syncedLines: [LyricLine]?
-    let plainText: String?
-    let isInstrumental: Bool
+    /// The correction in seconds, positive meaning every line comes later.
+    var offsetSeconds: Double {
+        Double(offsetMs) / 1000
+    }
 
-    var isEmpty: Bool {
-        !isInstrumental && (syncedLines?.isEmpty ?? true) && (plainText?.isEmpty ?? true)
+    /// The moment of the song to look up for a playback position: the position
+    /// less the correction.
+    func songTime(at position: TimeInterval) -> TimeInterval {
+        position - offsetSeconds
+    }
+
+    /// The sung line at a playback position, for surfaces that show one line.
+    func text(at position: TimeInterval) -> String? {
+        document.text(at: songTime(at: position))
     }
 }
 
@@ -20,9 +28,96 @@ nonisolated struct LyricsResult: Sendable {
 /// A miss is remembered (and expires); a failure is not, so a flaky network
 /// leaves a Retry rather than a permanently blank panel.
 nonisolated enum LyricsOutcome: Sendable {
-    case found(LyricsResult)
+    case found(Lyrics)
     case missing
     case failed
+}
+
+/// The pure rules behind the lyrics pipeline, kept apart from the service so
+/// they run without a database or a network. Mirrors `linux/src/lyrics.rs`.
+nonisolated enum LyricsResolution {
+
+    /// The generation of the lyrics pipeline that stores rows. Rows saved
+    /// before line ends and word timing existed hold content that a second
+    /// look at the server can improve, so they are asked for once more.
+    static let revision = 2
+
+    /// How long a remembered miss stands before lrclib is asked again — the
+    /// corpus is community-contributed and grows.
+    static let missTTL: TimeInterval = 30 * 24 * 3600
+
+    /// Builds the document a stored or fetched answer describes. A Lyricsfile
+    /// wins when it reads cleanly and holds synchronized lines; otherwise the
+    /// LRC text does.
+    static func document(
+        synced: String?, plain: String?, lyricsfile: String?, instrumental: Bool
+    ) -> LyricsDocument {
+        if instrumental { return LyricsDocument(instrumental: true) }
+        var document: LyricsDocument
+        if let fromFile = lyricsfile.flatMap(LyricsParser.parseLyricsfile), fromFile.hasSynced {
+            document = fromFile
+        } else if let synced {
+            document = LyricsParser.parseLRC(synced)
+        } else {
+            document = LyricsDocument()
+        }
+        if document.plain == nil, isFilled(plain) {
+            document.plain = plain
+        }
+        return document
+    }
+
+    static func lyrics(from record: LyricsRecord) -> Lyrics {
+        Lyrics(
+            document: document(
+                synced: record.syncedLyrics, plain: record.plainLyrics,
+                lyricsfile: record.lyricsfile, instrumental: record.instrumental
+            ),
+            offsetMs: record.offsetMs
+        )
+    }
+
+    static func isFilled(_ text: String?) -> Bool {
+        guard let text else { return false }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func hasContent(_ record: LyricsRecord) -> Bool {
+        record.instrumental
+            || isFilled(record.syncedLyrics)
+            || isFilled(record.plainLyrics)
+            || isFilled(record.lyricsfile)
+    }
+
+    /// A row is served as it stands unless it is a miss old enough to ask
+    /// again about, or holds content from before the current pipeline
+    /// revision. A miss without a timestamp predates the expiry and counts as
+    /// old.
+    static func isCurrent(_ record: LyricsRecord, now: Date = Date()) -> Bool {
+        if hasContent(record) { return record.revision >= revision }
+        guard let fetchedAt = record.fetchedAt else { return false }
+        return now.timeIntervalSince(fetchedAt) <= missTTL
+    }
+
+    static func outcome(_ lyrics: Lyrics) -> LyricsOutcome {
+        lyrics.document.isEmpty ? .missing : .found(lyrics)
+    }
+
+    /// Text with timestamps is synchronized lyrics (word tags and all, so a
+    /// timed file keeps its words); anything else is plain.
+    static func classify(_ text: String) -> (synced: String?, plain: String?) {
+        LyricsParser.parseLRC(text).hasSynced ? (text, nil) : (nil, text)
+    }
+
+    private static let unreserved = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+    )
+
+    /// Percent-encodes everything but the unreserved characters, so `&`, `+`
+    /// and `=` inside a title never reach the server as syntax.
+    static func urlEncode(_ text: String) -> String {
+        text.addingPercentEncoding(withAllowedCharacters: unreserved) ?? text
+    }
 }
 
 final class LyricsService {
@@ -42,7 +137,7 @@ final class LyricsService {
     func prefetch(track: String, artist: String, album: String, fileURL: URL? = nil, duration: TimeInterval = 0) {
         guard !track.isEmpty, !artist.isEmpty else { return }
         let cached = try? DatabaseManager.shared.fetchLyrics(trackTitle: track, artist: artist)
-        if let cached, !isExpiredMiss(cached) { return }
+        if let cached, LyricsResolution.isCurrent(cached) { return }
         Task {
             _ = await fetchLyrics(
                 track: track, artist: artist, album: album, fileURL: fileURL, duration: duration
@@ -50,14 +145,20 @@ final class LyricsService {
         }
     }
 
-    /// How long a remembered miss stands before lrclib is asked again — the
-    /// corpus is community-contributed and grows.
-    private static let notFoundTTL: TimeInterval = 30 * 24 * 3600
-    /// Two pressings of the same song can differ by a few seconds; beyond this
-    /// the timings would be useless, so a search candidate is rejected outright.
-    private static let maxDurationDrift: TimeInterval = 15
-    /// Below this a search candidate is a different song, not a near miss.
-    private static let acceptedScore = 0.80
+    /// Remembers the listener's timing correction for a track's lyrics. A
+    /// failure is logged and otherwise ignored: the correction still applies
+    /// for as long as the panel is open.
+    func saveOffset(track: String, artist: String, offsetMs: Int) {
+        do {
+            try DatabaseManager.shared.saveLyricsOffset(trackTitle: track, artist: artist, offsetMs: offsetMs)
+        } catch {
+            AppLogger.error("Saving lyrics offset failed: \(error.localizedDescription)", category: .content)
+        }
+    }
+
+    private static let defaultRetryWait: TimeInterval = 0.8
+    private static let shortestRetryWait: TimeInterval = 0.3
+    private static let longestRetryWait: TimeInterval = 3.0
 
     private static var userAgent: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
@@ -66,206 +167,247 @@ final class LyricsService {
 
     /// Resolution order: the local database cache, then lyrics the user keeps
     /// alongside the audio (an `.lrc` sidecar or an embedded tag), then lrclib.
+    /// A cached answer from an older pipeline revision is shown if the server
+    /// cannot improve on it.
     func fetchLyrics(
         track: String, artist: String, album: String,
         fileURL: URL? = nil, duration: TimeInterval = 0
     ) async -> LyricsOutcome {
         let cached = try? DatabaseManager.shared.fetchLyrics(trackTitle: track, artist: artist)
-        if let cached, !isExpiredMiss(cached) {
-            let result = LyricsResult(
-                syncedLines: cached.syncedLyrics.map(Self.parseLRC),
-                plainText: cached.plainLyrics,
-                isInstrumental: cached.instrumental
-            )
-            return result.isEmpty ? .missing : .found(result)
+        if let cached, LyricsResolution.isCurrent(cached) {
+            return LyricsResolution.outcome(LyricsResolution.lyrics(from: cached))
         }
+        let offsetMs = cached?.offsetMs ?? 0
 
         if let fileURL, let local = await Self.readLocalLyrics(at: fileURL) {
-            save(track: track, artist: artist, synced: local.synced, plain: local.plain, instrumental: false, replacing: cached?.id)
-            return .found(LyricsResult(
-                syncedLines: local.synced.map(Self.parseLRC),
-                plainText: local.plain,
-                isInstrumental: false
+            save(
+                track: track, artist: artist, replacing: cached,
+                fetched: Fetched(synced: local.synced, plain: local.plain, lyricsfile: nil, instrumental: false)
+            )
+            return LyricsResolution.outcome(Lyrics(
+                document: LyricsResolution.document(
+                    synced: local.synced, plain: local.plain, lyricsfile: nil, instrumental: false
+                ),
+                offsetMs: offsetMs
             ))
         }
 
+        let stale = cached.flatMap { LyricsResolution.hasContent($0) ? $0 : nil }
         switch await lookupRemote(track: track, artist: artist, album: album, duration: duration) {
-        case .found(let synced, let plain, let instrumental):
-            save(track: track, artist: artist, synced: synced, plain: plain, instrumental: instrumental, replacing: cached?.id)
-            return .found(LyricsResult(
-                syncedLines: synced.map(Self.parseLRC), plainText: plain, isInstrumental: instrumental
+        case .found(let fetched):
+            save(track: track, artist: artist, replacing: cached, fetched: fetched)
+            return LyricsResolution.outcome(Lyrics(
+                document: LyricsResolution.document(
+                    synced: fetched.synced, plain: fetched.plain,
+                    lyricsfile: fetched.lyricsfile, instrumental: fetched.instrumental
+                ),
+                offsetMs: offsetMs
             ))
         case .missing:
-            save(track: track, artist: artist, synced: nil, plain: nil, instrumental: false, replacing: cached?.id)
+            if let stale {
+                markCurrent(track: track, artist: artist)
+                return LyricsResolution.outcome(LyricsResolution.lyrics(from: stale))
+            }
+            save(
+                track: track, artist: artist, replacing: cached,
+                fetched: Fetched(synced: nil, plain: nil, lyricsfile: nil, instrumental: false)
+            )
             AppLogger.info("No lyrics for \(track) — \(artist) (cached miss)", category: .content)
             return .missing
         case .failed:
-            return .failed
+            guard let stale else { return .failed }
+            return LyricsResolution.outcome(LyricsResolution.lyrics(from: stale))
         }
     }
 
-    private func save(
-        track: String, artist: String, synced: String?, plain: String?,
-        instrumental: Bool, replacing existingID: Int64?
-    ) {
+    /// Stores what a source answered. The listener's offset rides along from
+    /// the row being replaced: a refetch must not undo a correction they made
+    /// by ear.
+    private func save(track: String, artist: String, replacing existing: LyricsRecord?, fetched: Fetched) {
         let record = LyricsRecord(
-            id: existingID,
+            id: existing?.id,
             trackTitle: track,
             artist: artist,
-            syncedLyrics: synced,
-            plainLyrics: plain,
-            instrumental: instrumental,
-            fetchedAt: Date()
+            syncedLyrics: fetched.synced,
+            plainLyrics: fetched.plain,
+            instrumental: fetched.instrumental,
+            fetchedAt: Date(),
+            lyricsfile: fetched.lyricsfile,
+            offsetMs: existing?.offsetMs ?? 0,
+            revision: LyricsResolution.revision
         )
-        try? DatabaseManager.shared.saveLyrics(record)
+        do {
+            try DatabaseManager.shared.saveLyrics(record)
+        } catch {
+            AppLogger.error("Saving lyrics failed: \(error.localizedDescription)", category: .content)
+        }
     }
 
-    /// A cached row with no lyrics and no instrumental flag is a remembered
-    /// lrclib miss; it expires after a month so lyrics published later are
-    /// eventually fetched. Legacy miss rows without a timestamp count as expired.
-    private func isExpiredMiss(_ record: LyricsRecord) -> Bool {
-        guard record.syncedLyrics == nil, record.plainLyrics == nil, !record.instrumental else { return false }
-        guard let fetchedAt = record.fetchedAt else { return true }
-        return Date().timeIntervalSince(fetchedAt) > Self.notFoundTTL
+    /// Marks a row as current without changing what it holds, for when the
+    /// server was asked again and had nothing better.
+    private func markCurrent(track: String, artist: String) {
+        do {
+            try DatabaseManager.shared.setLyricsRevision(
+                trackTitle: track, artist: artist, revision: LyricsResolution.revision
+            )
+        } catch {
+            AppLogger.error("Updating lyrics revision failed: \(error.localizedDescription)", category: .content)
+        }
+    }
+
+    private struct Fetched {
+        let synced: String?
+        let plain: String?
+        let lyricsfile: String?
+        let instrumental: Bool
     }
 
     private enum Remote {
-        case found(synced: String?, plain: String?, instrumental: Bool)
+        case found(Fetched)
         case missing
         case failed
     }
 
-    /// lrclib's exact-match endpoint is strict about the album name, which is
-    /// the single most common cause of a false 404. So: try the full signature,
-    /// then drop the album, then fall back to the fuzzy search endpoint and rank
-    /// its results here (the endpoint itself is duration-blind).
-    private func lookupRemote(track: String, artist: String, album: String, duration: TimeInterval) async -> Remote {
-        let exact = await getExact(track: track, artist: artist, album: album, duration: duration)
-        if case .missing = exact {} else { return exact }
-
-        if !album.trimmingCharacters(in: .whitespaces).isEmpty {
-            let withoutAlbum = await getExact(track: track, artist: artist, album: "", duration: duration)
-            if case .missing = withoutAlbum {} else { return withoutAlbum }
-        }
-        return await searchFallback(track: track, artist: artist, album: album, duration: duration)
-    }
-
-    private func getExact(track: String, artist: String, album: String, duration: TimeInterval) async -> Remote {
-        var items = [
-            URLQueryItem(name: "track_name", value: track),
-            URLQueryItem(name: "artist_name", value: artist),
-        ]
-        if !album.trimmingCharacters(in: .whitespaces).isEmpty {
-            items.append(URLQueryItem(name: "album_name", value: album))
-        }
-        if duration > 0 {
-            items.append(URLQueryItem(name: "duration", value: String(Int(duration.rounded()))))
-        }
-        guard let data = await get(path: "/api/get", items: items) else { return .failed }
-        switch data {
-        case .notFound: return .missing
-        case .body(let body):
-            guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return .missing }
-            return Self.record(from: json)
-        }
-    }
-
-    private func searchFallback(track: String, artist: String, album: String, duration: TimeInterval) async -> Remote {
-        let items = [
-            URLQueryItem(name: "track_name", value: track),
-            URLQueryItem(name: "artist_name", value: artist),
-        ]
-        guard let data = await get(path: "/api/search", items: items) else { return .failed }
-        guard case .body(let body) = data else { return .missing }
-        guard let candidates = try? JSONSerialization.jsonObject(with: body) as? [[String: Any]] else { return .missing }
-        let best = candidates
-            .compactMap { candidate -> (Double, [String: Any])? in
-                guard let score = Self.score(
-                    candidate: candidate, track: track, artist: artist, album: album, duration: duration
-                ) else { return nil }
-                return (score, candidate)
-            }
-            .max { $0.0 < $1.0 }
-        guard let best, best.0 >= Self.acceptedScore else { return .missing }
-        AppLogger.info(
-            "lrclib search matched \(track) — \(artist) (score \(String(format: "%.2f", best.0)))",
-            category: .content
-        )
-        return Self.record(from: best.1)
-    }
-
-    private enum Fetched {
+    private enum Reply {
         case body(Data)
         case notFound
+        case failed
     }
 
-    /// `nil` means the request itself failed — a different thing from a 404.
-    private func get(path: String, items: [URLQueryItem]) async -> Fetched? {
-        var components = URLComponents(string: "https://lrclib.net\(path)")!
-        components.queryItems = items
-        guard let url = components.url else { return nil }
-        var request = URLRequest(url: url)
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return nil }
-            if http.statusCode == 404 { return .notFound }
-            guard http.statusCode == 200 else { return nil }
-            return .body(data)
-        } catch {
-            AppLogger.error("Lyrics request failed: \(error.localizedDescription)", category: .content)
-            return nil
+    /// lrclib's exact-match endpoint is strict about the album name and about
+    /// the title as tagged, which are the commonest causes of a false 404. So:
+    /// try the full signature, then drop the album, then the title and artist
+    /// with edition decoration and featuring credits removed, then the fuzzy
+    /// search endpoint, ranking its results here (the endpoint itself is
+    /// duration-blind).
+    private func lookupRemote(track: String, artist: String, album: String, duration: TimeInterval) async -> Remote {
+        let title = LyricsQuery.cleanTitle(track)
+        let lead = LyricsQuery.leadArtist(artist)
+
+        var attempts: [(title: String, artist: String, album: String?)] = []
+        if !album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            attempts.append((track, artist, album))
         }
+        attempts.append((track, artist, nil))
+        if title != track || lead != artist {
+            attempts.append((title, lead, nil))
+        }
+        for attempt in attempts {
+            let result = await getExact(
+                title: attempt.title, artist: attempt.artist, album: attempt.album, duration: duration
+            )
+            if case .missing = result { continue }
+            return result
+        }
+        return await searchFallback(
+            track: track, artist: artist, album: album, duration: duration, title: title, lead: lead
+        )
+    }
+
+    private func getExact(title: String, artist: String, album: String?, duration: TimeInterval) async -> Remote {
+        var query = "track_name=\(LyricsResolution.urlEncode(title))&artist_name=\(LyricsResolution.urlEncode(artist))"
+        if let album {
+            query += "&album_name=\(LyricsResolution.urlEncode(album))"
+        }
+        if duration > 0 {
+            query += "&duration=\(Int(duration.rounded()))"
+        }
+        switch await request(path: "/api/get", query: query) {
+        case .body(let body): return Self.parseRecord(body)
+        case .notFound: return .missing
+        case .failed: return .failed
+        }
+    }
+
+    private func searchFallback(
+        track: String, artist: String, album: String, duration: TimeInterval,
+        title: String, lead: String
+    ) async -> Remote {
+        let query = "track_name=\(LyricsResolution.urlEncode(title))&artist_name=\(LyricsResolution.urlEncode(lead))"
+        let body: Data
+        switch await request(path: "/api/search", query: query) {
+        case .body(let data): body = data
+        case .notFound: return .missing
+        case .failed: return .failed
+        }
+        guard let items = try? JSONSerialization.jsonObject(with: body) as? [Any] else { return .missing }
+        let records = items.map { $0 as? [String: Any] ?? [:] }
+        let candidates = records.map { record in
+            LyricsCandidate(
+                title: LyricsQuery.cleanTitle(record["trackName"] as? String ?? ""),
+                artist: LyricsQuery.leadArtist(record["artistName"] as? String ?? ""),
+                album: record["albumName"] as? String ?? "",
+                duration: record["duration"] as? Double ?? 0,
+                hasSynced: LyricsResolution.isFilled(record["syncedLyrics"] as? String),
+                hasWordSync: record["hasWordSync"] as? Bool ?? false
+            )
+        }
+        let wanted = LyricsWanted(title: title, artist: lead, album: album, duration: duration)
+        guard let best = LyricsScoring.bestCandidate(wanted, candidates) else { return .missing }
+        AppLogger.info(
+            "lrclib search matched \(track) — \(artist) (score \(String(format: "%.2f", best.score)))",
+            category: .content
+        )
+        return Self.record(from: records[best.index])
+    }
+
+    /// One GET, retried once when the server is overloaded or throttling,
+    /// waiting as long as it asks within reason. A 404 is an answer, not a
+    /// failure.
+    private func request(path: String, query: String) async -> Reply {
+        guard let url = URL(string: "https://lrclib.net\(path)?\(query)") else { return .failed }
+        var urlRequest = URLRequest(url: url)
+        urlRequest.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        for attempt in 0..<2 {
+            do {
+                let (data, response) = try await session.data(for: urlRequest)
+                guard let http = response as? HTTPURLResponse else { return .failed }
+                switch http.statusCode {
+                case 200..<300:
+                    return .body(data)
+                case 404:
+                    return .notFound
+                case let code where attempt == 0 && (code == 429 || code >= 500):
+                    try await Task.sleep(for: .seconds(Self.retryWait(for: http)))
+                default:
+                    AppLogger.error("Lyrics request failed: HTTP \(http.statusCode)", category: .content)
+                    return .failed
+                }
+            } catch {
+                AppLogger.error("Lyrics request failed: \(error.localizedDescription)", category: .content)
+                return .failed
+            }
+        }
+        return .failed
+    }
+
+    private static func retryWait(for response: HTTPURLResponse) -> TimeInterval {
+        let asked = response.value(forHTTPHeaderField: "Retry-After")
+            .flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        return min(max(asked ?? defaultRetryWait, shortestRetryWait), longestRetryWait)
+    }
+
+    private static func parseRecord(_ body: Data) -> Remote {
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return .missing }
+        return record(from: json)
     }
 
     private static func record(from json: [String: Any]) -> Remote {
-        let synced = (json["syncedLyrics"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
-        let plain = (json["plainLyrics"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
-        let instrumental = json["instrumental"] as? Bool ?? false
-        if synced == nil, plain == nil, !instrumental { return .missing }
-        return .found(synced: synced, plain: plain, instrumental: instrumental)
+        func text(_ key: String) -> String? {
+            let value = json[key] as? String
+            return LyricsResolution.isFilled(value) ? value : nil
+        }
+        let fetched = Fetched(
+            synced: text("syncedLyrics"),
+            plain: text("plainLyrics"),
+            lyricsfile: text("lyricsfile"),
+            instrumental: json["instrumental"] as? Bool ?? false
+        )
+        if fetched.synced == nil, fetched.plain == nil, !fetched.instrumental { return .missing }
+        return .found(fetched)
     }
 
-    /// Weighted similarity across the fields lrclib returns. Duration carries
-    /// real weight because it is what distinguishes pressings whose timings
-    /// differ, and a large drift disqualifies a candidate outright.
-    static func score(
-        candidate: [String: Any], track: String, artist: String, album: String, duration: TimeInterval
-    ) -> Double? {
-        let candidateDuration = (candidate["duration"] as? NSNumber)?.doubleValue ?? 0
-        if duration > 0, candidateDuration > 0, abs(duration - candidateDuration) > maxDurationDrift {
-            return nil
-        }
-        let durationScore: Double
-        if duration > 0, candidateDuration > 0 {
-            durationScore = 1 - min(abs(duration - candidateDuration) / maxDurationDrift, 1)
-        } else {
-            durationScore = 0.5
-        }
-        let hasSynced = !((candidate["syncedLyrics"] as? String) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return 0.35 * similarity(track, candidate["trackName"] as? String ?? "")
-            + 0.30 * similarity(artist, candidate["artistName"] as? String ?? "")
-            + 0.25 * durationScore
-            + 0.06 * (hasSynced ? 1 : 0)
-            + 0.04 * similarity(album, candidate["albumName"] as? String ?? "")
-    }
-
-    /// Case- and punctuation-insensitive token overlap (Dice coefficient over
-    /// words), enough to tell "Song (Remastered 2011)" from a different song.
-    static func similarity(_ left: String, _ right: String) -> Double {
-        let tokens = { (text: String) -> [String] in
-            text.lowercased()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                .filter { !$0.isEmpty }
-        }
-        let (a, b) = (tokens(left), tokens(right))
-        guard !a.isEmpty, !b.isEmpty else { return 0 }
-        let shared = a.filter { b.contains($0) }.count
-        return 2 * Double(shared) / Double(a.count + b.count)
-    }
-
-    struct LocalLyrics {
+    private struct LocalLyrics {
         let synced: String?
         let plain: String?
     }
@@ -273,11 +415,11 @@ final class LyricsService {
     /// Lyrics the user curated themselves, in the order other players look: an
     /// `.lrc`/`.elrc` sidecar next to the audio, then the file's own tags. Never
     /// written back — the library is the user's.
-    static func readLocalLyrics(at fileURL: URL) async -> LocalLyrics? {
+    private static func readLocalLyrics(at fileURL: URL) async -> LocalLyrics? {
         for ext in ["lrc", "elrc"] {
             let sidecar = fileURL.deletingPathExtension().appendingPathExtension(ext)
             if let text = try? String(contentsOf: sidecar, encoding: .utf8),
-               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               LyricsResolution.isFilled(text) {
                 AppLogger.info("Using lyrics sidecar \(sidecar.lastPathComponent)", category: .content)
                 return classify(text)
             }
@@ -287,10 +429,8 @@ final class LyricsService {
     }
 
     private static func classify(_ text: String) -> LocalLyrics {
-        let stripped = stripWordTimestamps(text)
-        return parseLRC(stripped).isEmpty
-            ? LocalLyrics(synced: nil, plain: stripped)
-            : LocalLyrics(synced: stripped, plain: nil)
+        let classified = LyricsResolution.classify(text)
+        return LocalLyrics(synced: classified.synced, plain: classified.plain)
     }
 
     private static func taggedLyrics(at fileURL: URL) async -> String? {
@@ -301,71 +441,10 @@ final class LyricsService {
             let isLyrics = item.commonKey == .commonKeyDescription && key.contains("LYRIC")
                 || key.contains("LYRIC") || key.contains("USLT") || key.contains("\u{00A9}LYR")
             guard isLyrics, let text = try? await item.load(.stringValue),
-                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                  LyricsResolution.isFilled(text) else { continue }
             AppLogger.info("Using embedded lyrics tag from \(fileURL.lastPathComponent)", category: .content)
             return text
         }
         return nil
-    }
-
-    /// Enhanced-LRC files carry per-word `<mm:ss.xx>` tags inside each line. The
-    /// view highlights whole lines, so the word tags are removed rather than
-    /// mistaken for lyrics.
-    static func stripWordTimestamps(_ text: String) -> String {
-        var out = ""
-        out.reserveCapacity(text.count)
-        var depth = 0
-        for character in text {
-            switch character {
-            case "<": depth += 1
-            case ">" where depth > 0: depth -= 1
-            default: if depth == 0 { out.append(character) }
-            }
-        }
-        return out
-    }
-
-    /// Accepts every timestamp shape LRC files use in the wild, and expands a
-    /// line carrying several stamps into one line each — rejecting either
-    /// silently drops whole verses.
-    static func parseLRC(_ lrc: String) -> [LyricLine] {
-        var lines: [LyricLine] = []
-        for raw in lrc.components(separatedBy: .newlines) {
-            var rest = Substring(raw).drop { $0 == " " || $0 == "\t" }
-            var stamps: [TimeInterval] = []
-            while rest.first == "[", let close = rest.firstIndex(of: "]") {
-                guard let stamp = parseTimestamp(String(rest[rest.index(after: rest.startIndex)..<close])) else { break }
-                stamps.append(stamp)
-                rest = rest[rest.index(after: close)...]
-            }
-            let text = rest.trimmingCharacters(in: .whitespaces)
-            for stamp in stamps {
-                lines.append(LyricLine(time: stamp, text: text))
-            }
-        }
-        return lines.sorted { $0.time < $1.time }
-    }
-
-    /// `[mm:ss]`, `[mm:ss.xx]`, `[mm:ss:xx]` and `[hh:mm:ss.xx]` all appear in
-    /// files people actually have.
-    static func parseTimestamp(_ tag: String) -> TimeInterval? {
-        let parts = tag.trimmingCharacters(in: .whitespaces).components(separatedBy: ":")
-        let seconds = { (text: String) -> Double? in Double(text.replacingOccurrences(of: ",", with: ".")) }
-        switch parts.count {
-        case 2:
-            guard let minutes = Double(parts[0]), let secs = seconds(parts[1]) else { return nil }
-            return minutes * 60 + secs
-        case 3:
-            guard let first = Double(parts[0]), let second = Double(parts[1]) else { return nil }
-            // `mm:ss:xx` uses the third field as hundredths; `hh:mm:ss` does not.
-            if parts[2].count <= 2, second < 60, first < 60, parts[0].count <= 2 {
-                guard let fraction = Double(parts[2]) else { return nil }
-                return first * 60 + second + fraction / 100
-            }
-            guard let secs = seconds(parts[2]) else { return nil }
-            return first * 3600 + second * 60 + secs
-        default:
-            return nil
-        }
     }
 }

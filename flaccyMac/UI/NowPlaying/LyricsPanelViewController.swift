@@ -1,4 +1,5 @@
 import AppKit
+import FlaccyCore
 
 /// Synced-lyrics karaoke panel: the current line renders at full alpha and
 /// scale while the rest dim and shrink toward the leading edge, the scroll
@@ -32,9 +33,16 @@ final class LyricsPanelViewController: NSViewController {
     private let stateIcon = NSImageView()
     private let spinner = NSProgressIndicator()
     private let retryButton = NSButton(title: "", target: nil, action: nil)
+    private let timingButton = NSButton()
+    private static let offsetStepMs = 100
+    private static let offsetLimitMs = 10_000
+    private static let seekLeadIn: TimeInterval = 0.15
 
-    private var lineViews: [LyricLineView] = []
-    private var syncedLines: [LyricLine] = []
+    private var lineViews: [LyricRowView] = []
+    private var document = LyricsDocument()
+    private var lyrics: Lyrics?
+    private var litLines: [Int] = []
+    private var lastLyricTime: TimeInterval = 0
     private var currentLineIndex = -1
     private var loadGeneration = 0
     private var loadedTrackKey: String?
@@ -97,6 +105,17 @@ final class LyricsPanelViewController: NSViewController {
         retryButton.target = self
         retryButton.action = #selector(retryLoad)
 
+        timingButton.image = NSImage(systemSymbolName: "clock", accessibilityDescription: String(localized: "Lyrics timing"))
+        timingButton.imagePosition = .imageOnly
+        timingButton.isBordered = false
+        timingButton.contentTintColor = .tertiaryLabelColor
+        timingButton.toolTip = String(localized: "Lyrics timing")
+        timingButton.isHidden = true
+        timingButton.target = self
+        timingButton.action = #selector(showTimingMenu(_:))
+        timingButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(timingButton)
+
         let stateStack = NSStackView(views: [stateIcon, stateLabel, spinner, retryButton])
         stateStack.orientation = .vertical
         stateStack.spacing = 8
@@ -114,6 +133,8 @@ final class LyricsPanelViewController: NSViewController {
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
             stateStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stateStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            timingButton.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            timingButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
     }
 
@@ -205,7 +226,7 @@ final class LyricsPanelViewController: NSViewController {
 
         if player.isPlaying || needsLineRefresh {
             needsLineRefresh = false
-            updateCurrentLine(at: player.currentTime + Self.lyricLead)
+            updateLitLines(at: player.currentTime + Self.lyricLead)
         }
         advanceScroll(by: CGFloat(delta))
         if !player.isPlaying, scrollTarget == nil {
@@ -213,15 +234,24 @@ final class LyricsPanelViewController: NSViewController {
         }
     }
 
-    private func updateCurrentLine(at time: TimeInterval) {
-        var index = -1
-        for (offset, line) in syncedLines.enumerated() {
-            if line.time <= time { index = offset } else { break }
+    /// Lights the lines the clock is on and moves the fill inside them. The
+    /// listener's timing correction is applied to the clock, not to the lines.
+    private func updateLitLines(at position: TimeInterval) {
+        guard let lyrics, document.hasSynced else { return }
+        let time = lyrics.songTime(at: position)
+        lastLyricTime = time
+        let primary = document.primaryIndex(at: time) ?? -1
+        let lit = document.highlighted(at: time)
+        if primary != currentLineIndex || lit != litLines {
+            let moved = primary != currentLineIndex
+            currentLineIndex = primary
+            litLines = lit
+            applyLineStyles(animated: true)
+            if moved { followCurrentLine() }
         }
-        guard index != currentLineIndex else { return }
-        currentLineIndex = index
-        applyLineStyles(animated: true)
-        followCurrentLine()
+        for index in lit where index < lineViews.count {
+            lineViews[index].show(document.lines[index], time: time)
+        }
     }
 
     @objc private func playbackStateChanged() {
@@ -237,7 +267,7 @@ final class LyricsPanelViewController: NSViewController {
     /// The link runs only while there is something to animate: a hidden or
     /// paused panel with a settled scroll costs nothing.
     private func syncDisplayLink() {
-        let wanted = isActive && !syncedLines.isEmpty && view.window != nil
+        let wanted = isActive && document.hasSynced && view.window != nil
             && (player.isPlaying || scrollTarget != nil || needsLineRefresh)
         if wanted {
             startDisplayLink()
@@ -278,7 +308,9 @@ final class LyricsPanelViewController: NSViewController {
         loadGeneration += 1
         let generation = loadGeneration
 
-        syncedLines = []
+        document = LyricsDocument()
+        lyrics = nil
+        litLines = []
         currentLineIndex = -1
         clearLines()
         plainTextView.isHidden = true
@@ -297,31 +329,32 @@ final class LyricsPanelViewController: NSViewController {
     }
 
     private func render(_ outcome: LyricsOutcome) {
-        let result: LyricsResult
+        let found: Lyrics
         switch outcome {
-        case .found(let found):
-            result = found
+        case .found(let result):
+            found = result
         case .missing:
             showState(icon: "quote.bubble", text: String(localized: "No lyrics found"))
             return
         case .failed:
-            // Recoverable, unlike a miss — offer the way back.
             showState(icon: "wifi.exclamationmark", text: String(localized: "Couldn't reach lrclib.net"))
             retryButton.isHidden = false
             return
         }
-        if result.isInstrumental {
+        if found.document.instrumental {
             showState(icon: "music.note", text: String(localized: "Instrumental"))
             return
         }
-        if let lines = result.syncedLines, !lines.isEmpty {
+        if found.document.hasSynced {
             hideState()
-            syncedLines = lines
+            lyrics = found
+            document = found.document
+            timingButton.isHidden = false
             buildLineViews()
             progressChanged()
             return
         }
-        if let plain = result.plainText, !plain.isEmpty {
+        if let plain = found.document.plain, !plain.isEmpty {
             hideState()
             plainTextView.stringValue = plain
             plainTextView.isHidden = false
@@ -333,12 +366,12 @@ final class LyricsPanelViewController: NSViewController {
 
     private func buildLineViews() {
         clearLines()
-        for (index, line) in syncedLines.enumerated() {
-            let lineView = LyricLineView(text: line.text)
+        for (index, line) in document.lines.enumerated() {
+            let lineView: LyricRowView = line.isInterlude ? InterludeLineView() : LyricLineView(line: line)
             lineView.onClick = { [weak self] in
-                guard let self, index < self.syncedLines.count else { return }
-                // Nudge back a beat so the first syllable isn't clipped.
-                let time = max(0, self.syncedLines[index].time - 0.15)
+                guard let self, index < self.document.lines.count else { return }
+                let start = self.document.lines[index].start + (self.lyrics?.offsetSeconds ?? 0)
+                let time = max(0, start - Self.seekLeadIn)
                 self.player.seek(to: time)
                 self.lastUserScroll = .distantPast
                 AppLogger.info("Lyrics line seek to \(time)", category: .ui)
@@ -360,7 +393,9 @@ final class LyricsPanelViewController: NSViewController {
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let apply = {
             for (index, lineView) in self.lineViews.enumerated() {
-                lineView.setCurrent(index == self.currentLineIndex, reduceMotion: reduceMotion)
+                let lit = self.litLines.contains(index)
+                lineView.setCurrent(lit, reduceMotion: reduceMotion)
+                if !lit { lineView.clearProgress() }
             }
         }
         guard animated, !reduceMotion else {
@@ -436,10 +471,61 @@ final class LyricsPanelViewController: NSViewController {
         scrollTo(0)
     }
 
+    /// A menu under the clock button that shifts the lyrics earlier or later
+    /// when they run ahead of or behind the singing.
+    @objc private func showTimingMenu(_ sender: NSButton) {
+        guard let lyrics else { return }
+        let menu = NSMenu()
+        let status = NSMenuItem(title: Self.offsetText(lyrics.offsetMs), action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(.separator())
+        let earlier = NSMenuItem(title: String(localized: "Show Lyrics Earlier"), action: #selector(nudgeEarlier), keyEquivalent: "")
+        let later = NSMenuItem(title: String(localized: "Show Lyrics Later"), action: #selector(nudgeLater), keyEquivalent: "")
+        let reset = NSMenuItem(title: String(localized: "Reset Timing"), action: #selector(resetTiming), keyEquivalent: "")
+        for item in [earlier, later, reset] {
+            item.target = self
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    @objc private func nudgeEarlier() {
+        setOffset((lyrics?.offsetMs ?? 0) - Self.offsetStepMs)
+    }
+
+    @objc private func nudgeLater() {
+        setOffset((lyrics?.offsetMs ?? 0) + Self.offsetStepMs)
+    }
+
+    @objc private func resetTiming() {
+        setOffset(0)
+    }
+
+    private func setOffset(_ offsetMs: Int) {
+        guard var lyrics, let track = player.currentTrack else { return }
+        lyrics.offsetMs = min(max(offsetMs, -Self.offsetLimitMs), Self.offsetLimitMs)
+        self.lyrics = lyrics
+        LyricsService.shared.saveOffset(track: track.title, artist: track.artist, offsetMs: lyrics.offsetMs)
+        needsLineRefresh = true
+        syncDisplayLink()
+    }
+
+    /// "In sync", or the correction as a signed number of seconds.
+    private static func offsetText(_ offsetMs: Int) -> String {
+        guard offsetMs != 0 else { return String(localized: "In sync") }
+        let seconds = Double(abs(offsetMs)) / 1000
+        let sign = offsetMs > 0 ? "+" : "\u{2212}"
+        return "\(sign)\(String(format: "%.1f", seconds)) s"
+    }
+
     private func showState(icon: String?, text: String) {
         retryButton.isHidden = true
+        timingButton.isHidden = true
         clearLines()
-        syncedLines = []
+        document = LyricsDocument()
+        lyrics = nil
+        litLines = []
         cancelScroll()
         stopDisplayLink()
         plainTextView.isHidden = true
@@ -463,23 +549,105 @@ final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+/// What the panel needs from each row of lyrics, whether it is a sung line or
+/// an instrumental stretch.
+protocol LyricRowView: NSView {
+    var onClick: (() -> Void)? { get set }
+    func setCurrent(_ current: Bool, reduceMotion: Bool)
+    func show(_ line: LyricsLine, time: TimeInterval)
+    func clearProgress()
+}
+
+/// Draws the line being sung with the sung part in one colour and the rest in
+/// another, the edge following the words. It sits over the line's label while
+/// a line with timed words is current, and is hidden otherwise.
+private final class LyricWipeView: NSView {
+
+    private var layoutCache: LyricWipeLayout?
+    private var edge: LyricWipeEdge = .nothing
+    private var text = ""
+    private var words: [LyricsWord] = []
+    private var font = NSFont.systemFont(ofSize: 17, weight: .bold)
+
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(text: String, words: [LyricsWord], font: NSFont) {
+        self.text = text
+        self.words = words
+        self.font = font
+        layoutCache = nil
+        edge = .nothing
+    }
+
+    /// Moves the edge to a clock position, or hides the view for `nil`.
+    func show(_ progress: LyricsLineProgress?) {
+        guard let progress, !words.isEmpty else {
+            isHidden = true
+            return
+        }
+        guard let layout = currentLayout() else { return }
+        let next = layout.edge(for: progress)
+        if isHidden || next != edge {
+            edge = next
+            isHidden = false
+            needsDisplay = true
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        if let layoutCache, abs(layoutCache.width - bounds.width) > 0.5 {
+            self.layoutCache = nil
+            needsDisplay = true
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext, let layout = currentLayout() else { return }
+        layout.draw(edge: edge, in: context)
+    }
+
+    private func currentLayout() -> LyricWipeLayout? {
+        if let layoutCache { return layoutCache }
+        guard bounds.width > 1 else { return nil }
+        let built = LyricWipeLayout(
+            text: text, words: words, font: font, width: bounds.width,
+            bright: .labelColor, dim: NSColor.labelColor.withAlphaComponent(0.4)
+        )
+        layoutCache = built
+        return built
+    }
+}
+
 /// One clickable lyric line; current-line emphasis animates alpha and a
-/// leading-anchored scale.
-final class LyricLineView: NSView {
+/// leading-anchored scale, and a line with timed words fills as it is sung.
+final class LyricLineView: NSView, LyricRowView {
 
     var onClick: (() -> Void)?
 
     private let label = NSTextField(wrappingLabelWithString: "")
+    private let wipeView = LyricWipeView()
 
-    init(text: String) {
+    init(line: LyricsLine) {
         super.init(frame: .zero)
         wantsLayer = true
-        label.stringValue = text
-        label.font = .systemFont(ofSize: 17, weight: .bold)
+        label.stringValue = line.text
+        label.font = .systemFont(ofSize: line.background ? 15 : 17, weight: line.background ? .semibold : .bold)
         label.textColor = .labelColor
         label.isSelectable = false
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
+        addSubview(wipeView)
+        wipeView.configure(text: line.text, words: line.words, font: label.font ?? .systemFont(ofSize: 17))
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: topAnchor),
             label.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -488,9 +656,19 @@ final class LyricLineView: NSView {
         ])
         let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
         addGestureRecognizer(click)
+        setAccessibilityLabel(line.text)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        let textRect = label.cell?.titleRect(forBounds: label.bounds) ?? label.bounds
+        wipeView.frame = CGRect(
+            x: label.frame.minX + textRect.minX, y: label.frame.minY,
+            width: textRect.width, height: label.frame.height
+        )
+    }
 
     func setCurrent(_ current: Bool, reduceMotion: Bool) {
         alphaValue = current ? 1 : 0.35
@@ -499,6 +677,88 @@ final class LyricLineView: NSView {
         layer.position = CGPoint(x: frame.minX, y: frame.midY)
         let scale: CGFloat = current || reduceMotion ? 1 : 0.86
         layer.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+    }
+
+    func show(_ line: LyricsLine, time: TimeInterval) {
+        wipeView.show(line.progress(at: time))
+        label.isHidden = !wipeView.isHidden
+    }
+
+    func clearProgress() {
+        wipeView.show(nil)
+        label.isHidden = false
+    }
+
+    @objc private func clicked() {
+        onClick?()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
+/// An instrumental stretch: three beats that light one after another across
+/// the gap, so a pause in the singing reads as part of the song.
+final class InterludeLineView: NSView, LyricRowView {
+
+    var onClick: (() -> Void)?
+
+    private let beats: [NSView] = (0..<LyricsDocument.interludeBeats).map { _ in
+        let beat = NSView()
+        beat.wantsLayer = true
+        beat.layer?.cornerRadius = 4
+        beat.layer?.backgroundColor = NSColor.labelColor.cgColor
+        beat.alphaValue = InterludeLineView.unlitAlpha
+        return beat
+    }
+    private static let unlitAlpha: CGFloat = 0.25
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        let stack = NSStackView(views: beats)
+        stack.orientation = .horizontal
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+        ])
+        for beat in beats {
+            beat.widthAnchor.constraint(equalToConstant: 8).isActive = true
+            beat.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        }
+        let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
+        addGestureRecognizer(click)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setCurrent(_ current: Bool, reduceMotion: Bool) {
+        alphaValue = current ? 1 : 0.35
+    }
+
+    func show(_ line: LyricsLine, time: TimeInterval) {
+        let lit = line.litBeats(at: time)
+        for (index, beat) in beats.enumerated() {
+            let target = index < lit ? 1 : Self.unlitAlpha
+            guard beat.alphaValue != target else { continue }
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                beat.alphaValue = target
+            } else {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.26
+                    beat.animator().alphaValue = target
+                }
+            }
+        }
+    }
+
+    func clearProgress() {
+        for beat in beats { beat.alphaValue = Self.unlitAlpha }
     }
 
     @objc private func clicked() {

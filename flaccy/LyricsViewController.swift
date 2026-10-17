@@ -1,3 +1,4 @@
+import FlaccyCore
 import UIKit
 
 final class LyricsViewController: UIViewController {
@@ -14,13 +15,21 @@ final class LyricsViewController: UIViewController {
     /// Frame deltas are clamped before integrating so a stalled frame can't
     /// blow the spring up.
     private static let maxFrameDelta: CFTimeInterval = 1.0 / 30
+    /// One step of Earlier or Later, and the most the correction may reach.
+    /// How far a tap on a line seeks before the line's own start, so the first
+    /// syllable is not clipped.
+    private static let seekLeadIn: TimeInterval = 0.15
+    private static let offsetStepMs = 100
+    private static let offsetLimitMs = 10_000
 
     private var tableView: UITableView!
     private var plainTextView: UITextView!
     private var statusLabel: UILabel!
     private var spinner: UIActivityIndicatorView!
-    private var lyrics: [LyricLine] = []
+    private var document = LyricsDocument()
+    private var lyrics: Lyrics?
     private var currentLineIndex: Int = -1
+    private var litLines: [Int] = []
     private var trackTitle: String
     private var artistName: String
     private var albumName: String
@@ -33,9 +42,12 @@ final class LyricsViewController: UIViewController {
     private var displayLink: CADisplayLink?
     private var lastFrameTime: CFTimeInterval = 0
     private var needsLineRefresh = false
+    private var lastLyricTime: TimeInterval = 0
     private var scrollTarget: CGFloat?
     private var scrollVelocity: CGFloat = 0
     private lazy var retryButton: UIButton = makeRetryButton()
+    private lazy var offsetItem = UIAction(title: "", attributes: .disabled) { _ in }
+    private lazy var timingButton: UIButton = makeTimingButton()
 
     init(track: String, artist: String, album: String) {
         self.trackTitle = track
@@ -75,7 +87,7 @@ final class LyricsViewController: UIViewController {
     /// reach the anchor instead of being pinned to an edge.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        guard !lyrics.isEmpty, view.bounds.height > 1 else { return }
+        guard !document.lines.isEmpty, view.bounds.height > 1 else { return }
         tableView.contentInset = UIEdgeInsets(
             top: view.bounds.height * Self.activeLineAnchor,
             left: 0,
@@ -108,8 +120,11 @@ final class LyricsViewController: UIViewController {
         stopDisplayLink()
         cancelScroll()
         retryButton.isHidden = true
-        lyrics = []
+        timingButton.isHidden = true
+        document = LyricsDocument()
+        lyrics = nil
         currentLineIndex = -1
+        litLines = []
         tableView.isHidden = true
         tableView.reloadData()
         plainTextView.isHidden = true
@@ -151,6 +166,7 @@ final class LyricsViewController: UIViewController {
         tableView.delegate = self
         tableView.dataSource = self
         tableView.register(LyricCell.self, forCellReuseIdentifier: LyricCell.reuseID)
+        tableView.register(InterludeCell.self, forCellReuseIdentifier: InterludeCell.reuseID)
         tableView.isHidden = true
         tableView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tableView)
@@ -177,6 +193,8 @@ final class LyricsViewController: UIViewController {
             plainTextView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             plainTextView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
+
+        view.bringSubviewToFront(timingButton)
     }
 
     private func loadLyrics() {
@@ -197,10 +215,10 @@ final class LyricsViewController: UIViewController {
             guard generation == loadGeneration else { return }
             spinner.stopAnimating()
 
-            let result: LyricsResult
+            let found: Lyrics
             switch outcome {
-            case .found(let found):
-                result = found
+            case .found(let result):
+                found = result
             case .missing:
                 showStatus(String(localized: "No lyrics available"))
                 return
@@ -210,14 +228,14 @@ final class LyricsViewController: UIViewController {
                 return
             }
 
-            if result.isInstrumental {
+            if found.document.instrumental {
                 showInstrumental()
                 return
             }
 
-            if let syncedLines = result.syncedLines, !syncedLines.isEmpty {
-                showSyncedLyrics(syncedLines)
-            } else if let plain = result.plainText, !plain.isEmpty {
+            if found.document.hasSynced {
+                showSyncedLyrics(found)
+            } else if let plain = found.document.plain, !plain.isEmpty {
                 showPlainLyrics(plain)
             } else {
                 showStatus(String(localized: "No lyrics available"))
@@ -251,6 +269,74 @@ final class LyricsViewController: UIViewController {
         return button
     }
 
+    /// A small button over the lines whose menu shifts the lyrics earlier or
+    /// later when they run ahead of or behind the singing. The menu stays open
+    /// between presses so a correction can be dialled in by ear.
+    private func makeTimingButton() -> UIButton {
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: "clock")
+        config.baseForegroundColor = .white.withAlphaComponent(0.7)
+        config.background.backgroundColor = .white.withAlphaComponent(0.12)
+        config.cornerStyle = .capsule
+        config.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 9, bottom: 9, trailing: 9)
+        let earlier = UIAction(
+            title: String(localized: "Show Lyrics Earlier"),
+            image: UIImage(systemName: "minus.circle"),
+            attributes: .keepsMenuPresented
+        ) { [weak self] _ in
+            self?.nudgeOffset(by: -Self.offsetStepMs)
+        }
+        let later = UIAction(
+            title: String(localized: "Show Lyrics Later"),
+            image: UIImage(systemName: "plus.circle"),
+            attributes: .keepsMenuPresented
+        ) { [weak self] _ in
+            self?.nudgeOffset(by: Self.offsetStepMs)
+        }
+        let reset = UIAction(
+            title: String(localized: "Reset Timing"),
+            image: UIImage(systemName: "arrow.counterclockwise")
+        ) { [weak self] _ in
+            self?.setOffset(0)
+        }
+        let button = UIButton(configuration: config)
+        button.menu = UIMenu(title: String(localized: "Lyrics Timing"), children: [offsetItem, earlier, later, reset])
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityLabel = String(localized: "Lyrics timing")
+        button.isHidden = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+        ])
+        return button
+    }
+
+    private func nudgeOffset(by delta: Int) {
+        setOffset((lyrics?.offsetMs ?? 0) + delta)
+    }
+
+    private func setOffset(_ offsetMs: Int) {
+        guard var lyrics else { return }
+        let clamped = min(max(offsetMs, -Self.offsetLimitMs), Self.offsetLimitMs)
+        lyrics.offsetMs = clamped
+        self.lyrics = lyrics
+        offsetItem.title = Self.offsetText(clamped)
+        LyricsService.shared.saveOffset(track: trackTitle, artist: artistName, offsetMs: clamped)
+        lineSelectionFeedback.impactOccurred()
+        needsLineRefresh = true
+        syncDisplayLink()
+    }
+
+    /// "In sync", or the correction as a signed number of seconds.
+    private static func offsetText(_ offsetMs: Int) -> String {
+        guard offsetMs != 0 else { return String(localized: "In sync") }
+        let seconds = Double(abs(offsetMs)) / 1000
+        let sign = offsetMs > 0 ? "+" : "\u{2212}"
+        return "\(sign)\(String(format: "%.1f", seconds)) s"
+    }
+
     private func showInstrumental() {
         let attachment = NSTextAttachment()
         attachment.image = UIImage(
@@ -276,8 +362,13 @@ final class LyricsViewController: UIViewController {
         statusLabel.isHidden = false
     }
 
-    private func showSyncedLyrics(_ lines: [LyricLine]) {
-        lyrics = lines
+    private func showSyncedLyrics(_ found: Lyrics) {
+        lyrics = found
+        document = found.document
+        currentLineIndex = -1
+        litLines = []
+        offsetItem.title = Self.offsetText(found.offsetMs)
+        timingButton.isHidden = false
         tableView.isHidden = false
         tableView.reloadData()
 
@@ -333,7 +424,7 @@ final class LyricsViewController: UIViewController {
         }
     }
 
-    /// Re-evaluates the active line and advances the follow spring once per
+    /// Re-evaluates the lit lines and advances the follow spring once per
     /// displayed frame rather than on the player's quarter-second tick — a line
     /// change is only ever a frame late, and the scroll is a glide instead of a
     /// hop per line.
@@ -348,7 +439,7 @@ final class LyricsViewController: UIViewController {
         let playing = AudioPlayer.shared.isPlaying
         if playing || needsLineRefresh {
             needsLineRefresh = false
-            updateCurrentLine(at: AudioPlayer.shared.currentTime + Self.lyricLead)
+            updateLitLines(at: AudioPlayer.shared.currentTime + Self.lyricLead)
         }
         advanceScroll(by: CGFloat(delta))
         if !playing, scrollTarget == nil {
@@ -359,7 +450,7 @@ final class LyricsViewController: UIViewController {
     /// The link runs only while there is something to animate, so a paused or
     /// backgrounded lyrics view costs nothing.
     private func syncDisplayLink() {
-        let wanted = !lyrics.isEmpty && view.window != nil
+        let wanted = document.hasSynced && view.window != nil
             && (AudioPlayer.shared.isPlaying || scrollTarget != nil || needsLineRefresh)
         if wanted { startDisplayLink() } else { stopDisplayLink() }
     }
@@ -377,33 +468,42 @@ final class LyricsViewController: UIViewController {
         displayLink = nil
     }
 
-    private func updateCurrentLine(at time: TimeInterval) {
-        guard !lyrics.isEmpty else { return }
-        var newIndex = -1
-        for (index, line) in lyrics.enumerated() {
-            if line.time <= time {
-                newIndex = index
-            } else {
-                break
+    /// Lights the lines the clock is on and moves the fill inside them. The
+    /// listener's timing correction is applied to the clock, not to the lines.
+    private func updateLitLines(at position: TimeInterval) {
+        guard document.hasSynced, let lyrics else { return }
+        let time = lyrics.songTime(at: position)
+        lastLyricTime = time
+        let primary = document.primaryIndex(at: time) ?? -1
+        let lit = document.highlighted(at: time)
+        if primary != currentLineIndex || lit != litLines {
+            let previous = currentLineIndex
+            currentLineIndex = primary
+            litLines = lit
+            applyEmphasisToVisibleCells(animated: true)
+            if primary != previous, primary >= 0, !isUserScrolling {
+                aimScroll(atRow: primary)
             }
         }
-        setCurrentLine(newIndex, scrolls: !isUserScrolling)
+        for index in lit {
+            guard let cell = tableView.cellForRow(at: IndexPath(row: index, section: 0)) else { continue }
+            show(document.lines[index], time: time, in: cell)
+        }
     }
 
-    private func setCurrentLine(_ newIndex: Int, scrolls: Bool) {
-        guard newIndex != currentLineIndex else { return }
-        currentLineIndex = newIndex
-        applyEmphasisToVisibleCells(animated: true)
-
-        guard newIndex >= 0, scrolls else { return }
-        aimScroll(atRow: newIndex)
+    private func show(_ line: LyricsLine, time: TimeInterval, in cell: UITableViewCell) {
+        if let cell = cell as? LyricCell {
+            cell.showProgress(line.progress(at: time))
+        } else if let cell = cell as? InterludeCell {
+            cell.setLitBeats(line.litBeats(at: time))
+        }
     }
 
     /// Aims the follow spring so the line lands on the anchor. Retargeting
     /// mid-flight keeps the current velocity, so consecutive lines read as one
     /// continuous glide rather than a restart each time.
     private func aimScroll(atRow row: Int) {
-        guard row < lyrics.count, tableView.bounds.height > 1 else { return }
+        guard row < document.lines.count, tableView.bounds.height > 1 else { return }
         let rect = tableView.rectForRow(at: IndexPath(row: row, section: 0))
         let anchor = tableView.bounds.height * Self.activeLineAnchor
         let lowest = -tableView.adjustedContentInset.top
@@ -437,8 +537,18 @@ final class LyricsViewController: UIViewController {
 
     private func applyEmphasisToVisibleCells(animated: Bool) {
         for indexPath in tableView.indexPathsForVisibleRows ?? [] {
-            guard let cell = tableView.cellForRow(at: indexPath) as? LyricCell else { continue }
-            cell.setCurrent(indexPath.row == currentLineIndex, animated: animated)
+            applyEmphasis(to: tableView.cellForRow(at: indexPath), row: indexPath.row, animated: animated)
+        }
+    }
+
+    private func applyEmphasis(to cell: UITableViewCell?, row: Int, animated: Bool) {
+        let lit = litLines.contains(row)
+        if let cell = cell as? LyricCell {
+            cell.setCurrent(lit, animated: animated)
+            if !lit { cell.showProgress(nil) }
+        } else if let cell = cell as? InterludeCell {
+            cell.setCurrent(lit, animated: animated)
+            if !lit { cell.setLitBeats(0) }
         }
     }
 }
@@ -446,12 +556,21 @@ final class LyricsViewController: UIViewController {
 extension LyricsViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        lyrics.count
+        document.lines.count
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let line = document.lines[indexPath.row]
+        let lit = litLines.contains(indexPath.row)
+        if line.isInterlude {
+            let cell = tableView.dequeueReusableCell(withIdentifier: InterludeCell.reuseID, for: indexPath) as! InterludeCell
+            cell.configure(isCurrent: lit)
+            if lit { cell.setLitBeats(line.litBeats(at: lastLyricTime)) }
+            return cell
+        }
         let cell = tableView.dequeueReusableCell(withIdentifier: LyricCell.reuseID, for: indexPath) as! LyricCell
-        cell.configure(text: lyrics[indexPath.row].text, isCurrent: indexPath.row == currentLineIndex)
+        cell.configure(line: line, isCurrent: lit)
+        if lit { cell.showProgress(line.progress(at: lastLyricTime)) }
         return cell
     }
 }
@@ -460,13 +579,14 @@ extension LyricsViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let line = lyrics[indexPath.row]
+        let line = document.lines[indexPath.row]
         lineSelectionFeedback.impactOccurred()
-        // Nudge back a beat so the first syllable isn't clipped.
-        AudioPlayer.shared.seek(to: max(0, line.time - 0.15))
+        let target = line.start + (lyrics?.offsetSeconds ?? 0)
+        AudioPlayer.shared.seek(to: max(0, target - Self.seekLeadIn))
         scrollResumeWorkItem?.cancel()
         isUserScrolling = false
-        setCurrentLine(indexPath.row, scrolls: true)
+        needsLineRefresh = true
+        aimScroll(atRow: indexPath.row)
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -495,12 +615,86 @@ extension LyricsViewController: UITableViewDelegate {
     }
 }
 
+/// Draws the line being sung with the sung part in one colour and the rest in
+/// another, the edge following the words. It sits over the cell's label while a
+/// line with timed words is current, and is hidden otherwise.
+private final class LyricWipeView: UIView {
+
+    private var layout: LyricWipeLayout?
+    private var edge: LyricWipeEdge = .nothing
+    private var text = ""
+    private var words: [LyricsWord] = []
+    private var font = UIFont.systemFont(ofSize: 24, weight: .bold)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    func configure(text: String, words: [LyricsWord], font: UIFont) {
+        self.text = text
+        self.words = words
+        self.font = font
+        layout = nil
+        edge = .nothing
+    }
+
+    /// Moves the edge to a clock position, or hides the view for `nil`.
+    func show(_ progress: LyricsLineProgress?) {
+        guard let progress, !words.isEmpty else {
+            isHidden = true
+            return
+        }
+        guard let layout = currentLayout() else { return }
+        let next = layout.edge(for: progress)
+        if isHidden || next != edge {
+            edge = next
+            isHidden = false
+            setNeedsDisplay()
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if let layout, abs(layout.width - bounds.width) > 0.5 {
+            self.layout = nil
+            setNeedsDisplay()
+        }
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext(), let layout = currentLayout() else { return }
+        layout.draw(edge: edge, in: context)
+    }
+
+    private func currentLayout() -> LyricWipeLayout? {
+        if let layout { return layout }
+        guard bounds.width > 1 else { return nil }
+        let built = LyricWipeLayout(
+            text: text, words: words, font: font, width: bounds.width,
+            bright: .white, dim: .white.withAlphaComponent(0.4)
+        )
+        layout = built
+        return built
+    }
+}
+
 private final class LyricCell: UITableViewCell {
 
     static let reuseID = "LyricCell"
 
     private let lyricLabel = UILabel()
+    private let wipeView = LyricWipeView()
     private var isCurrentLine = false
+    private var isBacking = false
     private static let dimmedScale: CGFloat = 0.86
     private static let dimmedAlpha: CGFloat = 0.35
 
@@ -517,11 +711,18 @@ private final class LyricCell: UITableViewCell {
         lyricLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(lyricLabel)
 
+        wipeView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(wipeView)
+
         NSLayoutConstraint.activate([
             lyricLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             lyricLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
             lyricLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
             lyricLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            wipeView.topAnchor.constraint(equalTo: lyricLabel.topAnchor),
+            wipeView.bottomAnchor.constraint(equalTo: lyricLabel.bottomAnchor),
+            wipeView.leadingAnchor.constraint(equalTo: lyricLabel.leadingAnchor),
+            wipeView.trailingAnchor.constraint(equalTo: lyricLabel.trailingAnchor),
         ])
     }
 
@@ -530,14 +731,27 @@ private final class LyricCell: UITableViewCell {
         fatalError()
     }
 
-    func configure(text: String, isCurrent: Bool) {
-        lyricLabel.text = text
+    func configure(line: LyricsLine, isCurrent: Bool) {
+        isBacking = line.background
+        lyricLabel.font = isBacking
+            ? .scaled(.title3, size: 20, weight: .semibold)
+            : .scaled(.title2, size: 24, weight: .bold)
+        lyricLabel.text = line.text
+        wipeView.configure(text: line.text, words: line.words, font: lyricLabel.font)
+        showProgress(nil)
         isAccessibilityElement = true
-        accessibilityLabel = text
+        accessibilityLabel = line.text
         accessibilityValue = isCurrent ? String(localized: "Current line") : nil
         accessibilityHint = String(localized: "Plays from this line")
         accessibilityTraits = .button
         setCurrent(isCurrent, animated: false)
+    }
+
+    /// Shows the fill at a clock position, swapping the plain label for the
+    /// drawn one, or goes back to the plain label for `nil`.
+    func showProgress(_ progress: LyricsLineProgress?) {
+        wipeView.show(progress)
+        lyricLabel.isHidden = !wipeView.isHidden
     }
 
     func setCurrent(_ isCurrent: Bool, animated: Bool) {
@@ -568,5 +782,80 @@ private final class LyricCell: UITableViewCell {
     private static func dimmedTransform(width: CGFloat) -> CGAffineTransform {
         CGAffineTransform(translationX: -width * (1 - dimmedScale) / 2, y: 0)
             .scaledBy(x: dimmedScale, y: dimmedScale)
+    }
+}
+
+/// An instrumental stretch: three beats that light one after another across
+/// the gap, so a pause in the singing reads as part of the song.
+private final class InterludeCell: UITableViewCell {
+
+    static let reuseID = "InterludeCell"
+
+    private let beats: [UIView] = (0..<LyricsDocument.interludeBeats).map { _ in
+        let beat = UIView()
+        beat.layer.cornerRadius = 5
+        beat.backgroundColor = .white
+        beat.alpha = InterludeCell.unlitAlpha
+        return beat
+    }
+    private var isCurrentLine = false
+    private static let unlitAlpha: CGFloat = 0.25
+    private static let dimmedAlpha: CGFloat = 0.35
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
+        selectionStyle = .none
+        isAccessibilityElement = false
+
+        let stack = UIStackView(arrangedSubviews: beats)
+        stack.axis = .horizontal
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 28),
+        ])
+        for beat in beats {
+            beat.widthAnchor.constraint(equalToConstant: 10).isActive = true
+            beat.heightAnchor.constraint(equalToConstant: 10).isActive = true
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    func configure(isCurrent: Bool) {
+        setLitBeats(0)
+        setCurrent(isCurrent, animated: false)
+    }
+
+    func setCurrent(_ isCurrent: Bool, animated: Bool) {
+        isCurrentLine = isCurrent
+        let apply = { [self] in
+            contentView.alpha = isCurrent ? 1 : Self.dimmedAlpha
+        }
+        if animated, !UIAccessibility.isReduceMotionEnabled {
+            UIViewPropertyAnimator(duration: 0.28, dampingRatio: 0.86, animations: apply).startAnimation()
+        } else {
+            apply()
+        }
+    }
+
+    func setLitBeats(_ lit: Int) {
+        for (index, beat) in beats.enumerated() {
+            let target = index < lit ? 1 : Self.unlitAlpha
+            guard beat.alpha != target else { continue }
+            if UIAccessibility.isReduceMotionEnabled {
+                beat.alpha = target
+            } else {
+                UIView.animate(withDuration: 0.26) { beat.alpha = target }
+            }
+        }
     }
 }

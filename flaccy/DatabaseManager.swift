@@ -162,6 +162,9 @@ nonisolated struct LyricsRecord: Codable, FetchableRecord, PersistableRecord, Id
     var plainLyrics: String?
     var instrumental: Bool
     var fetchedAt: Date?
+    var lyricsfile: String?
+    var offsetMs: Int = 0
+    var revision: Int = 0
 }
 
 nonisolated struct WantlistRecord: Codable, FetchableRecord, PersistableRecord, Identifiable, Sendable {
@@ -549,6 +552,14 @@ nonisolated final class DatabaseManager: Sendable {
         migrator.registerMigration("v13") { db in
             try db.alter(table: "playlists") { t in
                 t.add(column: "customCoverData", .blob)
+            }
+        }
+
+        migrator.registerMigration("v14") { db in
+            try db.alter(table: "lyrics") { t in
+                t.add(column: "lyricsfile", .text)
+                t.add(column: "offsetMs", .integer).notNull().defaults(to: 0)
+                t.add(column: "revision", .integer).notNull().defaults(to: 0)
             }
         }
 
@@ -1905,6 +1916,29 @@ nonisolated final class DatabaseManager: Sendable {
     func saveLyrics(_ record: LyricsRecord) throws {
         try dbQueue.write { db in
             try record.save(db)
+        }
+    }
+
+    /// Remembers the listener's timing correction for one track's lyrics.
+    /// Mirrors `Db::save_lyrics_offset` in the Linux client.
+    func saveLyricsOffset(trackTitle: String, artist: String, offsetMs: Int) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE lyrics SET offsetMs = ? WHERE trackTitle = ? AND artist = ?",
+                arguments: [offsetMs, trackTitle, artist]
+            )
+        }
+    }
+
+    /// Marks a row as current without changing what it holds, for when the
+    /// source was asked again and had nothing better. Mirrors
+    /// `Db::set_lyrics_revision` in the Linux client.
+    func setLyricsRevision(trackTitle: String, artist: String, revision: Int) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE lyrics SET revision = ? WHERE trackTitle = ? AND artist = ?",
+                arguments: [revision, trackTitle, artist]
+            )
         }
     }
 
