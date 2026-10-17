@@ -373,14 +373,19 @@ overlay-split-view > .sidebar-pane:backdrop {
    frame of the transition, and a blurred text-shadow is a GPU blur per frame
    for as long as the line scrolls: together they were over a third of the
    main-thread time of a playing lyrics column. */
-.lyric-line {
+.lyric-line,
+.lyric-text {
   font-weight: 600;
   opacity: 0.55;
-  padding: 6px 4px;
   transition: opacity 150ms ease, color 150ms ease;
 }
 
-.lyric-line:hover {
+.lyric-line {
+  padding: 6px 4px;
+}
+
+.lyric-line:hover,
+.lyric-text:hover {
   opacity: 0.9;
 }
 
@@ -394,22 +399,44 @@ overlay-split-view > .sidebar-pane:backdrop {
   color: @accent_color;
 }
 
-.lyric-line-interlude {
-  letter-spacing: 0.35em;
+.lyric-line-backing {
+  font-style: italic;
+  font-weight: 500;
 }
 
-.lyric-line-interlude.lyric-line-current {
-  animation: lyric-interlude 2200ms ease-in-out infinite;
+.lyric-beats {
+  padding: 10px 4px;
+  opacity: 0.55;
 }
 
-@keyframes lyric-interlude {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 0.8; }
+.lyric-beat {
+  font-size: 0.7em;
+  opacity: 0.3;
+  transition: opacity 260ms ease, color 260ms ease;
+}
+
+.lyric-beat-lit {
+  opacity: 1.0;
+  color: @accent_color;
+}
+
+.lyric-line-current.lyric-beats {
+  opacity: 1.0;
+}
+
+.lyrics-timing {
+  opacity: 0.45;
+}
+
+.lyrics-timing:hover,
+.lyrics-timing:checked {
+  opacity: 1.0;
 }
 
 .lyrics-list > row {
   background: none;
   border-radius: 10px;
+  padding: 6px 4px;
 }
 
 .lyrics-list > row:hover {

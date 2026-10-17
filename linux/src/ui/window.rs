@@ -385,7 +385,7 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
                     }
                     // Warm the lyrics cache while the song plays, so opening the
                     // panel on the current track never spins.
-                    AppEvent::TrackChanged(Some(track)) => core.prefetch_lyric_lines(track),
+                    AppEvent::TrackChanged(Some(track)) => core.prefetch_lyrics(track),
                     _ => {}
                 }
             });

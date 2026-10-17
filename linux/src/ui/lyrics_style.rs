@@ -2,6 +2,9 @@ use crate::config;
 use gtk::gdk;
 use std::cell::{Cell, RefCell};
 
+/// Backing vocals are set smaller than the lead line they sit under.
+const BACKING_SCALE: f64 = 0.82;
+
 thread_local! {
     static PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
     static LAST_CSS: RefCell<String> = const { RefCell::new(String::new()) };
@@ -22,11 +25,11 @@ pub fn apply(size: i32) {
     let scale = crate::ui::ui_scale::current();
     let size = ((size as f64) * scale).round() as i32;
     let css = format!(
-        ".lyric-line, .lyric-line-near, .lyric-line-current {{ font-size: {size}px; }}\n\
-         .lyric-line-current {{ font-size: {current}px; }}\n\
+        ".lyric-line, .lyric-text {{ font-size: {size}px; }}\n\
+         .lyric-line-backing {{ font-size: {backing}px; }}\n\
          .lyrics-spacer {{ min-height: {spacer}px; }}\n",
         size = size,
-        current = size,
+        backing = (size as f64 * BACKING_SCALE).round() as i32,
         spacer = size * 6,
     );
     if LAST_CSS.with(|last| *last.borrow() == css) {

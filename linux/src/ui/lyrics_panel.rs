@@ -1,9 +1,11 @@
 use crate::events::AppEvent;
 use crate::library::Track;
 use crate::lyrics::{Lyrics, LyricsResult};
+use crate::ui::lyric_line::LyricLine;
 use crate::ui::screen::is_watched;
 use crate::ui::Ui;
 use adw::prelude::*;
+use flaccy_shared::lyrics::{Document, Line, LineProgress, INTERLUDE_BEATS};
 use gtk::glib;
 use gtk::pango;
 use std::cell::{Cell, RefCell};
@@ -18,6 +20,12 @@ const ACTIVE_LINE_ANCHOR: f64 = 0.42;
 /// A leading spacer row pads the top of the list, so ListBox row N holds
 /// synced line N - 1.
 const LINE_ROW_OFFSET: i32 = 1;
+/// How far a tap on a line seeks before the line's own start, so the first
+/// syllable is not clipped.
+const SEEK_LEAD_IN: f64 = 0.15;
+/// One press of Earlier or Later, and the most the correction may reach.
+const OFFSET_STEP_MS: i64 = 100;
+const OFFSET_LIMIT_MS: i64 = 10_000;
 /// How far ahead of the clock a line lights up. The audio sink reports the
 /// position it has rendered, not the one you are hearing, and CSS still has to
 /// fade the highlight in — without a lead the line always arrives late.
@@ -30,7 +38,7 @@ const SCROLL_RESPONSE: f64 = 15.0;
 /// the spring up.
 const MAX_FRAME_DELTA: f64 = 1.0 / 30.0;
 /// The longest a settled column sleeps between looks at the clock, the least
-/// it ever does, and the margin past a line's stamp it wakes at so the stamp
+/// it ever does, and the margin past a boundary it wakes at so the boundary
 /// has really passed.
 const LONGEST_NAP: f64 = 1.0;
 const SHORTEST_NAP: f64 = 0.008;
@@ -144,8 +152,6 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
             });
     }
 
-    // "Jump to current line" — the only way back once the user has scrolled
-    // away, which is otherwise an invisible and unrecoverable state.
     let resume = gtk::Button::builder()
         .child(
             &adw::ButtonContent::builder()
@@ -167,9 +173,12 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
         .can_target(true)
         .child(&resume)
         .build();
+
+    let timing = Timing::new();
     let synced_overlay = gtk::Overlay::new();
     synced_overlay.set_child(Some(&synced_scroll));
     synced_overlay.add_overlay(&resume_reveal);
+    synced_overlay.add_overlay(&timing.button);
 
     let stack = gtk::Stack::new();
     stack.add_named(&status, Some("status"));
@@ -260,13 +269,64 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
         let follow_now = Rc::clone(&follow_now);
         list.connect_row_activated(move |_, row| {
             let index = (row.index() - LINE_ROW_OFFSET).max(0) as usize;
-            let time = state.borrow().lyrics.synced.get(index).map(|(t, _)| *t);
-            if let Some(time) = time {
-                // Nudge back a beat so the first syllable isn't clipped.
-                ui.core.player.seek((time - 0.15).max(0.0));
+            let target = {
+                let state = state.borrow();
+                state
+                    .lyrics
+                    .document
+                    .lines
+                    .get(index)
+                    .map(|line| line.start + state.lyrics.offset_seconds())
+            };
+            if let Some(target) = target {
+                ui.core.player.seek((target - SEEK_LEAD_IN).max(0.0));
                 follow_now();
             }
         });
+    }
+
+    let apply_offset: Rc<dyn Fn(i64)> = {
+        let ui = Rc::clone(ui);
+        let state = Rc::clone(&state);
+        let refresh = Rc::clone(&refresh);
+        let sync_driver = Rc::clone(&sync_driver);
+        let label = timing.value.clone();
+        Rc::new(move |offset_ms: i64| {
+            let offset_ms = offset_ms.clamp(-OFFSET_LIMIT_MS, OFFSET_LIMIT_MS);
+            let track = {
+                let mut state = state.borrow_mut();
+                state.lyrics.offset_ms = offset_ms;
+                state.track.clone()
+            };
+            label.set_label(&offset_text(offset_ms));
+            ui.core.set_lyric_offset_ms(offset_ms);
+            if let Some(track) = track {
+                let db_path = ui.core.db_path.clone();
+                std::thread::spawn(move || crate::lyrics::save_offset(&db_path, &track, offset_ms));
+            }
+            refresh.set(true);
+            sync_driver();
+        })
+    };
+    {
+        let state = Rc::clone(&state);
+        let apply_offset = Rc::clone(&apply_offset);
+        timing.earlier.connect_clicked(move |_| {
+            let current = state.borrow().lyrics.offset_ms;
+            apply_offset(current - OFFSET_STEP_MS);
+        });
+    }
+    {
+        let state = Rc::clone(&state);
+        let apply_offset = Rc::clone(&apply_offset);
+        timing.later.connect_clicked(move |_| {
+            let current = state.borrow().lyrics.offset_ms;
+            apply_offset(current + OFFSET_STEP_MS);
+        });
+    }
+    {
+        let apply_offset = Rc::clone(&apply_offset);
+        timing.reset.connect_clicked(move |_| apply_offset(0));
     }
 
     let apply_lyrics = {
@@ -280,15 +340,23 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
         let scroller = Rc::clone(&scroller);
         let refresh = Rc::clone(&refresh);
         let sync_driver = Rc::clone(&sync_driver);
+        let offset_label = timing.value.clone();
+        let timing_button = timing.button.clone();
         Rc::new(move |result: &LyricsResult| {
             refresh.set(true);
             while let Some(child) = list.first_child() {
                 list.remove(&child);
             }
-            state.borrow_mut().current_line = None;
+            {
+                let mut state = state.borrow_mut();
+                state.current_line = None;
+                state.highlighted.clear();
+                state.rows.clear();
+            }
             resume_reveal.set_reveal_child(false);
             scroller.reset();
             retry.set_visible(false);
+            timing_button.set_visible(false);
             let lyrics = match result {
                 LyricsResult::Found(lyrics) => lyrics,
                 LyricsResult::Missing => {
@@ -307,18 +375,23 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
                     return;
                 }
             };
-            if lyrics.instrumental {
+            let document = &lyrics.document;
+            if document.instrumental {
                 status.set_title("Instrumental");
                 status.set_description(Some("This track has no lyrics."));
                 stack.set_visible_child_name("status");
-            } else if !lyrics.synced.is_empty() {
+            } else if document.has_synced() {
                 list.append(&head_spacer);
-                for (_, text) in &lyrics.synced {
-                    list.append(&lyric_row(text));
+                let rows: Vec<LineRow> = document.lines.iter().map(LineRow::new).collect();
+                for row in &rows {
+                    list.append(&row.row);
                 }
                 list.append(&tail_spacer);
+                state.borrow_mut().rows = rows;
+                offset_label.set_label(&offset_text(lyrics.offset_ms));
+                timing_button.set_visible(true);
                 stack.set_visible_child_name("synced");
-            } else if let Some(plain) = lyrics.plain.as_deref().filter(|p| !p.trim().is_empty()) {
+            } else if let Some(plain) = document.plain.as_deref() {
                 plain_view.set_label(plain);
                 stack.set_visible_child_name("plain");
             } else {
@@ -342,6 +415,7 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
             let generation = {
                 let mut state = state.borrow_mut();
                 state.generation += 1;
+                state.lyrics = Lyrics::default();
                 state.generation
             };
             subtitle.set_label(&format!("{} — {}", track.title, track.artist));
@@ -368,8 +442,6 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
                 }
                 if let LyricsResult::Found(lyrics) = &result {
                     state.borrow_mut().lyrics = lyrics.clone();
-                } else {
-                    state.borrow_mut().lyrics = Lyrics::default();
                 }
                 apply_lyrics(&result);
             });
@@ -463,7 +535,87 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
     }
 }
 
-/// A- / A+ buttons on the panel header. Same config key as the Preferences
+/// The timing control: a small button over the lines that opens a popover with
+/// Earlier and Later, the current correction and a reset.
+struct Timing {
+    button: gtk::MenuButton,
+    earlier: gtk::Button,
+    later: gtk::Button,
+    reset: gtk::Button,
+    value: gtk::Label,
+}
+
+impl Timing {
+    fn new() -> Self {
+        let earlier = gtk::Button::with_label("Earlier");
+        let later = gtk::Button::with_label("Later");
+        let value = gtk::Label::builder()
+            .label(offset_text(0))
+            .width_chars(9)
+            .build();
+        value.add_css_class("numeric");
+        let stepper = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        stepper.append(&earlier);
+        stepper.append(&value);
+        stepper.append(&later);
+        let reset = gtk::Button::with_label("Reset");
+        reset.add_css_class("flat");
+        let caption = gtk::Label::builder()
+            .label("Shift the lyrics if they run ahead of or behind the singing.")
+            .wrap(true)
+            .max_width_chars(30)
+            .xalign(0.0)
+            .build();
+        caption.add_css_class("dim");
+        caption.add_css_class("caption");
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        content.set_margin_top(12);
+        content.set_margin_bottom(12);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
+        let title = gtk::Label::builder()
+            .label("Lyrics Timing")
+            .xalign(0.0)
+            .build();
+        title.add_css_class("heading");
+        content.append(&title);
+        content.append(&stepper);
+        content.append(&caption);
+        content.append(&reset);
+        let popover = gtk::Popover::builder().child(&content).build();
+        let button = gtk::MenuButton::builder()
+            .icon_name("preferences-system-time-symbolic")
+            .tooltip_text("Lyrics timing")
+            .popover(&popover)
+            .halign(gtk::Align::End)
+            .valign(gtk::Align::Start)
+            .margin_top(6)
+            .margin_end(6)
+            .visible(false)
+            .build();
+        button.add_css_class("flat");
+        button.add_css_class("circular");
+        button.add_css_class("lyrics-timing");
+        Self {
+            button,
+            earlier,
+            later,
+            reset,
+            value,
+        }
+    }
+}
+
+/// "In sync", or the correction as a signed number of seconds.
+fn offset_text(offset_ms: i64) -> String {
+    if offset_ms == 0 {
+        return "In sync".to_string();
+    }
+    let sign = if offset_ms > 0 { "+" } else { "\u{2212}" };
+    format!("{sign}{:.1} s", offset_ms.abs() as f64 / 1000.0)
+}
+
+/// A–/A+ buttons on the panel header. Same config key as the Preferences
 /// spinner, so both surfaces stay in step and every open lyrics view resizes at
 /// once.
 fn font_size_controls(ui: &Rc<Ui>) -> gtk::Box {
@@ -496,26 +648,97 @@ fn font_size_controls(ui: &Rc<Ui>) -> gtk::Box {
     row
 }
 
-/// Blank LRC lines mark an instrumental break; render them as a glyph that
-/// breathes while the break is the current line, rather than an empty row, so
-/// the pause reads as part of the song.
-fn lyric_row(text: &str) -> gtk::ListBoxRow {
-    let interlude = text.trim().is_empty();
-    let label = gtk::Label::builder()
-        .label(if interlude { "♪" } else { text })
-        .xalign(0.0)
-        .wrap(true)
-        .build();
-    label.add_css_class("lyric-line");
-    if interlude {
-        label.add_css_class("lyric-line-interlude");
-    }
-    let row = gtk::ListBoxRow::builder().child(&label).build();
-    row.set_cursor_from_name(Some("pointer"));
-    row
+/// What a row of the list holds for one line of the document.
+enum Body {
+    Text(LyricLine),
+    Beats(Vec<gtk::Label>),
 }
 
-/// The ListBox row holding synced line `index`, past the leading spacer.
+/// One row of the lyrics list, with the widget inside it kept to hand so the
+/// follower can light it without searching the list.
+struct LineRow {
+    row: gtk::ListBoxRow,
+    body: Body,
+}
+
+impl LineRow {
+    fn new(line: &Line) -> Self {
+        let (child, body): (gtk::Widget, Body) = if line.is_interlude() {
+            let beats = interlude_beats();
+            let holder = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(14)
+                .halign(gtk::Align::Start)
+                .margin_start(4)
+                .build();
+            holder.add_css_class("lyric-beats");
+            for beat in &beats {
+                holder.append(beat);
+            }
+            (holder.upcast(), Body::Beats(beats))
+        } else {
+            let text = LyricLine::new(&line.text, &line.words);
+            if line.background {
+                text.add_css_class("lyric-line-backing");
+            }
+            (text.clone().upcast(), Body::Text(text))
+        };
+        let row = gtk::ListBoxRow::builder().child(&child).build();
+        row.set_cursor_from_name(Some("pointer"));
+        Self { row, body }
+    }
+
+    fn widget(&self) -> gtk::Widget {
+        self.row.child().expect("every lyrics row has a child")
+    }
+
+    fn set_state(&self, lit: bool, near: bool) {
+        let widget = self.widget();
+        widget.remove_css_class("lyric-line-current");
+        widget.remove_css_class("lyric-line-near");
+        if lit {
+            widget.add_css_class("lyric-line-current");
+        } else if near {
+            widget.add_css_class("lyric-line-near");
+        }
+    }
+
+    fn show(&self, line: &Line, time: f64) {
+        match &self.body {
+            Body::Text(text) => text.set_progress(line.progress(time)),
+            Body::Beats(beats) => set_lit_beats(beats, line.lit_beats(time)),
+        }
+    }
+
+    fn clear(&self) {
+        match &self.body {
+            Body::Text(text) => text.set_progress(None),
+            Body::Beats(beats) => set_lit_beats(beats, 0),
+        }
+    }
+}
+
+fn interlude_beats() -> Vec<gtk::Label> {
+    (0..INTERLUDE_BEATS)
+        .map(|_| {
+            let beat = gtk::Label::new(Some("\u{25CF}"));
+            beat.add_css_class("lyric-beat");
+            beat
+        })
+        .collect()
+}
+
+fn set_lit_beats(beats: &[gtk::Label], lit: usize) {
+    for (index, beat) in beats.iter().enumerate() {
+        if index < lit {
+            beat.add_css_class("lyric-beat-lit");
+        } else {
+            beat.remove_css_class("lyric-beat-lit");
+        }
+    }
+}
+
+/// The ListBox row holding line `index`, past the leading spacer.
 fn line_row(list: &gtk::ListBox, index: usize) -> Option<gtk::ListBoxRow> {
     list.row_at_index(index as i32 + LINE_ROW_OFFSET)
 }
@@ -539,58 +762,49 @@ fn spacer_height(request: f64) -> i32 {
     (request.max(24.0)) as i32
 }
 
-fn active_line(synced: &[(f64, String)], position: f64) -> Option<usize> {
-    let mut index = None;
-    for (i, (time, _)) in synced.iter().enumerate() {
-        if *time <= position {
-            index = Some(i);
-        } else {
-            break;
-        }
-    }
-    index
-}
-
-/// Repaints the depth ramp around the active line: the current line at full
-/// weight, its immediate neighbours part-way, everything else receded.
+/// Repaints the depth ramp: every lit line at full weight, the neighbours of
+/// the primary line part-way, everything else receded. Only rows whose state
+/// can have changed are touched.
 fn repaint_depth(
-    list: &gtk::ListBox,
-    previous: Option<usize>,
-    current: Option<usize>,
-    total: usize,
+    rows: &[LineRow],
+    document: &Document,
+    previous: (&[usize], Option<usize>),
+    current: (&[usize], Option<usize>),
+    time: f64,
 ) {
     let mut touched: Vec<usize> = Vec::new();
-    for anchor in [previous, current].into_iter().flatten() {
-        for offset in -1i64..=1 {
-            let index = anchor as i64 + offset;
-            if index >= 0 && (index as usize) < total {
-                touched.push(index as usize);
+    for (lit, primary) in [previous, current] {
+        touched.extend_from_slice(lit);
+        if let Some(anchor) = primary {
+            for offset in -1i64..=1 {
+                let index = anchor as i64 + offset;
+                if index >= 0 && (index as usize) < rows.len() {
+                    touched.push(index as usize);
+                }
             }
         }
     }
     touched.sort_unstable();
     touched.dedup();
+    let (lit, primary) = current;
     for index in touched {
-        let Some(row) = line_row(list, index) else {
-            continue;
-        };
-        let Some(label) = row.child() else { continue };
-        label.remove_css_class("lyric-line-current");
-        label.remove_css_class("lyric-line-near");
-        match current {
-            Some(active) if active == index => label.add_css_class("lyric-line-current"),
-            Some(active) if active.abs_diff(index) == 1 => label.add_css_class("lyric-line-near"),
-            _ => {}
+        let Some(row) = rows.get(index) else { continue };
+        let near = primary.is_some_and(|anchor| anchor.abs_diff(index) == 1);
+        let is_lit = lit.contains(&index);
+        row.set_state(is_lit, near);
+        match document.lines.get(index) {
+            Some(line) if is_lit => row.show(line, time),
+            _ => row.clear(),
         }
     }
 }
 
 /// Keeps the lyrics column on the line being sung. The line is looked up when
 /// it can change, not on every frame: a settled column sleeps until the next
-/// line is due, and a frame callback only runs while there is a line to find
-/// or a scroll to finish. Leaving a frame callback on for the whole song held
-/// the window's frame clock running at the display's full rate for as long as
-/// the lyrics were on screen.
+/// boundary is due, and a frame callback only runs while a word is being filled
+/// or a scroll is finishing. Leaving a frame callback on for the whole song
+/// held the window's frame clock running at the display's full rate for as
+/// long as the lyrics were on screen.
 struct Follower {
     ui: Rc<Ui>,
     list: gtk::ListBox,
@@ -613,7 +827,7 @@ impl Follower {
             !self.ui.core.player.is_playing() && !self.scroller.is_busy() && !self.refresh.get();
         self.visible.get()
             && self.panel.upgrade().is_some_and(|panel| is_watched(&panel))
-            && !self.state.borrow().lyrics.synced.is_empty()
+            && self.state.borrow().lyrics.document.has_synced()
             && !idle
     }
 
@@ -653,50 +867,91 @@ impl Follower {
         }
         let playing = self.ui.core.player.is_playing();
         let stale = self.refresh.replace(false);
+        let mut filling = false;
         if playing || stale {
-            self.follow_clock();
+            filling = self.follow_clock();
         }
         self.scroller.advance(delta);
-        if !self.scroller.is_busy() {
+        let busy = self.scroller.is_busy() || (filling && playing);
+        if !busy {
             self.driver.stop();
             if playing {
-                self.nap_until_next_line();
+                self.nap_until_next_change();
             }
         }
     }
 
-    /// Lights the line the clock is on and aims the scroll at it, unless the
-    /// person has scrolled by hand a moment ago.
-    fn follow_clock(&self) {
+    /// The moment of the song the clock is on, with the listener's correction
+    /// applied and a small lead so the line arrives with the singer.
+    fn song_time(&self) -> f64 {
         let position = self.ui.core.player.position().unwrap_or(0.0) + LYRIC_LEAD;
-        let changed = {
-            let state = self.state.borrow();
-            let line = active_line(&state.lyrics.synced, position);
-            (state.current_line != line).then_some(line)
-        };
-        let Some(line) = changed else { return };
-        let (previous, total) = {
-            let mut state = self.state.borrow_mut();
-            let previous = state.current_line;
-            state.current_line = line;
-            (previous, state.lyrics.synced.len())
-        };
-        repaint_depth(&self.list, previous, line, total);
-        let Some(current) = line else { return };
-        let user_recent = self
-            .last_user_scroll
-            .get()
-            .is_some_and(|at| at.elapsed().as_secs_f64() < USER_SCROLL_GRACE);
-        if user_recent {
-            self.resume_reveal.set_reveal_child(true);
-        } else if let Some(row) = line_row(&self.list, current) {
-            self.scroller.aim_at(&self.list, &row);
-        }
+        self.state.borrow().lyrics.song_time(position)
     }
 
-    fn nap_until_next_line(self: &Rc<Self>) {
-        let position = self.ui.core.player.position().unwrap_or(0.0) + LYRIC_LEAD;
-        let delay = next_line_delay(&self.state.borrow().lyrics.synced, position);
+    /// Lights the lines the clock is on, advances the fill inside them, and
+    /// aims the scroll at the primary line unless the person has scrolled by
+    /// hand a moment ago. Returns whether a fill is mid-word and needs frames.
+    fn follow_clock(&self) -> bool {
+        let time = self.song_time();
+        let (primary, lit) = {
+            let state = self.state.borrow();
+            let document = &state.lyrics.document;
+            (document.primary_index(time), document.highlighted(time))
+        };
+        let (primary_changed, lit_changed) = {
+            let state = self.state.borrow();
+            (state.current_line != primary, state.highlighted != lit)
+        };
+        if primary_changed || lit_changed {
+            {
+                let state = self.state.borrow();
+                repaint_depth(
+                    &state.rows,
+                    &state.lyrics.document,
+                    (&state.highlighted, state.current_line),
+                    (&lit, primary),
+                    time,
+                );
+            }
+            let mut state = self.state.borrow_mut();
+            state.current_line = primary;
+            state.highlighted = lit.clone();
+        }
+        let filling = {
+            let state = self.state.borrow();
+            let document = &state.lyrics.document;
+            let mut filling = false;
+            for index in &lit {
+                let (Some(line), Some(row)) = (document.lines.get(*index), state.rows.get(*index))
+                else {
+                    continue;
+                };
+                row.show(line, time);
+                if matches!(line.progress(time), Some(LineProgress::Singing { .. })) {
+                    filling = true;
+                }
+            }
+            filling
+        };
+        if primary_changed {
+            if let Some(current) = primary {
+                let user_recent = self
+                    .last_user_scroll
+                    .get()
+                    .is_some_and(|at| at.elapsed().as_secs_f64() < USER_SCROLL_GRACE);
+                if user_recent {
+                    self.resume_reveal.set_reveal_child(true);
+                } else if let Some(row) = line_row(&self.list, current) {
+                    self.scroller.aim_at(&self.list, &row);
+                }
+            }
+        }
+        filling
+    }
+
+    fn nap_until_next_change(self: &Rc<Self>) {
+        let time = self.song_time();
+        let delay = next_delay(&self.state.borrow().lyrics.document, time);
         let weak = Rc::downgrade(self);
         let id = glib::timeout_add_local_once(delay, move || {
             let Some(follower) = weak.upgrade() else {
@@ -709,15 +964,13 @@ impl Follower {
     }
 }
 
-/// How long a settled column can sleep: until the next line is due, never
-/// longer than a second, so a position that jumped for a reason nobody told
-/// the panel about is still caught.
-fn next_line_delay(synced: &[(f64, String)], position: f64) -> Duration {
-    let until = synced
-        .iter()
-        .map(|(time, _)| *time)
-        .find(|time| *time > position)
-        .map_or(LONGEST_NAP, |time| time - position);
+/// How long a settled column can sleep: until anything on screen next changes,
+/// never longer than a second, so a position that jumped for a reason nobody
+/// told the panel about is still caught.
+fn next_delay(document: &Document, time: f64) -> Duration {
+    let until = document
+        .next_boundary(time)
+        .map_or(LONGEST_NAP, |at| at - time);
     Duration::from_secs_f64((until + NAP_SLACK).clamp(SHORTEST_NAP, LONGEST_NAP))
 }
 
@@ -727,6 +980,8 @@ struct PanelState {
     lyrics: Lyrics,
     generation: u64,
     current_line: Option<usize>,
+    highlighted: Vec<usize>,
+    rows: Vec<LineRow>,
 }
 
 /// Runs a closure on the widget's frame clock — every frame the compositor
@@ -835,45 +1090,38 @@ impl SmoothScroller {
 
 #[cfg(test)]
 mod tests {
-    use super::{active_line, next_line_delay, LONGEST_NAP, NAP_SLACK, SHORTEST_NAP};
+    use super::{next_delay, offset_text, LONGEST_NAP, NAP_SLACK, SHORTEST_NAP};
+    use flaccy_shared::lyrics::{parse_lrc, Document};
 
-    fn lines() -> Vec<(f64, String)> {
-        vec![
-            (0.0, "one".into()),
-            (10.0, "two".into()),
-            (20.0, "three".into()),
-        ]
+    fn song() -> Document {
+        parse_lrc("[00:01.00]one\n[00:11.00]two\n[00:21.00]three")
     }
 
     #[test]
-    fn holds_the_last_line_whose_stamp_has_passed() {
-        assert_eq!(active_line(&lines(), 0.0), Some(0));
-        assert_eq!(active_line(&lines(), 9.9), Some(0));
-        assert_eq!(active_line(&lines(), 10.0), Some(1));
-        assert_eq!(active_line(&lines(), 999.0), Some(2));
-    }
-
-    #[test]
-    fn a_settled_column_sleeps_until_the_next_line_is_due() {
-        let delay = next_line_delay(&lines(), 4.0).as_secs_f64();
-        assert!((delay - (6.0 + NAP_SLACK).min(LONGEST_NAP)).abs() < 1e-9);
-        let delay = next_line_delay(&lines(), 9.5).as_secs_f64();
+    fn a_settled_column_sleeps_until_the_next_change_is_due() {
+        let delay = next_delay(&song(), 4.0).as_secs_f64();
+        assert!((delay - (7.0 + NAP_SLACK).min(LONGEST_NAP)).abs() < 1e-9);
+        let delay = next_delay(&song(), 10.5).as_secs_f64();
         assert!((delay - (0.5 + NAP_SLACK)).abs() < 1e-9);
     }
 
     #[test]
     fn the_nap_never_outlasts_the_ceiling_or_dips_under_the_floor() {
-        assert_eq!(next_line_delay(&lines(), 999.0).as_secs_f64(), LONGEST_NAP);
+        assert_eq!(next_delay(&song(), 999.0).as_secs_f64(), LONGEST_NAP);
         assert_eq!(
-            next_line_delay(&lines(), 10.0 - 0.001).as_secs_f64(),
+            next_delay(&song(), 11.0 - 0.001).as_secs_f64(),
             SHORTEST_NAP
         );
-        assert_eq!(next_line_delay(&[], 5.0).as_secs_f64(), LONGEST_NAP);
+        assert_eq!(
+            next_delay(&Document::default(), 5.0).as_secs_f64(),
+            LONGEST_NAP
+        );
     }
 
     #[test]
-    fn nothing_is_active_before_the_first_stamp() {
-        let late = vec![(5.0, "late".to_string())];
-        assert_eq!(active_line(&late, 1.0), None);
+    fn the_offset_reads_as_a_signed_number_of_seconds() {
+        assert_eq!(offset_text(0), "In sync");
+        assert_eq!(offset_text(300), "+0.3 s");
+        assert_eq!(offset_text(-1200), "\u{2212}1.2 s");
     }
 }

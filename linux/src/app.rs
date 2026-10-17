@@ -67,7 +67,7 @@ pub struct AppCore {
     job: RefCell<JobProgress>,
     /// The playing track's synced lyrics, so the seek bar can name the line
     /// under the pointer. Cleared the moment the track changes.
-    lyric_lines: RefCell<Vec<(f64, String)>>,
+    lyrics: RefCell<crate::lyrics::Lyrics>,
     /// The level unmuting returns to.
     restore_volume: Cell<f64>,
     config_save_queued: Cell<bool>,
@@ -140,7 +140,7 @@ impl AppCore {
             reload_in_flight: Cell::new(false),
             reload_pending: Cell::new(false),
             job: RefCell::new(JobProgress::idle()),
-            lyric_lines: RefCell::new(Vec::new()),
+            lyrics: RefCell::new(crate::lyrics::Lyrics::default()),
             restore_volume: Cell::new(restore_volume),
             config_save_queued: Cell::new(false),
         });
@@ -614,24 +614,24 @@ impl AppCore {
         });
     }
 
-    /// Resolves the new track's synced lyrics off the main thread — database
-    /// cache, then the file's own lyrics, then lrclib — which also warms the
-    /// cache the lyrics panel reads, so opening it on this song is instant.
-    pub fn prefetch_lyric_lines(self: &Rc<Self>, track: &Track) {
-        self.lyric_lines.borrow_mut().clear();
-        let (tx, rx) = async_channel::bounded::<Vec<(f64, String)>>(1);
+    /// Resolves the new track's lyrics off the main thread — database cache,
+    /// then the file's own lyrics, then lrclib — which also warms the cache the
+    /// lyrics panel reads, so opening it on this song is instant.
+    pub fn prefetch_lyrics(self: &Rc<Self>, track: &Track) {
+        *self.lyrics.borrow_mut() = crate::lyrics::Lyrics::default();
+        let (tx, rx) = async_channel::bounded::<crate::lyrics::Lyrics>(1);
         let db_path = self.db_path.clone();
         let music_root = self.music_root();
         let for_thread = track.clone();
         let spawned = std::thread::Builder::new()
             .name("flaccy-lyrics-prefetch".into())
             .spawn(move || {
-                let lines = match crate::lyrics::fetch_blocking(&db_path, &music_root, &for_thread)
+                let lyrics = match crate::lyrics::fetch_blocking(&db_path, &music_root, &for_thread)
                 {
-                    crate::lyrics::LyricsResult::Found(lyrics) => lyrics.synced,
-                    _ => Vec::new(),
+                    crate::lyrics::LyricsResult::Found(lyrics) => lyrics,
+                    _ => crate::lyrics::Lyrics::default(),
                 };
-                let _ = tx.send_blocking(lines);
+                let _ = tx.send_blocking(lyrics);
             });
         if spawned.is_err() {
             return;
@@ -639,7 +639,7 @@ impl AppCore {
         let weak = Rc::downgrade(self);
         let rel_path = track.rel_path.clone();
         glib::spawn_future_local(async move {
-            let Ok(lines) = rx.recv().await else {
+            let Ok(lyrics) = rx.recv().await else {
                 return;
             };
             let Some(core) = weak.upgrade() else {
@@ -650,7 +650,7 @@ impl AppCore {
                 .current_track()
                 .is_some_and(|track| track.rel_path == rel_path);
             if still_playing {
-                *core.lyric_lines.borrow_mut() = lines;
+                *core.lyrics.borrow_mut() = lyrics;
             }
         });
     }
@@ -658,7 +658,13 @@ impl AppCore {
     /// The lyric line sung `seconds` into the playing track, when it has
     /// synced lyrics.
     pub fn lyric_line_at(&self, seconds: f64) -> Option<String> {
-        crate::lyrics::line_at(&self.lyric_lines.borrow(), seconds).map(str::to_string)
+        self.lyrics.borrow().text_at(seconds).map(str::to_string)
+    }
+
+    /// Records a timing correction the lyrics panel just saved, so the seek
+    /// bar's hover line follows it.
+    pub fn set_lyric_offset_ms(&self, offset_ms: i64) {
+        self.lyrics.borrow_mut().offset_ms = offset_ms;
     }
 
     /// Mirrors the transport modes the player owns back into the config file so

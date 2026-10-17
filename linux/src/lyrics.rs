@@ -1,25 +1,52 @@
-use crate::db::Db;
+use crate::db::{Db, LyricsContent, LyricsRow};
 use crate::library::Track;
-use std::path::{Path, PathBuf};
+use flaccy_shared::lyrics::{
+    best_candidate, clean_title, lead_artist, parse_lrc, parse_lyricsfile, Candidate, Document,
+    Wanted,
+};
+use std::path::Path;
 use std::time::Duration;
 
+/// The generation of the lyrics pipeline that stores rows. Rows saved before
+/// line ends and word timing existed hold content that a second look at the
+/// server can improve, so they are asked for once more.
+const REVISION: i64 = 2;
+
+/// A lyrics answer can be a minute of the server's patience; past this the
+/// request is given up on and the panel offers Try Again.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// The pause before the one retry of a request the server turned away, when it
+/// does not say how long to wait, and the bounds on what it may ask for.
+const DEFAULT_RETRY_WAIT: f64 = 0.8;
+const SHORTEST_RETRY_WAIT: f64 = 0.3;
+const LONGEST_RETRY_WAIT: f64 = 3.0;
+
+/// How long a remembered miss stands before lrclib is asked again — the corpus
+/// is community-contributed and grows.
+const MISS_TTL_DAYS: f64 = 30.0;
+
+/// One track's lyrics together with the listener's own timing correction.
 #[derive(Clone, Default)]
 pub struct Lyrics {
-    pub synced: Vec<(f64, String)>,
-    pub plain: Option<String>,
-    pub instrumental: bool,
+    pub document: Document,
+    pub offset_ms: i64,
 }
 
 impl Lyrics {
-    fn is_empty(&self) -> bool {
-        !self.instrumental
-            && self.synced.is_empty()
-            && self
-                .plain
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or("")
-                .is_empty()
+    /// The correction in seconds, positive meaning every line comes later.
+    pub fn offset_seconds(&self) -> f64 {
+        self.offset_ms as f64 / 1000.0
+    }
+
+    /// The moment of the song to look up for a playback position: the position
+    /// less the correction.
+    pub fn song_time(&self, position: f64) -> f64 {
+        position - self.offset_seconds()
+    }
+
+    /// The sung line at a playback position, for surfaces that show one line.
+    pub fn text_at(&self, position: f64) -> Option<&str> {
+        self.document.text_at(self.song_time(position))
     }
 }
 
@@ -33,13 +60,6 @@ pub enum LyricsResult {
     Failed,
 }
 
-/// How long a remembered miss stands before lrclib is asked again — the corpus
-/// is community-contributed and grows.
-const MISS_TTL_DAYS: f64 = 30.0;
-/// Two pressings of the same song can differ by a few seconds; beyond this the
-/// timings would be useless, so a search candidate is rejected outright.
-const MAX_DURATION_DRIFT: f64 = 15.0;
-
 fn user_agent() -> String {
     format!(
         "flaccy/{} (https://github.com/guitaripod/flaccy)",
@@ -47,192 +67,291 @@ fn user_agent() -> String {
     )
 }
 
-/// How long after a line starts it still names that moment of the song. LRC
-/// lines carry no end time, so past this an instrumental break has taken over.
-const LINE_HOLD: f64 = 10.0;
-
-/// The line being sung `seconds` into a track: the last one to have started,
-/// unless it is blank or started so long ago that the music has moved on.
-pub fn line_at(lines: &[(f64, String)], seconds: f64) -> Option<&str> {
-    let index = lines
-        .partition_point(|(start, _)| *start <= seconds)
-        .checked_sub(1)?;
-    let (start, text) = &lines[index];
-    let text = text.trim();
-    (!text.is_empty() && seconds - start <= LINE_HOLD).then_some(text)
+/// Builds the document a stored or fetched answer describes. A Lyricsfile wins
+/// when it reads cleanly and holds synchronized lines; otherwise the LRC text
+/// does.
+fn document_from(
+    synced: Option<&str>,
+    plain: Option<&str>,
+    lyricsfile: Option<&str>,
+    instrumental: bool,
+) -> Document {
+    if instrumental {
+        return Document {
+            instrumental: true,
+            ..Document::default()
+        };
+    }
+    let from_file = lyricsfile
+        .and_then(parse_lyricsfile)
+        .filter(Document::has_synced);
+    let mut document = match (from_file, synced) {
+        (Some(document), _) => document,
+        (None, Some(synced)) => parse_lrc(synced),
+        (None, None) => Document::default(),
+    };
+    if document.plain.is_none() {
+        document.plain = plain
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string);
+    }
+    document
 }
 
-fn is_stale_miss(row: &crate::db::LyricsRow) -> bool {
-    let empty = !row.instrumental
-        && row
-            .synced
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("")
-            .is_empty()
-        && row.plain.as_deref().map(str::trim).unwrap_or("").is_empty();
-    empty && row.age_days > MISS_TTL_DAYS
+fn lyrics_from_row(row: &LyricsRow) -> Lyrics {
+    Lyrics {
+        document: document_from(
+            row.synced.as_deref(),
+            row.plain.as_deref(),
+            row.lyricsfile.as_deref(),
+            row.instrumental,
+        ),
+        offset_ms: row.offset_ms,
+    }
+}
+
+fn has_content(row: &LyricsRow) -> bool {
+    row.instrumental
+        || is_filled(row.synced.as_deref())
+        || is_filled(row.plain.as_deref())
+        || is_filled(row.lyricsfile.as_deref())
+}
+
+fn is_filled(text: Option<&str>) -> bool {
+    text.is_some_and(|text| !text.trim().is_empty())
+}
+
+/// A row is served as it stands unless it is a miss old enough to ask again
+/// about, or holds content from before the current pipeline revision.
+fn is_current(row: &LyricsRow) -> bool {
+    if has_content(row) {
+        row.revision >= REVISION
+    } else {
+        row.age_days <= MISS_TTL_DAYS
+    }
+}
+
+fn found_or_missing(lyrics: Lyrics) -> LyricsResult {
+    if lyrics.document.is_empty() {
+        LyricsResult::Missing
+    } else {
+        LyricsResult::Found(lyrics)
+    }
 }
 
 /// Resolution order: the local database cache, then lyrics the user keeps
-/// alongside the audio (`.lrc` sidecar or an embedded tag), then lrclib.
-pub fn fetch_blocking(db_path: &PathBuf, music_root: &Path, track: &Track) -> LyricsResult {
+/// alongside the audio (`.lrc` sidecar or an embedded tag), then lrclib. A
+/// cached answer from an older pipeline revision is shown if the server cannot
+/// improve on it.
+pub fn fetch_blocking(db_path: &Path, music_root: &Path, track: &Track) -> LyricsResult {
     let db = match Db::open(db_path) {
         Ok(db) => db,
         Err(_) => return LyricsResult::Failed,
     };
-    if let Some(cached) = db.fetch_lyrics(&track.title, &track.artist) {
-        if !is_stale_miss(&cached) {
-            let lyrics = Lyrics {
-                synced: cached.synced.as_deref().map(parse_lrc).unwrap_or_default(),
-                plain: cached.plain,
-                instrumental: cached.instrumental,
-            };
-            return if lyrics.is_empty() {
-                LyricsResult::Missing
-            } else {
-                LyricsResult::Found(lyrics)
-            };
-        }
+    let cached = db.fetch_lyrics(&track.title, &track.artist);
+    if let Some(row) = cached.as_ref().filter(|row| is_current(row)) {
+        return found_or_missing(lyrics_from_row(row));
     }
+    let offset_ms = cached.as_ref().map_or(0, |row| row.offset_ms);
 
     if let Some(local) = read_local(&music_root.join(&track.rel_path)) {
-        let _ = db.save_lyrics(
-            &track.title,
-            &track.artist,
-            local.synced_raw.as_deref(),
-            local.plain.as_deref(),
-            false,
-        );
-        return LyricsResult::Found(Lyrics {
-            synced: local
-                .synced_raw
-                .as_deref()
-                .map(parse_lrc)
-                .unwrap_or_default(),
-            plain: local.plain,
+        let content = LyricsContent {
+            synced: local.synced_raw.clone(),
+            plain: local.plain.clone(),
+            lyricsfile: None,
             instrumental: false,
+            revision: REVISION,
+        };
+        let _ = db.save_lyrics(&track.title, &track.artist, &content);
+        return found_or_missing(Lyrics {
+            document: document_from(local.synced_raw.as_deref(), local.plain.as_deref(), None, false),
+            offset_ms,
         });
     }
 
+    let stale = cached.as_ref().filter(|row| has_content(row));
     match lookup_remote(track) {
-        Remote::Found {
-            synced,
-            plain,
-            instrumental,
-        } => {
-            let _ = db.save_lyrics(
-                &track.title,
-                &track.artist,
-                synced.as_deref(),
-                plain.as_deref(),
-                instrumental,
-            );
-            LyricsResult::Found(Lyrics {
-                synced: synced.as_deref().map(parse_lrc).unwrap_or_default(),
-                plain,
-                instrumental,
+        Remote::Found(fetched) => {
+            let content = LyricsContent {
+                synced: fetched.synced.clone(),
+                plain: fetched.plain.clone(),
+                lyricsfile: fetched.lyricsfile.clone(),
+                instrumental: fetched.instrumental,
+                revision: REVISION,
+            };
+            let _ = db.save_lyrics(&track.title, &track.artist, &content);
+            found_or_missing(Lyrics {
+                document: document_from(
+                    fetched.synced.as_deref(),
+                    fetched.plain.as_deref(),
+                    fetched.lyricsfile.as_deref(),
+                    fetched.instrumental,
+                ),
+                offset_ms,
             })
         }
-        Remote::Missing => {
-            let _ = db.save_lyrics(&track.title, &track.artist, None, None, false);
-            crate::logger::info(
-                "lyrics",
-                &format!(
-                    "no lyrics for {} — {} (cached miss)",
-                    track.title, track.artist
-                ),
-            );
-            LyricsResult::Missing
-        }
-        Remote::Failed => LyricsResult::Failed,
+        Remote::Missing => match stale {
+            Some(row) => {
+                let _ = db.set_lyrics_revision(&track.title, &track.artist, REVISION);
+                found_or_missing(lyrics_from_row(row))
+            }
+            None => {
+                let _ = db.save_lyrics(
+                    &track.title,
+                    &track.artist,
+                    &LyricsContent {
+                        synced: None,
+                        plain: None,
+                        lyricsfile: None,
+                        instrumental: false,
+                        revision: REVISION,
+                    },
+                );
+                crate::logger::info(
+                    "lyrics",
+                    &format!(
+                        "no lyrics for {} — {} (cached miss)",
+                        track.title, track.artist
+                    ),
+                );
+                LyricsResult::Missing
+            }
+        },
+        Remote::Failed => match stale {
+            Some(row) => found_or_missing(lyrics_from_row(row)),
+            None => LyricsResult::Failed,
+        },
     }
 }
 
+/// Remembers the listener's timing correction for a track's lyrics.
+pub fn save_offset(db_path: &Path, track: &Track, offset_ms: i64) {
+    if let Ok(db) = Db::open(db_path) {
+        let _ = db.save_lyrics_offset(&track.title, &track.artist, offset_ms);
+    }
+}
+
+struct Fetched {
+    synced: Option<String>,
+    plain: Option<String>,
+    lyricsfile: Option<String>,
+    instrumental: bool,
+}
+
 enum Remote {
-    Found {
-        synced: Option<String>,
-        plain: Option<String>,
-        instrumental: bool,
-    },
+    Found(Fetched),
     Missing,
     Failed,
 }
 
-/// lrclib's exact-match endpoint is strict about the album name, which is the
-/// single most common cause of a false 404. So: try the full signature, then
-/// drop the album, then fall back to the fuzzy search endpoint and rank its
-/// results here (the endpoint itself is duration-blind).
-fn lookup_remote(track: &Track) -> Remote {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .build();
-    let ua = user_agent();
+enum Reply {
+    Body(String),
+    NotFound,
+    Failed,
+}
 
-    match get_exact(&agent, &ua, track, true) {
-        Remote::Missing => {}
-        other => return other,
-    }
+/// lrclib's exact-match endpoint is strict about the album name and about the
+/// title as tagged, which are the commonest causes of a false 404. So: try the
+/// full signature, then drop the album, then the title and artist with edition
+/// decoration and featuring credits removed, then the fuzzy search endpoint,
+/// ranking its results here (the endpoint itself is duration-blind).
+fn lookup_remote(track: &Track) -> Remote {
+    let agent = ureq::AgentBuilder::new().timeout(REQUEST_TIMEOUT).build();
+    let ua = user_agent();
+    let title = clean_title(&track.title);
+    let artist = lead_artist(&track.artist);
+
+    let mut attempts: Vec<(&str, &str, Option<&str>)> = Vec::new();
     if !track.album.trim().is_empty() {
-        match get_exact(&agent, &ua, track, false) {
+        attempts.push((&track.title, &track.artist, Some(&track.album)));
+    }
+    attempts.push((&track.title, &track.artist, None));
+    if title != track.title || artist != track.artist {
+        attempts.push((&title, &artist, None));
+    }
+    for (attempt_title, attempt_artist, album) in attempts {
+        match get_exact(&agent, &ua, attempt_title, attempt_artist, album, track.duration) {
             Remote::Missing => {}
             other => return other,
         }
     }
-    search_fallback(&agent, &ua, track)
+    search_fallback(&agent, &ua, track, &title, &artist)
 }
 
-fn get_exact(agent: &ureq::Agent, ua: &str, track: &Track, with_album: bool) -> Remote {
+fn get_exact(
+    agent: &ureq::Agent,
+    ua: &str,
+    title: &str,
+    artist: &str,
+    album: Option<&str>,
+    duration: f64,
+) -> Remote {
     let mut url = format!(
         "https://lrclib.net/api/get?track_name={}&artist_name={}",
-        url_encode(&track.title),
-        url_encode(&track.artist)
+        url_encode(title),
+        url_encode(artist)
     );
-    if with_album && !track.album.trim().is_empty() {
-        url.push_str(&format!("&album_name={}", url_encode(&track.album)));
+    if let Some(album) = album {
+        url.push_str(&format!("&album_name={}", url_encode(album)));
     }
-    if track.duration > 0.0 {
-        url.push_str(&format!("&duration={}", track.duration.round() as i64));
+    if duration > 0.0 {
+        url.push_str(&format!("&duration={}", duration.round() as i64));
     }
-    match agent.get(&url).set("User-Agent", ua).call() {
-        Ok(response) => match response.into_string().ok().and_then(parse_record) {
-            Some(record) => record,
-            None => Remote::Missing,
-        },
-        Err(ureq::Error::Status(404, _)) => Remote::Missing,
-        Err(err) => {
-            crate::logger::warn("lyrics", &format!("lrclib request failed: {err}"));
-            Remote::Failed
-        }
+    match request(agent, ua, &url) {
+        Reply::Body(body) => parse_record(&body).unwrap_or(Remote::Missing),
+        Reply::NotFound => Remote::Missing,
+        Reply::Failed => Remote::Failed,
     }
 }
 
-fn search_fallback(agent: &ureq::Agent, ua: &str, track: &Track) -> Remote {
+fn search_fallback(
+    agent: &ureq::Agent,
+    ua: &str,
+    track: &Track,
+    title: &str,
+    artist: &str,
+) -> Remote {
     let url = format!(
         "https://lrclib.net/api/search?track_name={}&artist_name={}",
-        url_encode(&track.title),
-        url_encode(&track.artist)
+        url_encode(title),
+        url_encode(artist)
     );
-    let body = match agent.get(&url).set("User-Agent", ua).call() {
-        Ok(response) => match response.into_string() {
-            Ok(body) => body,
-            Err(_) => return Remote::Failed,
-        },
-        Err(ureq::Error::Status(404, _)) => return Remote::Missing,
-        Err(err) => {
-            crate::logger::warn("lyrics", &format!("lrclib search failed: {err}"));
-            return Remote::Failed;
-        }
+    let body = match request(agent, ua, &url) {
+        Reply::Body(body) => body,
+        Reply::NotFound => return Remote::Missing,
+        Reply::Failed => return Remote::Failed,
     };
-    let Ok(candidates) = serde_json::from_str::<Vec<serde_json::Value>>(&body) else {
+    let Ok(records) = serde_json::from_str::<Vec<serde_json::Value>>(&body) else {
         return Remote::Missing;
     };
-    let best = candidates
+    let titles: Vec<String> = records
         .iter()
-        .filter_map(|value| score_candidate(track, value).map(|score| (score, value)))
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    match best {
-        Some((score, value)) if score >= 0.80 => {
+        .map(|record| clean_title(record["trackName"].as_str().unwrap_or_default()))
+        .collect();
+    let artists: Vec<String> = records
+        .iter()
+        .map(|record| lead_artist(record["artistName"].as_str().unwrap_or_default()))
+        .collect();
+    let candidates: Vec<Candidate> = records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| Candidate {
+            title: &titles[index],
+            artist: &artists[index],
+            album: record["albumName"].as_str().unwrap_or_default(),
+            duration: record["duration"].as_f64().unwrap_or(0.0),
+            has_synced: is_filled(record["syncedLyrics"].as_str()),
+            has_word_sync: record["hasWordSync"].as_bool().unwrap_or(false),
+        })
+        .collect();
+    let wanted = Wanted {
+        title,
+        artist,
+        album: &track.album,
+        duration: track.duration,
+    };
+    match best_candidate(&wanted, &candidates) {
+        Some((index, score)) => {
             crate::logger::info(
                 "lyrics",
                 &format!(
@@ -240,84 +359,65 @@ fn search_fallback(agent: &ureq::Agent, ua: &str, track: &Track) -> Remote {
                     track.title, track.artist
                 ),
             );
-            record_from_value(value).unwrap_or(Remote::Missing)
+            record_from_value(&records[index]).unwrap_or(Remote::Missing)
         }
-        _ => Remote::Missing,
+        None => Remote::Missing,
     }
 }
 
-/// Weighted similarity across the fields lrclib returns. Duration carries real
-/// weight because it is what distinguishes pressings whose timings differ, and
-/// a large drift disqualifies a candidate outright.
-fn score_candidate(track: &Track, value: &serde_json::Value) -> Option<f64> {
-    let title = value["trackName"].as_str().unwrap_or_default();
-    let artist = value["artistName"].as_str().unwrap_or_default();
-    let album = value["albumName"].as_str().unwrap_or_default();
-    let duration = value["duration"].as_f64().unwrap_or(0.0);
-    if track.duration > 0.0
-        && duration > 0.0
-        && (track.duration - duration).abs() > MAX_DURATION_DRIFT
-    {
-        return None;
+/// One GET, retried once when the server is overloaded or throttling, waiting
+/// as long as it asks within reason. A 404 is an answer, not a failure.
+fn request(agent: &ureq::Agent, ua: &str, url: &str) -> Reply {
+    for attempt in 0..2 {
+        match agent.get(url).set("User-Agent", ua).call() {
+            Ok(response) => {
+                return response
+                    .into_string()
+                    .map(Reply::Body)
+                    .unwrap_or(Reply::Failed);
+            }
+            Err(ureq::Error::Status(404, _)) => return Reply::NotFound,
+            Err(ureq::Error::Status(code, response))
+                if attempt == 0 && (code == 429 || code >= 500) =>
+            {
+                let wait = response
+                    .header("Retry-After")
+                    .and_then(|value| value.trim().parse::<f64>().ok())
+                    .unwrap_or(DEFAULT_RETRY_WAIT)
+                    .clamp(SHORTEST_RETRY_WAIT, LONGEST_RETRY_WAIT);
+                std::thread::sleep(Duration::from_secs_f64(wait));
+            }
+            Err(err) => {
+                crate::logger::warn("lyrics", &format!("lrclib request failed: {err}"));
+                return Reply::Failed;
+            }
+        }
     }
-    let duration_score = if track.duration > 0.0 && duration > 0.0 {
-        1.0 - ((track.duration - duration).abs() / MAX_DURATION_DRIFT).min(1.0)
-    } else {
-        0.5
-    };
-    let has_synced = value["syncedLyrics"]
-        .as_str()
-        .is_some_and(|s| !s.trim().is_empty());
-    Some(
-        0.35 * similarity(&track.title, title)
-            + 0.30 * similarity(&track.artist, artist)
-            + 0.25 * duration_score
-            + 0.06 * if has_synced { 1.0 } else { 0.0 }
-            + 0.04 * similarity(&track.album, album),
-    )
+    Reply::Failed
 }
 
-/// Case- and punctuation-insensitive token overlap (Dice coefficient over
-/// words), enough to tell "Song (Remastered 2011)" from a different song.
-fn similarity(left: &str, right: &str) -> f64 {
-    let tokens = |text: &str| -> Vec<String> {
-        text.to_lowercase()
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|part| !part.is_empty())
-            .map(|part| part.to_string())
-            .collect()
-    };
-    let (left, right) = (tokens(left), tokens(right));
-    if left.is_empty() || right.is_empty() {
-        return 0.0;
-    }
-    let shared = left.iter().filter(|token| right.contains(token)).count();
-    2.0 * shared as f64 / (left.len() + right.len()) as f64
-}
-
-fn parse_record(body: String) -> Option<Remote> {
-    let value = serde_json::from_str::<serde_json::Value>(&body).ok()?;
+fn parse_record(body: &str) -> Option<Remote> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     record_from_value(&value)
 }
 
 fn record_from_value(value: &serde_json::Value) -> Option<Remote> {
-    let synced = value["syncedLyrics"]
-        .as_str()
-        .filter(|text| !text.trim().is_empty())
-        .map(str::to_string);
-    let plain = value["plainLyrics"]
-        .as_str()
-        .filter(|text| !text.trim().is_empty())
-        .map(str::to_string);
-    let instrumental = value["instrumental"].as_bool().unwrap_or(false);
-    if synced.is_none() && plain.is_none() && !instrumental {
+    let text = |key: &str| {
+        value[key]
+            .as_str()
+            .filter(|text| !text.trim().is_empty())
+            .map(str::to_string)
+    };
+    let fetched = Fetched {
+        synced: text("syncedLyrics"),
+        plain: text("plainLyrics"),
+        lyricsfile: text("lyricsfile"),
+        instrumental: value["instrumental"].as_bool().unwrap_or(false),
+    };
+    if fetched.synced.is_none() && fetched.plain.is_none() && !fetched.instrumental {
         return Some(Remote::Missing);
     }
-    Some(Remote::Found {
-        synced,
-        plain,
-        instrumental,
-    })
+    Some(Remote::Found(fetched))
 }
 
 struct LocalLyrics {
@@ -341,36 +441,20 @@ fn read_local(path: &Path) -> Option<LocalLyrics> {
     read_tagged_lyrics(path).map(|text| classify_local(&text))
 }
 
+/// Text with timestamps is synchronized lyrics (word tags and all, so a
+/// timed file keeps its words); anything else is plain.
 fn classify_local(text: &str) -> LocalLyrics {
-    let text = strip_word_timestamps(text);
-    if parse_lrc(&text).is_empty() {
+    if parse_lrc(text).has_synced() {
         LocalLyrics {
-            synced_raw: None,
-            plain: Some(text),
+            synced_raw: Some(text.to_string()),
+            plain: None,
         }
     } else {
         LocalLyrics {
-            synced_raw: Some(text),
-            plain: None,
+            synced_raw: None,
+            plain: Some(text.to_string()),
         }
     }
-}
-
-/// Enhanced-LRC files carry per-word `<mm:ss.xx>` tags inside each line. The
-/// panel highlights whole lines, so the word tags are removed rather than
-/// mistaken for lyrics.
-fn strip_word_timestamps(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut depth = 0usize;
-    for ch in text.chars() {
-        match ch {
-            '<' => depth += 1,
-            '>' if depth > 0 => depth -= 1,
-            _ if depth == 0 => out.push(ch),
-            _ => {}
-        }
-    }
-    out
 }
 
 fn read_tagged_lyrics(path: &Path) -> Option<String> {
@@ -402,54 +486,6 @@ fn read_tagged_lyrics(path: &Path) -> Option<String> {
     None
 }
 
-pub fn parse_lrc(text: &str) -> Vec<(f64, String)> {
-    let mut lines: Vec<(f64, String)> = Vec::new();
-    for raw_line in text.lines() {
-        let mut rest = raw_line.trim_start();
-        let mut stamps: Vec<f64> = Vec::new();
-        while let Some(close) = rest.find(']') {
-            if !rest.starts_with('[') {
-                break;
-            }
-            let tag = &rest[1..close];
-            match parse_timestamp(tag) {
-                Some(stamp) => stamps.push(stamp),
-                None => break,
-            }
-            rest = &rest[close + 1..];
-        }
-        let content = rest.trim().to_string();
-        for stamp in stamps {
-            lines.push((stamp, content.clone()));
-        }
-    }
-    lines.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    lines
-}
-
-/// Accepts `[mm:ss]`, `[mm:ss.xx]`, `[mm:ss:xx]` and `[hh:mm:ss.xx]` — all four
-/// appear in files in the wild, and rejecting one silently drops the whole set.
-fn parse_timestamp(tag: &str) -> Option<f64> {
-    let tag = tag.trim();
-    let parts: Vec<&str> = tag.split(':').collect();
-    let seconds = |text: &str| -> Option<f64> { text.replace(',', ".").parse::<f64>().ok() };
-    match parts.len() {
-        2 => Some(parts[0].parse::<f64>().ok()? * 60.0 + seconds(parts[1])?),
-        3 => {
-            let first: f64 = parts[0].parse().ok()?;
-            let second: f64 = parts[1].parse().ok()?;
-            // `mm:ss:xx` uses the third field as hundredths; `hh:mm:ss` does not.
-            if parts[2].len() <= 2 && second < 60.0 && first < 60.0 && parts[0].len() <= 2 {
-                let fraction: f64 = parts[2].parse().ok()?;
-                Some(first * 60.0 + second + fraction / 100.0)
-            } else {
-                Some(first * 3600.0 + second * 60.0 + seconds(parts[2])?)
-            }
-        }
-        _ => None,
-    }
-}
-
 fn url_encode(input: &str) -> String {
     let mut result = String::new();
     for byte in input.as_bytes() {
@@ -467,93 +503,84 @@ fn url_encode(input: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn names_the_line_sung_at_a_moment() {
-        let lines = parse_lrc("[00:05.00]First\n[00:09.00]\n[00:12.00]Second\n[00:40.00]Last");
-        assert_eq!(line_at(&lines, 4.9), None);
-        assert_eq!(line_at(&lines, 5.0), Some("First"));
-        assert_eq!(line_at(&lines, 8.9), Some("First"));
-        assert_eq!(line_at(&lines, 10.0), None);
-        assert_eq!(line_at(&lines, 21.5), Some("Second"));
-        assert_eq!(line_at(&lines, 23.0), None);
-        assert_eq!(line_at(&lines, 45.0), Some("Last"));
-        assert_eq!(line_at(&[], 3.0), None);
-    }
+    const LYRICSFILE: &str = "version: '1.0'\nmetadata:\n  title: t\n  artist: a\nlines:\n- text: Hello\n  start_ms: 1000\n  end_ms: 3000\n  words:\n  - text: 'Hel'\n    start_ms: 1000\n    end_ms: 2000\n  - text: lo\n    start_ms: 2000\n    end_ms: 3000\n";
 
-    #[test]
-    fn parses_every_timestamp_shape() {
-        assert_eq!(parse_timestamp("01:30"), Some(90.0));
-        assert_eq!(parse_timestamp("01:30.50"), Some(90.5));
-        assert_eq!(parse_timestamp("01:30:50"), Some(90.5));
-        assert_eq!(parse_timestamp("01:02:03.5"), Some(3723.5));
-        assert_eq!(parse_timestamp("ti"), None);
-    }
-
-    #[test]
-    fn strips_enhanced_word_tags() {
-        let text = "[00:12.00]<00:12.00>Hello <00:12.50>world";
-        assert_eq!(
-            parse_lrc(&strip_word_timestamps(text)),
-            vec![(12.0, "Hello world".to_string())]
-        );
-    }
-
-    #[test]
-    fn repeated_timestamps_expand_to_one_line_each() {
-        let lines = parse_lrc("[00:10.00][01:10.00]Chorus");
-        assert_eq!(
-            lines,
-            vec![(10.0, "Chorus".into()), (70.0, "Chorus".into())]
-        );
-    }
-
-    #[test]
-    fn duration_drift_disqualifies_a_candidate() {
-        let track = track_with_duration(200.0);
-        let candidate = serde_json::json!({
-            "trackName": "Song", "artistName": "Artist", "albumName": "Album", "duration": 400.0
-        });
-        assert!(score_candidate(&track, &candidate).is_none());
-    }
-
-    #[test]
-    fn exact_match_scores_above_the_accept_threshold() {
-        let track = track_with_duration(200.0);
-        let candidate = serde_json::json!({
-            "trackName": "Song", "artistName": "Artist", "albumName": "Album",
-            "duration": 200.0, "syncedLyrics": "[00:01.00]hi"
-        });
-        assert!(score_candidate(&track, &candidate).unwrap() >= 0.80);
-    }
-
-    #[test]
-    fn a_different_song_scores_below_the_threshold() {
-        let track = track_with_duration(200.0);
-        let candidate = serde_json::json!({
-            "trackName": "Something Else Entirely", "artistName": "Other Band",
-            "albumName": "Nope", "duration": 199.0
-        });
-        assert!(score_candidate(&track, &candidate).unwrap() < 0.80);
-    }
-
-    fn track_with_duration(duration: f64) -> Track {
-        Track {
-            id: 0,
-            rel_path: "Artist/Album/01.flac".into(),
-            title: "Song".into(),
-            artist: "Artist".into(),
-            album: "Album".into(),
-            album_artist: None,
-            track_number: 1,
-            duration,
-            codec: None,
-            bit_depth: None,
-            sample_rate: None,
-            channels: None,
-            loved: false,
-            play_count: 0,
-            date_added: 0,
-            last_played: None,
+    fn row(synced: Option<&str>, lyricsfile: Option<&str>, revision: i64) -> LyricsRow {
+        LyricsRow {
+            synced: synced.map(str::to_string),
+            plain: None,
+            lyricsfile: lyricsfile.map(str::to_string),
+            instrumental: false,
+            offset_ms: 0,
+            revision,
+            age_days: 0.0,
         }
+    }
+
+    #[test]
+    fn a_readable_lyricsfile_beats_the_lrc_text() {
+        let document = document_from(Some("[00:05.00]other"), None, Some(LYRICSFILE), false);
+        assert!(document.has_word_sync());
+        assert_eq!(document.lines.last().unwrap().text, "Hello");
+    }
+
+    #[test]
+    fn an_unreadable_lyricsfile_falls_back_to_the_lrc_text() {
+        let document = document_from(Some("[00:05.00]other"), None, Some("not: [yaml"), false);
+        assert!(!document.has_word_sync());
+        assert_eq!(document.lines.last().unwrap().text, "other");
+    }
+
+    #[test]
+    fn plain_lyrics_ride_along_with_synced_ones() {
+        let document = document_from(Some("[00:05.00]x"), Some("x\ny"), None, false);
+        assert_eq!(document.plain.as_deref(), Some("x\ny"));
+    }
+
+    #[test]
+    fn instrumental_wins_over_everything() {
+        let document = document_from(Some("[00:05.00]x"), Some("x"), Some(LYRICSFILE), true);
+        assert!(document.instrumental);
+        assert!(document.lines.is_empty());
+    }
+
+    #[test]
+    fn content_from_an_older_revision_is_asked_for_again() {
+        assert!(!is_current(&row(Some("[00:01.00]x"), None, 0)));
+        assert!(is_current(&row(Some("[00:01.00]x"), None, REVISION)));
+    }
+
+    #[test]
+    fn a_miss_stands_for_thirty_days_whatever_its_revision() {
+        let mut miss = row(None, None, 0);
+        miss.age_days = 10.0;
+        assert!(is_current(&miss));
+        miss.age_days = 31.0;
+        assert!(!is_current(&miss));
+    }
+
+    #[test]
+    fn a_local_file_with_stamps_stays_synchronized_with_its_word_tags() {
+        let local = classify_local("[00:05.00]<00:05.00>Hi <00:05.50>there");
+        let document = document_from(local.synced_raw.as_deref(), None, None, false);
+        assert!(document.has_word_sync());
+        let unsynced = classify_local("just words\nno stamps");
+        assert!(unsynced.synced_raw.is_none());
+        assert_eq!(unsynced.plain.as_deref(), Some("just words\nno stamps"));
+    }
+
+    #[test]
+    fn the_offset_moves_the_song_time_opposite_to_the_position() {
+        let lyrics = Lyrics {
+            document: parse_lrc("[00:10.00]a\n[00:20.00]b"),
+            offset_ms: 500,
+        };
+        assert_eq!(lyrics.text_at(10.4), None);
+        assert_eq!(lyrics.text_at(10.6), Some("a"));
+        let earlier = Lyrics {
+            offset_ms: -500,
+            ..lyrics
+        };
+        assert_eq!(earlier.text_at(9.6), Some("a"));
     }
 }

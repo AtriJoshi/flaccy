@@ -14,6 +14,7 @@ pub mod equalizer;
 pub mod filter_chips;
 pub mod guide;
 pub mod lyrics_panel;
+pub mod lyric_line;
 pub mod lyrics_style;
 pub mod now_playing;
 pub mod playlist_cover;

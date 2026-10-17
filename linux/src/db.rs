@@ -121,10 +121,26 @@ pub struct NewReleaseRow {
 pub struct LyricsRow {
     pub synced: Option<String>,
     pub plain: Option<String>,
+    pub lyricsfile: Option<String>,
     pub instrumental: bool,
+    /// The listener's own timing correction in milliseconds; positive shows
+    /// every line later. Survives a refetch of the lyrics.
+    pub offset_ms: i64,
+    /// Which generation of the lyrics pipeline stored the row, so rows saved
+    /// before line ends and word timing existed can be asked for again.
+    pub revision: i64,
     /// Age of the cache entry in days, so a remembered miss can expire and be
     /// looked up again once lrclib's corpus has grown.
     pub age_days: f64,
+}
+
+/// What a lyrics source answered, in the shape the cache stores it.
+pub struct LyricsContent {
+    pub synced: Option<String>,
+    pub plain: Option<String>,
+    pub lyricsfile: Option<String>,
+    pub instrumental: bool,
+    pub revision: i64,
 }
 
 pub struct MusicVideoRow {
@@ -462,6 +478,15 @@ impl Db {
         let _ = self
             .conn
             .execute("ALTER TABLE lyrics ADD COLUMN fetchedAt DATETIME", []);
+        for column in [
+            "lyricsfile TEXT",
+            "offsetMs INTEGER NOT NULL DEFAULT 0",
+            "revision INTEGER NOT NULL DEFAULT 0",
+        ] {
+            let _ = self
+                .conn
+                .execute(&format!("ALTER TABLE lyrics ADD COLUMN {column}"), []);
+        }
         let _ = self.conn.execute(
             "ALTER TABLE downloads ADD COLUMN codecChecked INTEGER NOT NULL DEFAULT 0",
             [],
@@ -1271,7 +1296,8 @@ impl Db {
         self.conn
             .query_row(
                 "SELECT syncedLyrics, plainLyrics, instrumental,
-                        COALESCE(julianday('now') - julianday(fetchedAt), 0.0)
+                        COALESCE(julianday('now') - julianday(fetchedAt), 0.0),
+                        lyricsfile, offsetMs, revision
                  FROM lyrics WHERE trackTitle = ?1 AND artist = ?2",
                 params![title, artist],
                 |row| {
@@ -1280,6 +1306,9 @@ impl Db {
                         plain: row.get(1)?,
                         instrumental: row.get(2)?,
                         age_days: row.get(3)?,
+                        lyricsfile: row.get(4)?,
+                        offset_ms: row.get(5)?,
+                        revision: row.get(6)?,
                     })
                 },
             )
@@ -1288,24 +1317,64 @@ impl Db {
             .flatten()
     }
 
+    /// Stores what a source answered. The listener's offset is left alone: a
+    /// refetch must not undo a correction they made by ear.
     pub fn save_lyrics(
         &self,
         title: &str,
         artist: &str,
-        synced: Option<&str>,
-        plain: Option<&str>,
-        instrumental: bool,
+        content: &LyricsContent,
     ) -> Result<(), rusqlite::Error> {
         self.conn.execute(
             "INSERT INTO lyrics
-             (trackTitle, artist, syncedLyrics, plainLyrics, instrumental, fetchedAt)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             (trackTitle, artist, syncedLyrics, plainLyrics, instrumental, fetchedAt,
+              lyricsfile, revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(trackTitle, artist) DO UPDATE SET
                 syncedLyrics = excluded.syncedLyrics,
                 plainLyrics = excluded.plainLyrics,
                 instrumental = excluded.instrumental,
-                fetchedAt = excluded.fetchedAt",
-            params![title, artist, synced, plain, instrumental, now_string()],
+                fetchedAt = excluded.fetchedAt,
+                lyricsfile = excluded.lyricsfile,
+                revision = excluded.revision",
+            params![
+                title,
+                artist,
+                content.synced,
+                content.plain,
+                content.instrumental,
+                now_string(),
+                content.lyricsfile,
+                content.revision
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_lyrics_offset(
+        &self,
+        title: &str,
+        artist: &str,
+        offset_ms: i64,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE lyrics SET offsetMs = ?3 WHERE trackTitle = ?1 AND artist = ?2",
+            params![title, artist, offset_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Marks a row as current without changing what it holds, for when the
+    /// source was asked again and had nothing better.
+    pub fn set_lyrics_revision(
+        &self,
+        title: &str,
+        artist: &str,
+        revision: i64,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE lyrics SET revision = ?3 WHERE trackTitle = ?1 AND artist = ?2",
+            params![title, artist, revision],
         )?;
         Ok(())
     }
