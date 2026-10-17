@@ -784,6 +784,16 @@ fn wire_events(
             update_up_next_label(&ui, &queue_label);
         }
         AppEvent::QueueChanged => update_up_next_label(&ui, &queue_label),
+        AppEvent::AlbumArtworkChanged { title, artist } => {
+            let playing_this = ui
+                .core
+                .player
+                .current_track()
+                .is_some_and(|track| &track.album == title && &track.artist == artist);
+            if playing_this {
+                update();
+            }
+        }
         AppEvent::PlayingChanged(playing) => {
             play.set_icon_name(if *playing {
                 "media-playback-pause-symbolic"

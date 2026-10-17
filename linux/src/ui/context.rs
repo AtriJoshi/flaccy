@@ -56,6 +56,7 @@ pub fn album_menu(key: &str) -> gio::Menu {
     extra_section.append_item(&item("Start Station", "win.album-station", key));
     extra_section.append_item(&item("Share Songlink…", "win.album-share", key));
     extra_section.append_item(&item("Copy Songlink", "win.album-songlink", key));
+    extra_section.append_item(&item("Edit Artwork…", "win.album-artwork", key));
     extra_section.append_item(&item("Enrich Metadata", "win.album-enrich", key));
     extra_section.append_item(&item("Show in Files", "win.album-reveal", key));
     menu.append_section(None, &extra_section);

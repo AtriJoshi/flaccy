@@ -7,6 +7,15 @@ always in view beside the curve (hover one to hear it, click to keep it),
 Equalizer APO / AutoEq import, a profile per output (it follows your default sink) and a
 level-matched Hold to compare. With it off or flat the audio passes through untouched.
 
+Album artwork (right-click an album → Edit Artwork…, or the pencil on its cover): frame any
+cover in a square window — drag, wheel-zoom around the pointer, pinch, double-click for
+2.5×, arrow keys and +/− to nudge, 0 to fit — with live album, list and player previews and
+a warning when the crop is too small to stay sharp. Pick a picture from a file, the
+clipboard (image, file or link), a drop, the images in the album's folders, the art
+embedded in its tracks, or a search of Apple Music, Deezer and the Cover Art Archive.
+Dropping an image on a cover or an album tile opens the editor with it already framed.
+Nothing is written until Save; Use Original Artwork puts the files' own art back.
+
 An adaptive theme engine retints the whole app with the dominant color of whatever's
 playing — ambient gradient backdrops, glass surfaces, a glowing now-playing pulse — or
 pick one of seven curated palettes in Preferences. Works in light and dark.

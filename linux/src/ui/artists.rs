@@ -265,30 +265,41 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         let covers = Rc::clone(&covers);
         let bound = Rc::clone(&bound);
         ui.core.hub.clone().subscribe_widget(&stack, move |_, event| {
-            if let AppEvent::AlbumEnriched { title, artist } = event {
-                let key = crate::hygiene::artist_key(artist);
-                let is_rep =
-                    matches!(covers.borrow().get(&key), Some((t, a)) if t == title && a == artist);
-                if !is_rep {
-                    return;
-                }
+            let (AppEvent::AlbumEnriched { title, artist }
+            | AppEvent::AlbumArtworkChanged { title, artist }) = event
+            else {
+                return;
+            };
+            let represented: Vec<String> = covers
+                .borrow()
+                .iter()
+                .filter(|(_, (t, a))| t == title && a == artist)
+                .map(|(key, _)| key.clone())
+                .collect();
+            if represented.is_empty() {
+                return;
+            }
+            if matches!(event, AppEvent::AlbumEnriched { .. }) {
                 ui.core.artwork.invalidate(title, artist);
-                if let Some(avatar) = bound.borrow().get(&key).and_then(|w| w.upgrade()) {
-                    let weak = avatar.downgrade();
-                    let bound = Rc::clone(&bound);
-                    ui.core.artwork.request(title, artist, 120, move |texture, _| {
-                        if let (Some(avatar), Some(texture)) = (weak.upgrade(), texture) {
-                            let still = bound
-                                .borrow()
-                                .get(&key)
-                                .and_then(|w| w.upgrade())
-                                .is_some_and(|current| current == avatar);
-                            if still {
-                                avatar.set_custom_image(Some(texture));
-                            }
+            }
+            for key in represented {
+                let Some(avatar) = bound.borrow().get(&key).and_then(|w| w.upgrade()) else {
+                    continue;
+                };
+                let weak = avatar.downgrade();
+                let bound = Rc::clone(&bound);
+                ui.core.artwork.request(title, artist, 120, move |texture, _| {
+                    if let Some(avatar) = weak.upgrade() {
+                        let still = bound
+                            .borrow()
+                            .get(&key)
+                            .and_then(|w| w.upgrade())
+                            .is_some_and(|current| current == avatar);
+                        if still {
+                            avatar.set_custom_image(texture);
                         }
-                    });
-                }
+                    }
+                });
             }
         });
     }
@@ -877,16 +888,7 @@ fn album_cell_for_artist(ui: &Rc<Ui>, album: &Album) -> gtk::FlowBoxChild {
     picture.set_overflow(gtk::Overflow::Hidden);
     picture.add_css_class("cover");
     picture.set_paintable(Some(&ui.core.artwork.placeholder(&album.key())));
-    {
-        let weak = picture.downgrade();
-        ui.core
-            .artwork
-            .request(&album.title, &album.artist, 168, move |texture, _| {
-                if let (Some(picture), Some(texture)) = (weak.upgrade(), texture) {
-                    picture.set_paintable(Some(texture));
-                }
-            });
-    }
+    crate::ui::artwork::follow_picture(&ui.core, &picture, &album.title, &album.artist, 168);
     cell.append(&picture);
     let title = gtk::Label::builder()
         .label(&album.title)

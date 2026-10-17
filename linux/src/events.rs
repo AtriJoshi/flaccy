@@ -48,6 +48,14 @@ pub enum AppEvent {
         title: String,
         artist: String,
     },
+    /// The person chose a cover for this (title, artist) or went back to the
+    /// original. Sent once per key the cover is stored under, after the
+    /// artwork cache has dropped everything it held for that key, so every
+    /// surface that asks again gets the new picture.
+    AlbumArtworkChanged {
+        title: String,
+        artist: String,
+    },
     /// Albums whose embedded cover the tag pass just committed, batched per
     /// insert chunk. This is what fuels the Debut's mosaic while the scan is
     /// still reading, rather than all at once when the first build lands.

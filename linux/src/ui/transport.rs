@@ -375,6 +375,42 @@ pub fn build(ui: &Rc<Ui>, bubble_host: &gtk::Overlay) -> gtk::Widget {
                         *current_rel.borrow_mut() = None;
                     }
                 },
+                AppEvent::AlbumArtworkChanged {
+                    title: changed_title,
+                    artist: changed_artist,
+                } => {
+                    let playing_this = ui_ref
+                        .core
+                        .player
+                        .current_track()
+                        .filter(|t| &t.album == changed_title && &t.artist == changed_artist);
+                    if let Some(track) = playing_this {
+                        let placeholder = ui_ref
+                            .core
+                            .artwork
+                            .placeholder(&format!("{}|{}", track.album, track.artist));
+                        let seed_color = crate::palette::placeholder_colors(&format!(
+                            "{}|{}",
+                            track.album, track.artist
+                        ))
+                        .0;
+                        let weak = artwork.downgrade();
+                        ui_ref.core.artwork.request(
+                            &track.album,
+                            &track.artist,
+                            52,
+                            move |texture, color| {
+                                if let Some(picture) = weak.upgrade() {
+                                    match texture {
+                                        Some(texture) => picture.set_paintable(Some(texture)),
+                                        None => picture.set_paintable(Some(&placeholder)),
+                                    }
+                                }
+                                set_adaptive_accent(Some(color.unwrap_or(seed_color)));
+                            },
+                        );
+                    }
+                }
                 AppEvent::PlayingChanged(playing) => {
                     play.set_icon_name(if *playing {
                         "media-playback-pause-symbolic"

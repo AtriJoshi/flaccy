@@ -827,7 +827,7 @@ fn attach_paste_to_download(ui: &Rc<Ui>, sidebar: &gtk::ListBox) {
         let editing = gtk::prelude::GtkWindowExt::focus(&ui.window)
             .map(|widget| widget.is::<gtk::Text>() || widget.is::<gtk::Entry>())
             .unwrap_or(false);
-        if editing {
+        if editing || ui.window.visible_dialog().is_some() {
             return glib::Propagation::Proceed;
         }
         let ui = Rc::clone(&ui);
@@ -1078,6 +1078,12 @@ fn register_actions(app: &adw::Application, ui: &Rc<Ui>, search: &gtk::SearchEnt
         }
         crate::enrichment::request_album(&ui.core, &album.title, &album.artist);
         ui.core.toast(&format!("Enriching {}…", album.title));
+    });
+    add_string_action(ui, "album-artwork", |ui, key| {
+        let library = ui.core.library.borrow().clone();
+        if let Some(album) = library.album_by_key(key) {
+            ui::artwork_editor::present(ui, album, None);
+        }
     });
     add_string_action(ui, "album-station", |ui, key| {
         let library = ui.core.library.borrow().clone();
@@ -1562,7 +1568,7 @@ fn attach_space_handler(ui: &Rc<Ui>) {
     let controller = gtk::EventControllerKey::new();
     let ui_ref = Rc::clone(ui);
     controller.connect_key_pressed(move |_, key, _, _| {
-        if key == gdk::Key::space && !is_editing(&ui_ref) {
+        if key == gdk::Key::space && !is_editing(&ui_ref) && ui_ref.window.visible_dialog().is_none() {
             ui_ref.core.toggle_play_pause();
             return glib::Propagation::Stop;
         }
@@ -1783,6 +1789,12 @@ fn schedule_demo_detail(ui: &Rc<Ui>) {
                 crate::scrub_drill::run(&core);
             });
             glib::ControlFlow::Break
+        });
+    }
+    if let Ok(spec) = std::env::var("FLACCY_DEMO_ARTWORK") {
+        let ui = Rc::clone(ui);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1400), move || {
+            ui::artwork_demo::open(&ui, &spec);
         });
     }
     if let Ok(mode) = std::env::var("FLACCY_DEMO_EQ_UI") {

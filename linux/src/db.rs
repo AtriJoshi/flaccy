@@ -472,6 +472,9 @@ impl Db {
         let _ = self
             .conn
             .execute("ALTER TABLE tracks ADD COLUMN albumArtist TEXT", []);
+        let _ = self
+            .conn
+            .execute("ALTER TABLE albumInfo ADD COLUMN customCoverData BLOB", []);
         Ok(())
     }
 
@@ -634,10 +637,14 @@ impl Db {
             .unwrap_or(0)
     }
 
+    /// The cover to show for a release: the one the person chose, which
+    /// outranks every embedded and downloaded cover, else the hoisted or
+    /// enriched one.
     pub fn fetch_album_artwork(&self, title: &str, artist: &str) -> Option<Vec<u8>> {
         self.conn
             .query_row(
-                "SELECT coverArtData FROM albumInfo WHERE title = ?1 AND artist = ?2",
+                "SELECT COALESCE(customCoverData, coverArtData) FROM albumInfo
+                 WHERE title = ?1 AND artist = ?2",
                 params![title, artist],
                 |row| row.get::<_, Option<Vec<u8>>>(0),
             )
@@ -645,6 +652,55 @@ impl Db {
             .ok()
             .flatten()
             .flatten()
+    }
+
+    /// Stores a person-chosen cover under every key a surface can ask for the
+    /// release by, in one transaction. Only `customCoverData` is written, so
+    /// enrichment, hoisting and adoption never see it and it never loses to them.
+    pub fn set_custom_cover(
+        &self,
+        keys: &[(String, String)],
+        data: &[u8],
+    ) -> Result<(), rusqlite::Error> {
+        let tx = self.conn.unchecked_transaction()?;
+        for (title, artist) in keys {
+            tx.execute(
+                "INSERT INTO albumInfo (title, artist, customCoverData) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(title, artist) DO UPDATE SET customCoverData = excluded.customCoverData",
+                params![title, artist, data],
+            )?;
+        }
+        tx.commit()
+    }
+
+    /// Takes the person's cover away from every key, so the original artwork
+    /// shows again. Rows the editor created stay: they are ordinary empty
+    /// `albumInfo` rows, the same thing enrichment leaves behind.
+    pub fn clear_custom_cover(&self, keys: &[(String, String)]) -> Result<(), rusqlite::Error> {
+        let tx = self.conn.unchecked_transaction()?;
+        for (title, artist) in keys {
+            tx.execute(
+                "UPDATE albumInfo SET customCoverData = NULL WHERE title = ?1 AND artist = ?2",
+                params![title, artist],
+            )?;
+        }
+        tx.commit()
+    }
+
+    pub fn has_custom_cover(&self, keys: &[(String, String)]) -> bool {
+        keys.iter().any(|(title, artist)| {
+            self.conn
+                .query_row(
+                    "SELECT 1 FROM albumInfo
+                     WHERE title = ?1 AND artist = ?2 AND customCoverData IS NOT NULL",
+                    params![title, artist],
+                    |_| Ok(()),
+                )
+                .optional()
+                .ok()
+                .flatten()
+                .is_some()
+        })
     }
 
     pub fn delete_tracks_not_in(&self, keep: &HashSet<String>) -> Result<usize, rusqlite::Error> {
@@ -841,6 +897,7 @@ impl Db {
                 "UPDATE albumInfo SET
                     coverArtURL = COALESCE(coverArtURL, (SELECT coverArtURL FROM albumInfo WHERE title = ?1 AND artist = ?2)),
                     coverArtData = COALESCE(coverArtData, (SELECT coverArtData FROM albumInfo WHERE title = ?1 AND artist = ?2)),
+                    customCoverData = COALESCE(customCoverData, (SELECT customCoverData FROM albumInfo WHERE title = ?1 AND artist = ?2)),
                     musicBrainzID = COALESCE(musicBrainzID, (SELECT musicBrainzID FROM albumInfo WHERE title = ?1 AND artist = ?2)),
                     year = COALESCE(year, (SELECT year FROM albumInfo WHERE title = ?1 AND artist = ?2)),
                     genre = COALESCE(genre, (SELECT genre FROM albumInfo WHERE title = ?1 AND artist = ?2)),
@@ -3426,5 +3483,248 @@ mod cleanup_tests {
             state_row(db, "pending").expect("row").status,
             Status::Pending
         );
+    }
+
+    fn keys(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(title, artist)| (title.to_string(), artist.to_string()))
+            .collect()
+    }
+
+    fn custom_cover_column(temp: &TempDb, title: &str, artist: &str) -> Option<Vec<u8>> {
+        temp.db
+            .conn
+            .query_row(
+                "SELECT customCoverData FROM albumInfo WHERE title = ?1 AND artist = ?2",
+                params![title, artist],
+                |row| row.get::<_, Option<Vec<u8>>>(0),
+            )
+            .optional()
+            .expect("query")
+            .flatten()
+    }
+
+    #[test]
+    fn a_chosen_cover_outranks_the_embedded_one_and_resetting_brings_the_original_back() {
+        let temp = TempDb::open();
+        let both = keys(&[("Record", "Band"), ("Record", "Guest")]);
+        temp.db
+            .save_album_cover_if_missing("Record", "Band", &[1, 1])
+            .expect("embedded cover");
+        assert_eq!(
+            temp.db.fetch_album_artwork("Record", "Band"),
+            Some(vec![1, 1])
+        );
+        assert!(!temp.db.has_custom_cover(&both));
+
+        temp.db.set_custom_cover(&both, &[7, 7, 7]).expect("save");
+        assert_eq!(
+            temp.db.fetch_album_artwork("Record", "Band"),
+            Some(vec![7, 7, 7]),
+            "the chosen cover wins on a key that already had one"
+        );
+        assert_eq!(
+            temp.db.fetch_album_artwork("Record", "Guest"),
+            Some(vec![7, 7, 7]),
+            "and a key that had no row at all gets one"
+        );
+        assert!(temp.db.has_custom_cover(&both));
+        assert!(temp.db.has_custom_cover(&keys(&[("Record", "Guest")])));
+
+        temp.db.clear_custom_cover(&both).expect("reset");
+        assert_eq!(
+            temp.db.fetch_album_artwork("Record", "Band"),
+            Some(vec![1, 1]),
+            "the original returns"
+        );
+        assert!(temp.db.fetch_album_artwork("Record", "Guest").is_none());
+        assert!(!temp.db.has_custom_cover(&both));
+    }
+
+    #[test]
+    fn saving_a_cover_again_replaces_it_on_every_key() {
+        let temp = TempDb::open();
+        let both = keys(&[("Record", "Band"), ("Record", "Guest")]);
+        temp.db.set_custom_cover(&both, &[1]).expect("first");
+        temp.db.set_custom_cover(&both, &[2, 2]).expect("second");
+        for (title, artist) in &both {
+            assert_eq!(
+                custom_cover_column(&temp, title, artist),
+                Some(vec![2, 2])
+            );
+        }
+    }
+
+    #[test]
+    fn a_chosen_cover_survives_hoisting_enrichment_and_a_rescan() {
+        let temp = TempDb::open();
+        temp.db
+            .set_custom_cover(&keys(&[("Record", "Band")]), &[9, 9, 9])
+            .expect("save");
+
+        temp.db
+            .save_album_cover_if_missing("Record", "Band", &[1])
+            .expect("a later hoist");
+        temp.db
+            .apply_album_enrichment(
+                "Record",
+                "Band",
+                Some("2020"),
+                Some("rock"),
+                Some("https://example.invalid/cover.jpg"),
+                Some(&[2, 2]),
+                Some("mbid"),
+            )
+            .expect("enrichment writes a cover");
+        temp.db
+            .insert_track(&NewTrack {
+                rel_path: "Record/01.flac".into(),
+                title: "One".into(),
+                artist: "Band".into(),
+                album: "Record".into(),
+                album_artist: None,
+                track_number: 1,
+                duration: 100.0,
+                codec: Some("FLAC".into()),
+                bit_depth: Some(16),
+                sample_rate: Some(44100),
+                channels: Some(2),
+                artwork: Some(vec![3, 3, 3, 3]),
+            })
+            .expect("a rescan re-inserts the track and hoists its art");
+
+        assert_eq!(
+            temp.db.fetch_album_artwork("Record", "Band"),
+            Some(vec![9, 9, 9])
+        );
+        assert_eq!(
+            custom_cover_column(&temp, "Record", "Band"),
+            Some(vec![9, 9, 9])
+        );
+        let status = temp.db.album_info_status("Record", "Band").expect("row");
+        assert_eq!(status.year.as_deref(), Some("2020"), "enrichment still fills the rest");
+    }
+
+    #[test]
+    fn credit_adoption_neither_overwrites_nor_erases_a_chosen_cover() {
+        let temp = TempDb::open();
+        for (index, artist) in ["Composer A", "Composer B", "Composer C"].iter().enumerate() {
+            insert_credited(&temp.db, &format!("Score/{index}.flac"), artist, "Score", None);
+        }
+        temp.db
+            .save_album_cover_if_missing("Score", "Composer B", &[1, 2, 3])
+            .expect("hoist");
+        temp.db
+            .set_custom_cover(
+                &keys(&[("Score", "Various Artists"), ("Score", "Composer B")]),
+                &[8, 8],
+            )
+            .expect("save");
+
+        temp.db.resolve_album_credits();
+        temp.db.resolve_album_credits();
+
+        assert_eq!(
+            temp.db.fetch_album_artwork("Score", album_credit::VARIOUS_ARTISTS),
+            Some(vec![8, 8]),
+            "the credited release keeps the chosen cover"
+        );
+        assert_eq!(
+            custom_cover_column(&temp, "Score", "Composer B"),
+            Some(vec![8, 8])
+        );
+        assert_eq!(
+            temp.db.fetch_album_artwork("Score", "Composer A"),
+            None,
+            "a performer the person never keyed gets no cover from it"
+        );
+    }
+
+    #[test]
+    fn a_chosen_cover_on_a_folded_edition_moves_to_the_canonical_album() {
+        let temp = TempDb::open();
+        temp.db
+            .set_custom_cover(&keys(&[("Aurora (Deluxe Edition)", "aurora band")]), &[5, 5])
+            .expect("save on the variant");
+        temp.db
+            .apply_cleanup(
+                &[],
+                &[],
+                &[AlbumInfoMerge {
+                    canonical_title: "Aurora".into(),
+                    canonical_artist: "Aurora Band".into(),
+                    variants: vec![("Aurora (Deluxe Edition)".into(), "aurora band".into())],
+                }],
+                &[],
+            )
+            .expect("cleanup");
+        assert_eq!(
+            temp.db.fetch_album_artwork("Aurora", "Aurora Band"),
+            Some(vec![5, 5])
+        );
+
+        temp.db
+            .set_custom_cover(&keys(&[("Aurora (Reissue)", "aurora band")]), &[6])
+            .expect("save on another variant");
+        temp.db
+            .apply_cleanup(
+                &[],
+                &[],
+                &[AlbumInfoMerge {
+                    canonical_title: "Aurora".into(),
+                    canonical_artist: "Aurora Band".into(),
+                    variants: vec![("Aurora (Reissue)".into(), "aurora band".into())],
+                }],
+                &[],
+            )
+            .expect("cleanup again");
+        assert_eq!(
+            temp.db.fetch_album_artwork("Aurora", "Aurora Band"),
+            Some(vec![5, 5]),
+            "a canonical album keeps the cover it already had"
+        );
+    }
+
+    #[test]
+    fn a_library_from_before_custom_covers_gains_the_column_and_keeps_its_art() {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "flaccy-legacy-test-{}-{unique}.sqlite",
+            std::process::id()
+        ));
+        remove_all(&path);
+        {
+            let legacy = Connection::open(&path).expect("legacy db");
+            legacy
+                .execute_batch(
+                    "CREATE TABLE albumInfo (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        coverArtURL TEXT,
+                        coverArtData BLOB,
+                        musicBrainzID TEXT,
+                        year TEXT,
+                        genre TEXT,
+                        lastFetched DATETIME,
+                        UNIQUE(title, artist)
+                    );
+                    INSERT INTO albumInfo (title, artist, coverArtData)
+                    VALUES ('Old', 'Band', x'0102');",
+                )
+                .expect("legacy schema");
+        }
+        let db = Db::open(&path).expect("migrates");
+        assert_eq!(db.fetch_album_artwork("Old", "Band"), Some(vec![1, 2]));
+        db.set_custom_cover(&keys(&[("Old", "Band")]), &[4])
+            .expect("the column exists");
+        assert_eq!(db.fetch_album_artwork("Old", "Band"), Some(vec![4]));
+        drop(db);
+        let reopened = Db::open(&path).expect("a second open is a no-op");
+        assert_eq!(reopened.fetch_album_artwork("Old", "Band"), Some(vec![4]));
+        drop(reopened);
+        remove_all(&path);
     }
 }

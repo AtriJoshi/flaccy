@@ -305,6 +305,21 @@ impl AppCore {
         }));
     }
 
+    /// Everything that shows an album's cover starts asking again: the cache
+    /// forgets each key first, so no surface can be handed the old picture,
+    /// then one event per key tells the live ones to repaint.
+    pub fn album_artwork_changed(&self, keys: &[(String, String)]) {
+        for (title, artist) in keys {
+            self.artwork.invalidate(title, artist);
+        }
+        for (title, artist) in keys {
+            self.hub.emit(&AppEvent::AlbumArtworkChanged {
+                title: title.clone(),
+                artist: artist.clone(),
+            });
+        }
+    }
+
     pub fn toast(&self, message: &str) {
         self.hub.emit(&AppEvent::Toast(message.to_string()));
     }

@@ -128,6 +128,25 @@ impl Album {
         self.tracks.iter().map(|t| t.duration).sum()
     }
 
+    /// Every (title, artist) a surface may ask this release's cover by: album
+    /// cards use the grouped title and credit, tracks their own album and
+    /// performing artist. A chosen cover is stored under all of them.
+    pub fn artwork_keys(&self) -> Vec<(String, String)> {
+        let mut seen = HashSet::new();
+        let mut keys = Vec::new();
+        let candidates = std::iter::once((self.title.as_str(), self.artist.as_str())).chain(
+            self.tracks
+                .iter()
+                .map(|track| (track.album.as_str(), track.artist.as_str())),
+        );
+        for (title, artist) in candidates {
+            if !title.is_empty() && seen.insert((title.to_string(), artist.to_string())) {
+                keys.push((title.to_string(), artist.to_string()));
+            }
+        }
+        keys
+    }
+
     /// When the album entered the library: the newest track's dateAdded, so a
     /// release that trickles in file-by-file surfaces when it completes
     /// (mirrors LibraryViewModel.albumDateAddedMap on the Apple clients).
@@ -608,6 +627,90 @@ mod meta_tests {
         let (year, genre) = album_meta_for(&meta, "Score", "Various Artists", &group);
         assert_eq!(year.as_deref(), Some("2009"));
         assert_eq!(genre.as_deref(), Some("score"));
+    }
+}
+
+#[cfg(test)]
+mod artwork_key_tests {
+    use super::*;
+
+    fn track(album: &str, artist: &str) -> Track {
+        TrackRow {
+            id: 0,
+            rel_path: format!("{album}/{artist}.flac"),
+            title: "t".into(),
+            artist: artist.into(),
+            album: album.into(),
+            album_artist: None,
+            track_number: 1,
+            duration: 100.0,
+            codec: None,
+            bit_depth: None,
+            sample_rate: None,
+            channels: None,
+            loved: false,
+            play_count: 0,
+            date_added: 0,
+            last_played: None,
+        }
+    }
+
+    fn album(title: &str, artist: &str, tracks: Vec<Track>) -> Album {
+        Album {
+            title: title.into(),
+            artist: artist.into(),
+            year: None,
+            genre: None,
+            tracks,
+        }
+    }
+
+    #[test]
+    fn a_compilation_is_keyed_by_its_credit_and_every_performer() {
+        let release = album(
+            "Score",
+            "Various Artists",
+            vec![
+                track("Score", "Composer A"),
+                track("Score", "Composer B"),
+                track("Score", "Composer A"),
+            ],
+        );
+        let expected: Vec<(String, String)> = [
+            ("Score", "Various Artists"),
+            ("Score", "Composer A"),
+            ("Score", "Composer B"),
+        ]
+        .iter()
+        .map(|(title, artist)| (title.to_string(), artist.to_string()))
+        .collect();
+        assert_eq!(release.artwork_keys(), expected);
+    }
+
+    #[test]
+    fn a_plain_album_is_one_key_and_empty_titles_are_skipped() {
+        let release = album(
+            "Record",
+            "Band",
+            vec![track("Record", "Band"), track("", "Band")],
+        );
+        assert_eq!(
+            release.artwork_keys(),
+            vec![("Record".to_string(), "Band".to_string())]
+        );
+        assert!(album("", "Band", vec![track("", "Band")])
+            .artwork_keys()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_track_filed_under_a_different_album_title_gets_its_own_key() {
+        let release = album(
+            "Aurora",
+            "Aurora Band",
+            vec![track("Aurora", "Aurora Band"), track("Aurora (Deluxe)", "Aurora Band")],
+        );
+        assert_eq!(release.artwork_keys().len(), 2);
     }
 }
 

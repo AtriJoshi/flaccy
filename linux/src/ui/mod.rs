@@ -1,6 +1,9 @@
 pub mod albums;
 pub mod artists;
 pub mod artwork;
+pub mod artwork_crop;
+pub mod artwork_demo;
+pub mod artwork_editor;
 pub mod cleanup;
 pub mod context;
 pub mod controls;

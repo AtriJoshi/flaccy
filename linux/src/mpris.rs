@@ -131,6 +131,18 @@ pub fn start(core: &Rc<AppCore>) {
                         let _ = player.set_metadata(metadata).await;
                     });
                 }
+                AppEvent::AlbumArtworkChanged { title, artist } => {
+                    let playing_this = core
+                        .player
+                        .current_track()
+                        .filter(|track| &track.album == title && &track.artist == artist);
+                    if let Some(track) = playing_this {
+                        let metadata = metadata_for(&core, Some(&track));
+                        glib::spawn_future_local(async move {
+                            let _ = player.set_metadata(metadata).await;
+                        });
+                    }
+                }
                 AppEvent::PlayingChanged(playing) => {
                     let status = if *playing {
                         PlaybackStatus::Playing
@@ -213,22 +225,60 @@ fn accepts_position(seconds: f64, duration: f64) -> bool {
     seconds >= 0.0 && (duration <= 0.0 || seconds <= duration)
 }
 
+/// Writes the album's current cover where a desktop shell can read it. The
+/// file name carries a hash of the picture itself, so a cover the person just
+/// chose gets a new URL and the shell cannot keep showing the old one; files
+/// left by earlier covers of the same album are removed.
 fn export_artwork(core: &Rc<AppCore>, track: &Track) -> Option<PathBuf> {
     let cache_dir = dirs::cache_dir()?.join("flaccy").join("mpris");
     std::fs::create_dir_all(&cache_dir).ok()?;
-    let key = crate::palette::fnv1a_64(&format!("{}|{}", track.album, track.artist));
-    let path = cache_dir.join(format!("{key:016x}.img"));
+    let data = core.db.fetch_album_artwork(&track.album, &track.artist)?;
+    let album = crate::palette::fnv1a_64(&format!("{}|{}", track.album, track.artist));
+    let prefix = format!("{album:016x}-");
+    let path = cache_dir.join(format!("{prefix}{:016x}.img", content_hash(&data)));
     if path.exists() {
         return Some(path);
     }
-    let data = core.db.fetch_album_artwork(&track.album, &track.artist)?;
+    remove_stale_exports(&cache_dir, &prefix);
     std::fs::write(&path, &data).ok()?;
     Some(path)
 }
 
+fn content_hash(data: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn remove_stale_exports(directory: &std::path::Path, prefix: &str) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with(prefix) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::accepts_position;
+    use super::{accepts_position, content_hash, remove_stale_exports};
+
+    #[test]
+    fn a_new_cover_gets_a_new_file_name_and_the_old_export_is_removed() {
+        let dir = std::env::temp_dir().join(format!("flaccy-mpris-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        assert_ne!(content_hash(&[1, 2, 3]), content_hash(&[1, 2, 4]));
+        assert_eq!(content_hash(&[1, 2, 3]), content_hash(&[1, 2, 3]));
+        std::fs::write(dir.join("00aa-0001.img"), b"old").expect("old export");
+        std::fs::write(dir.join("00bb-0001.img"), b"other album").expect("other export");
+        remove_stale_exports(&dir, "00aa-");
+        assert!(!dir.join("00aa-0001.img").exists());
+        assert!(dir.join("00bb-0001.img").exists(), "other albums keep theirs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn set_position_stays_inside_the_track() {

@@ -515,16 +515,7 @@ fn queue_row(ui: &Rc<Ui>, track: &Track, index: usize, current: usize) -> gtk::L
             .artwork
             .placeholder(&format!("{}|{}", track.album, track.artist)),
     ));
-    {
-        let weak = artwork.downgrade();
-        ui.core
-            .artwork
-            .request(&track.album, &track.artist, 36, move |texture, _| {
-                if let (Some(picture), Some(texture)) = (weak.upgrade(), texture) {
-                    picture.set_paintable(Some(texture));
-                }
-            });
-    }
+    crate::ui::artwork::follow_picture(&ui.core, &artwork, &track.album, &track.artist, 36);
     row_box.append(&artwork);
 
     let text_box = gtk::Box::new(gtk::Orientation::Vertical, 1);

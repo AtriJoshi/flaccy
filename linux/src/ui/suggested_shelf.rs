@@ -153,14 +153,7 @@ fn card(ui: &Rc<Ui>, playlist: &SuggestedPlaylist) -> gtk::Widget {
                 .artwork
                 .placeholder(&format!("{}|{}", first.album, first.artist)),
         ));
-        let weak = artwork.downgrade();
-        ui.core
-            .artwork
-            .request(&first.album, &first.artist, 56, move |texture, _| {
-                if let (Some(picture), Some(texture)) = (weak.upgrade(), texture) {
-                    picture.set_paintable(Some(texture));
-                }
-            });
+        crate::ui::artwork::follow_picture(&ui.core, &artwork, &first.album, &first.artist, 56);
     }
     card.append(&artwork);
 

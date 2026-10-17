@@ -1,4 +1,7 @@
 mod app;
+mod artwork_image;
+mod artwork_search;
+mod local_artwork;
 mod chart_queue;
 mod config;
 mod db;

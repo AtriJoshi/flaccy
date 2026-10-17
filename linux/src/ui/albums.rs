@@ -131,11 +131,20 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
         Rc::new(RefCell::new(HashMap::new()));
 
     let factory = gtk::SignalListItemFactory::new();
+    let setup_ui = Rc::clone(ui);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         let cell = build_album_cell();
+        {
+            let item_weak = item.downgrade();
+            crate::ui::artwork_editor::attach_image_drop(&cell, &setup_ui, move || {
+                let boxed = item_weak.upgrade()?.item().and_downcast::<BoxedAnyObject>()?;
+                let album = boxed.borrow::<Album>().clone();
+                Some(album)
+            });
+        }
         let gesture = gtk::GestureClick::builder()
             .button(gdk::BUTTON_SECONDARY)
             .build();
@@ -452,24 +461,32 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
             .hub
             .clone()
             .subscribe_widget(&stack, move |_, event| {
-                if let AppEvent::AlbumEnriched { title, artist } = event {
-                    ui.core.artwork.invalidate(title, artist);
+                if let AppEvent::AlbumEnriched { title, artist }
+                | AppEvent::AlbumArtworkChanged { title, artist } = event
+                {
+                    if matches!(event, AppEvent::AlbumEnriched { .. }) {
+                        ui.core.artwork.invalidate(title, artist);
+                    }
                     let key = format!("{title}|{artist}");
                     let picture = bound.borrow().get(&key).and_then(|w| w.upgrade());
                     if let Some(picture) = picture {
                         let weak = picture.downgrade();
                         let bound = Rc::clone(&bound);
+                        let placeholder = ui.core.artwork.placeholder(&key);
                         ui.core
                             .artwork
                             .request(title, artist, 168, move |texture, _| {
-                                if let (Some(picture), Some(texture)) = (weak.upgrade(), texture) {
+                                if let Some(picture) = weak.upgrade() {
                                     let still = bound
                                         .borrow()
                                         .get(&key)
                                         .and_then(|w| w.upgrade())
                                         .is_some_and(|current| current == picture);
                                     if still {
-                                        picture.set_paintable(Some(texture));
+                                        match texture {
+                                            Some(texture) => picture.set_paintable(Some(texture)),
+                                            None => picture.set_paintable(Some(&placeholder)),
+                                        }
                                     }
                                 }
                             });
@@ -782,7 +799,8 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
                 }
             });
     }
-    header.append(&picture);
+    let cover_host = cover_host_with_pencil(ui, album, &picture);
+    header.append(&cover_host);
 
     let meta = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -869,7 +887,9 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
             }
         };
         ui.core.hub.subscribe_widget(&info, move |info, event| {
-            let AppEvent::AlbumEnriched { title, artist } = event else {
+            let (AppEvent::AlbumEnriched { title, artist }
+            | AppEvent::AlbumArtworkChanged { title, artist }) = event
+            else {
                 return;
             };
             if title != &album_title || artist != &album_artist {
@@ -967,7 +987,7 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
     let detail_bin = adw::BreakpointBin::new();
     detail_bin.set_size_request(320, 200);
     detail_bin.set_child(Some(&scroll));
-    install_album_detail_breakpoints(&detail_bin, &header, &picture, &content);
+    install_album_detail_breakpoints(&detail_bin, &header, &cover_host, &content);
 
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&backdrop));
@@ -986,10 +1006,51 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
 /// minimum size of its own, and a viewport sizes its adjustment from the
 /// child's minimum, so a bin inside the scroller leaves `upper == page_size`
 /// and the page silently clips instead of scrolling.
+/// The album page's cover with the pencil that fades in on hover or focus,
+/// the album menu on right-click, and a drop target: an image dropped on the
+/// cover opens the artwork editor with that image already framed.
+fn cover_host_with_pencil(ui: &Rc<Ui>, album: &Album, picture: &gtk::Picture) -> gtk::Overlay {
+    let host = gtk::Overlay::new();
+    host.set_child(Some(picture));
+    host.set_halign(gtk::Align::Start);
+    host.set_valign(gtk::Align::Start);
+    host.add_css_class("album-cover-host");
+    let pencil = gtk::Button::from_icon_name("document-edit-symbolic");
+    pencil.add_css_class("osd");
+    pencil.add_css_class("circular");
+    pencil.add_css_class("artwork-pencil");
+    pencil.set_halign(gtk::Align::End);
+    pencil.set_valign(gtk::Align::End);
+    pencil.set_tooltip_text(Some("Edit Artwork"));
+    pencil.update_property(&[gtk::accessible::Property::Label("Edit Artwork")]);
+    let key = album.key();
+    {
+        let ui = Rc::clone(ui);
+        let key = key.clone();
+        let fallback = album.clone();
+        pencil.connect_clicked(move |_| {
+            let library = ui.core.library.borrow().clone();
+            let album = library.album_by_key(&key).cloned().unwrap_or_else(|| fallback.clone());
+            crate::ui::artwork_editor::present(&ui, &album, None);
+        });
+    }
+    host.add_overlay(&pencil);
+    context::attach_album_context_menu(&host, key.clone());
+    {
+        let ui_for_drop = Rc::clone(ui);
+        let fallback = album.clone();
+        crate::ui::artwork_editor::attach_image_drop(&host, ui, move || {
+            let library = ui_for_drop.core.library.borrow().clone();
+            Some(library.album_by_key(&key).cloned().unwrap_or_else(|| fallback.clone()))
+        });
+    }
+    host
+}
+
 fn install_album_detail_breakpoints(
     bin: &adw::BreakpointBin,
     header: &gtk::Box,
-    picture: &gtk::Picture,
+    picture: &gtk::Overlay,
     content: &gtk::Box,
 ) {
     let compact = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
