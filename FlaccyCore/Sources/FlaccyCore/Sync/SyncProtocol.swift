@@ -9,6 +9,7 @@ public enum SyncKeys {
     public static let album = "album"
     public static let trackNumber = "trackNumber"
     public static let duration = "duration"
+    public static let bytes = "bytes"
 
     /// Heartbeat (watch -> phone, via updateApplicationContext): the watch's
     /// authoritative state. The phone mirrors this exactly — it never infers
@@ -18,11 +19,16 @@ public enum SyncKeys {
     public static let isFull = "isFull"
     public static let lastErrorPath = "lastErrorPath"
     public static let lastErrorReason = "lastErrorReason"
+    public static let usedBytes = "usedBytes"
+    public static let totalBytes = "totalBytes"
 
     /// The phone's enrichment job (phone -> watch, via updateApplicationContext).
     /// The watch renders what the phone is doing and never fetches metadata
     /// itself, so this is the only enrichment state that exists on the wrist.
     public static let enrichmentJob = "enrichmentJob"
+
+    /// The run the phone is sending (phone -> watch, via updateApplicationContext).
+    public static let syncBatch = "syncBatch"
 
     /// User-info command (phone -> watch).
     public static let command = "command"
@@ -30,6 +36,13 @@ public enum SyncKeys {
     public static let commandRemove = "remove"
     public static let commandRemoveAll = "removeAll"
     public static let commandGetState = "getState"
+
+    /// User-info commands (watch -> phone): the person deleted these on the
+    /// watch (paths in `removePaths`), or played tracks there (`plays`, an
+    /// array of `WatchPlayEntry` dictionaries).
+    public static let commandRemoved = "removed"
+    public static let commandPlays = "plays"
+    public static let plays = "plays"
 }
 
 /// Reason a track failed to persist on the watch.
@@ -55,6 +68,7 @@ public struct TransferMetadata: Sendable, Equatable {
     public let album: String
     public let trackNumber: Int
     public let duration: TimeInterval
+    public let bytes: Int64
 
     public init(
         relativePath: String,
@@ -62,7 +76,8 @@ public struct TransferMetadata: Sendable, Equatable {
         artist: String,
         album: String,
         trackNumber: Int,
-        duration: TimeInterval
+        duration: TimeInterval,
+        bytes: Int64 = 0
     ) {
         self.relativePath = canonicalSyncPath(relativePath)
         self.title = title
@@ -70,6 +85,7 @@ public struct TransferMetadata: Sendable, Equatable {
         self.album = album
         self.trackNumber = trackNumber
         self.duration = duration
+        self.bytes = bytes
     }
 
     public var dictionary: [String: Any] {
@@ -80,6 +96,7 @@ public struct TransferMetadata: Sendable, Equatable {
             SyncKeys.album: album,
             SyncKeys.trackNumber: trackNumber,
             SyncKeys.duration: duration,
+            SyncKeys.bytes: bytes,
         ]
     }
 
@@ -95,6 +112,16 @@ public struct TransferMetadata: Sendable, Equatable {
         self.album = dictionary[SyncKeys.album] as? String ?? ""
         self.trackNumber = dictionary[SyncKeys.trackNumber] as? Int ?? 0
         self.duration = dictionary[SyncKeys.duration] as? TimeInterval ?? 0
+        self.bytes = Self.byteCount(dictionary[SyncKeys.bytes])
+    }
+
+    /// A byte count survives a plist round trip as whichever integer width
+    /// the other side happened to use, so every width is accepted.
+    private static func byteCount(_ value: Any?) -> Int64 {
+        if let value = value as? Int64 { return value }
+        if let value = value as? Int { return Int64(value) }
+        if let value = value as? NSNumber { return value.int64Value }
+        return 0
     }
 }
 
