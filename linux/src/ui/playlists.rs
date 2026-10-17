@@ -1,11 +1,34 @@
 use crate::events::AppEvent;
 use crate::library::{format_time, Track};
-use crate::ui::{context, Ui};
+use crate::ui::playlist_cover::PlaylistArt;
+use crate::ui::{artwork_editor, context, Ui};
 use adw::prelude::*;
+use flaccy_shared::playlist_cover;
 use gtk::gdk;
 use gtk::pango;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+const LIST_COVER_SIDE: i32 = 48;
+const DETAIL_COVER_SIDE: i32 = 148;
+
+/// The albums a playlist's automatic mosaic is drawn from: the first distinct
+/// releases among its tracks, in playlist order.
+fn mosaic_albums(
+    ui: &Rc<Ui>,
+    by_rel_path: &std::collections::HashMap<&str, &Track>,
+    playlist_id: i64,
+) -> Vec<(String, String)> {
+    let albums: Vec<(String, String)> = ui
+        .core
+        .db
+        .playlist_tracks(playlist_id)
+        .into_iter()
+        .filter_map(|row| by_rel_path.get(row.rel_path.as_str()))
+        .map(|track| (track.album.clone(), track.artist.clone()))
+        .collect();
+    playlist_cover::mosaic_albums(&albums)
+}
 
 pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     let list = gtk::ListBox::builder()
@@ -88,6 +111,12 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
                 list.remove(&child);
             }
             let playlists = ui.core.db.fetch_playlists();
+            let library = ui.core.library.borrow().clone();
+            let by_rel_path: std::collections::HashMap<&str, &Track> = library
+                .tracks
+                .iter()
+                .map(|track| (track.rel_path.as_str(), track))
+                .collect();
             let mut collected = Vec::new();
             for playlist in &playlists {
                 collected.push(playlist.id);
@@ -99,7 +128,16 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
                     .margin_start(10)
                     .margin_end(10)
                     .build();
-                row_box.append(&gtk::Image::from_icon_name("view-list-symbolic"));
+                let art = PlaylistArt::new(
+                    &ui,
+                    playlist.id,
+                    &playlist.name,
+                    LIST_COVER_SIDE,
+                    "playlist-thumb",
+                    mosaic_albums(&ui, &by_rel_path, playlist.id),
+                );
+                artwork_editor::attach_playlist_image_drop(&art.widget(), &ui, playlist.id);
+                row_box.append(&art.widget());
                 let name = gtk::Label::builder()
                     .label(&playlist.name)
                     .xalign(0.0)
@@ -117,7 +155,7 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
                 count.add_css_class("caption");
                 row_box.append(&count);
                 let list_row = gtk::ListBoxRow::builder().child(&row_box).build();
-                attach_playlist_list_menu(&list_row, playlist.id);
+                attach_playlist_list_menu(&list_row, &ui, playlist.id);
                 list.append(&list_row);
             }
             *ids.borrow_mut() = collected;
@@ -326,7 +364,7 @@ pub fn prompt_new_playlist(ui: &Rc<Ui>, add_rel_path: Option<String>) {
     dialog.present(Some(&window));
 }
 
-fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
+pub(crate) fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
     let name = ui
         .core
         .db
@@ -341,9 +379,19 @@ fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
 
     let entries: Rc<RefCell<Vec<(i64, Track)>>> = Rc::new(RefCell::new(Vec::new()));
 
+    let art = Rc::new(PlaylistArt::new(
+        ui,
+        playlist_id,
+        &name,
+        DETAIL_COVER_SIDE,
+        "cover-large",
+        Vec::new(),
+    ));
+
     let rebuild = {
         let list = list.clone();
         let entries = Rc::clone(&entries);
+        let art = Rc::clone(&art);
         let ui = Rc::clone(ui);
         Rc::new(move || {
             while let Some(child) = list.first_child() {
@@ -407,6 +455,11 @@ fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
                 );
                 list.append(&list_row);
             }
+            let albums: Vec<(String, String)> = collected
+                .iter()
+                .map(|(_, track)| (track.album.clone(), track.artist.clone()))
+                .collect();
+            art.set_albums(playlist_cover::mosaic_albums(&albums));
             *entries.borrow_mut() = collected;
         })
     };
@@ -426,15 +479,27 @@ fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
 
     let header = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
+        .spacing(20)
+        .build();
+    header.append(&editable_cover(ui, &art, playlist_id));
+    let meta = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
         .spacing(12)
+        .hexpand(true)
+        .valign(gtk::Align::Center)
         .build();
     let title = gtk::Label::builder()
         .label(&name)
         .xalign(0.0)
-        .hexpand(true)
+        .wrap(true)
         .build();
     title.add_css_class("title-1");
-    header.append(&title);
+    meta.append(&title);
+    let buttons = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .build();
+    header.append(&meta);
 
     let play = gtk::Button::builder().label("Play").build();
     play.add_css_class("pill");
@@ -449,7 +514,7 @@ fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
             }
         });
     }
-    header.append(&play);
+    buttons.append(&play);
 
     let delete = gtk::Button::builder().label("Delete").build();
     delete.add_css_class("pill");
@@ -477,7 +542,8 @@ fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
             dialog.present(Some(&window));
         });
     }
-    header.append(&delete);
+    buttons.append(&delete);
+    meta.append(&buttons);
 
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -523,18 +589,49 @@ fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
     ui.nav.push(&page);
 }
 
-fn attach_playlist_list_menu(row: &gtk::ListBoxRow, playlist_id: i64) {
+fn attach_playlist_list_menu(row: &impl IsA<gtk::Widget>, ui: &Rc<Ui>, playlist_id: i64) {
     let gesture = gtk::GestureClick::builder()
         .button(gdk::BUTTON_SECONDARY)
         .build();
-    let target = row.clone();
+    let target = row.clone().upcast::<gtk::Widget>();
+    let ui = Rc::clone(ui);
     gesture.connect_pressed(move |_, _, x, y| {
-        context::popup_menu_at(&target, &playlist_list_menu(playlist_id), x, y);
+        let has_cover = ui.core.db.has_playlist_cover(playlist_id);
+        context::popup_menu_at(&target, &playlist_list_menu(playlist_id, has_cover), x, y);
     });
     row.add_controller(gesture);
 }
 
-fn playlist_list_menu(playlist_id: i64) -> gtk::gio::Menu {
+/// The detail page's cover with the pencil that fades in on hover or focus,
+/// the playlist menu on right-click, and a drop target: an image dropped on it
+/// opens the cover editor with that picture already framed.
+fn editable_cover(ui: &Rc<Ui>, art: &Rc<PlaylistArt>, playlist_id: i64) -> gtk::Overlay {
+    let host = gtk::Overlay::new();
+    host.set_child(Some(&art.widget()));
+    host.set_halign(gtk::Align::Start);
+    host.set_valign(gtk::Align::Start);
+    host.add_css_class("album-cover-host");
+    let pencil = gtk::Button::from_icon_name("document-edit-symbolic");
+    pencil.add_css_class("osd");
+    pencil.add_css_class("circular");
+    pencil.add_css_class("artwork-pencil");
+    pencil.set_halign(gtk::Align::End);
+    pencil.set_valign(gtk::Align::End);
+    pencil.set_tooltip_text(Some("Edit Cover"));
+    pencil.update_property(&[gtk::accessible::Property::Label("Edit Cover")]);
+    {
+        let ui = Rc::clone(ui);
+        pencil.connect_clicked(move |_| {
+            artwork_editor::present_playlist(&ui, playlist_id, None);
+        });
+    }
+    host.add_overlay(&pencil);
+    attach_playlist_list_menu(&host, ui, playlist_id);
+    artwork_editor::attach_playlist_image_drop(&host, ui, playlist_id);
+    host
+}
+
+fn playlist_list_menu(playlist_id: i64, has_cover: bool) -> gtk::gio::Menu {
     let menu = gtk::gio::Menu::new();
     let play_section = gtk::gio::Menu::new();
     play_section.append_item(&playlist_item("Play", "win.playlist-play", playlist_id));
@@ -550,6 +647,18 @@ fn playlist_list_menu(playlist_id: i64) -> gtk::gio::Menu {
         "win.playlist-rename",
         playlist_id,
     ));
+    manage_section.append_item(&playlist_item(
+        "Edit Cover…",
+        "win.playlist-cover-edit",
+        playlist_id,
+    ));
+    if has_cover {
+        manage_section.append_item(&playlist_item(
+            "Use Automatic Cover",
+            "win.playlist-cover-reset",
+            playlist_id,
+        ));
+    }
     manage_section.append_item(&playlist_item("Delete", "win.playlist-delete", playlist_id));
     menu.append_section(None, &manage_section);
     menu

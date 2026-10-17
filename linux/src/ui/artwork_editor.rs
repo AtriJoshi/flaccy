@@ -1,12 +1,12 @@
 use crate::artwork_image::{self, MipChain};
 use crate::artwork_search::{self, Candidate, Request};
 use crate::db::Db;
-use crate::library::Album;
+use crate::library::{Album, Track};
 use crate::local_artwork::{self, LocalCover, Origin};
 use crate::ui::artwork_crop::{preview_area, ArtworkSource, CropView, ThumbArea, KEY_ZOOM_FACTOR};
 use crate::ui::Ui;
 use adw::prelude::*;
-use flaccy_shared::artwork_local;
+use flaccy_shared::{artwork_local, playlist_cover};
 use gtk::{gdk, gio, glib};
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -162,10 +162,167 @@ struct LoadRequest {
     user_initiated: bool,
 }
 
+/// What the editor is choosing a cover for: a release or a playlist. A
+/// playlist is addressed in the artwork cache by the reserved key
+/// `playlist_cover` defines, so the cache, the decode worker and the repaint
+/// event serve it exactly as they serve an album.
+#[derive(Clone)]
+pub enum Subject {
+    Album(Album),
+    Playlist {
+        id: i64,
+        name: String,
+        tracks: Vec<Track>,
+    },
+}
+
+impl Subject {
+    fn key(&self) -> String {
+        match self {
+            Subject::Album(album) => album.key(),
+            Subject::Playlist { id, .. } => playlist_cover::title_for(*id),
+        }
+    }
+
+    fn title(&self) -> &str {
+        match self {
+            Subject::Album(album) => &album.title,
+            Subject::Playlist { name, .. } => name,
+        }
+    }
+
+    fn credit(&self) -> &str {
+        match self {
+            Subject::Album(album) => &album.artist,
+            Subject::Playlist { .. } => "",
+        }
+    }
+
+    fn is_playlist(&self) -> bool {
+        matches!(self, Subject::Playlist { .. })
+    }
+
+    fn subtitle(&self) -> String {
+        match self {
+            Subject::Album(album) => format!("{} · {}", album.title, album.artist),
+            Subject::Playlist { name, tracks, .. } => {
+                format!("{name} · {}", track_count_label(tracks.len()))
+            }
+        }
+    }
+
+    fn artwork_keys(&self) -> Vec<(String, String)> {
+        match self {
+            Subject::Album(album) => album.artwork_keys(),
+            Subject::Playlist { id, .. } => {
+                vec![(playlist_cover::title_for(*id), playlist_cover::ARTIST.to_string())]
+            }
+        }
+    }
+
+    fn has_custom_cover(&self, db: &Db) -> bool {
+        match self {
+            Subject::Album(album) => db.has_custom_cover(&album.artwork_keys()),
+            Subject::Playlist { id, .. } => db.has_playlist_cover(*id),
+        }
+    }
+
+    fn current_cover(&self, db: &Db) -> Option<Vec<u8>> {
+        match self {
+            Subject::Album(album) => db.fetch_album_artwork(&album.title, &album.artist),
+            Subject::Playlist { id, .. } => db.playlist_cover(*id),
+        }
+    }
+
+    fn save_cover(&self, db: &Db, jpeg: &[u8]) -> Result<(), rusqlite::Error> {
+        match self {
+            Subject::Album(album) => db.set_custom_cover(&album.artwork_keys(), jpeg),
+            Subject::Playlist { id, .. } => db.set_playlist_cover(*id, jpeg),
+        }
+    }
+
+    fn clear_cover(&self, db: &Db) -> Result<(), rusqlite::Error> {
+        match self {
+            Subject::Album(album) => db.clear_custom_cover(&album.artwork_keys()),
+            Subject::Playlist { id, .. } => db.clear_playlist_cover(*id),
+        }
+    }
+
+    fn default_query(&self) -> String {
+        match self {
+            Subject::Album(album) => artwork_search::default_query(&album.title, &album.artist),
+            Subject::Playlist { .. } => String::new(),
+        }
+    }
+
+    fn reset_label(&self) -> &'static str {
+        if self.is_playlist() {
+            "Use Automatic Cover"
+        } else {
+            "Use Original Artwork"
+        }
+    }
+
+    fn reset_heading(&self) -> &'static str {
+        if self.is_playlist() {
+            "Use the automatic cover?"
+        } else {
+            "Use the original artwork?"
+        }
+    }
+
+    fn reset_body(&self) -> &'static str {
+        if self.is_playlist() {
+            "Your chosen cover will be removed and the playlist shows a mosaic of its albums again."
+        } else {
+            "Your chosen cover will be removed and the artwork from the music files is used again."
+        }
+    }
+
+    fn reset_toast(&self) -> &'static str {
+        if self.is_playlist() {
+            "Automatic cover restored"
+        } else {
+            "Original artwork restored"
+        }
+    }
+
+    fn shelf_title(&self) -> &'static str {
+        if self.is_playlist() {
+            "From This Playlist"
+        } else {
+            "In Your Files"
+        }
+    }
+
+    fn search_placeholder(&self) -> &'static str {
+        if self.is_playlist() {
+            "Search for cover art"
+        } else {
+            "Artist and album"
+        }
+    }
+
+    fn previews(&self) -> Vec<(i32, f64, &'static str)> {
+        if self.is_playlist() {
+            vec![(120, 14.0, "Playlist"), (48, 8.0, "List")]
+        } else {
+            vec![(120, 14.0, "Album"), (48, 8.0, "List"), (32, 6.0, "Player")]
+        }
+    }
+
+    fn announce_change(&self, core: &crate::app::AppCore) {
+        core.album_artwork_changed(&self.artwork_keys());
+    }
+}
+
+fn track_count_label(count: usize) -> String {
+    format!("{count} track{}", if count == 1 { "" } else { "s" })
+}
+
 pub struct Editor {
     ui: Rc<Ui>,
-    album: Album,
-    keys: Vec<(String, String)>,
+    subject: Subject,
     dialog: adw::Dialog,
     crop: Rc<CropView>,
     backdrop: gtk::DrawingArea,
@@ -204,8 +361,44 @@ thread_local! {
 /// Opens the editor for an album, optionally with a picture already loaded and
 /// framed (a drop on a cover). While one is open, another request reuses it.
 pub fn present(ui: &Rc<Ui>, album: &Album, preload: Option<Payload>) -> Rc<Editor> {
+    present_subject(ui, Subject::Album(album.clone()), preload)
+}
+
+/// Opens the editor for a playlist's cover, resolving its tracks against the
+/// live library so the shelf and the header know what the playlist holds.
+pub fn present_playlist(ui: &Rc<Ui>, playlist_id: i64, preload: Option<Payload>) -> Rc<Editor> {
+    present_subject(ui, playlist_subject(ui, playlist_id), preload)
+}
+
+pub fn playlist_subject(ui: &Rc<Ui>, playlist_id: i64) -> Subject {
+    let name = ui
+        .core
+        .db
+        .playlist_name(playlist_id)
+        .unwrap_or_else(|| "Playlist".to_string());
+    let library = ui.core.library.borrow().clone();
+    let by_rel_path: HashMap<&str, &Track> = library
+        .tracks
+        .iter()
+        .map(|track| (track.rel_path.as_str(), track))
+        .collect();
+    let tracks = ui
+        .core
+        .db
+        .playlist_tracks(playlist_id)
+        .into_iter()
+        .filter_map(|row| by_rel_path.get(row.rel_path.as_str()).map(|track| (*track).clone()))
+        .collect();
+    Subject::Playlist {
+        id: playlist_id,
+        name,
+        tracks,
+    }
+}
+
+pub fn present_subject(ui: &Rc<Ui>, subject: Subject, preload: Option<Payload>) -> Rc<Editor> {
     if let Some(open) = CURRENT.with(|slot| slot.borrow().clone()) {
-        if open.album.key() == album.key() {
+        if open.subject.key() == subject.key() {
             open.dialog.present(Some(&ui.window));
             if let Some(payload) = preload {
                 open.load(LoadRequest {
@@ -219,21 +412,19 @@ pub fn present(ui: &Rc<Ui>, album: &Album, preload: Option<Payload>) -> Rc<Edito
             return open;
         }
     }
-    let editor = Editor::build(ui, album);
+    let editor = Editor::build(ui, &subject);
     CURRENT.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&editor)));
     editor.present(preload);
     editor
 }
 
 impl Editor {
-    fn build(ui: &Rc<Ui>, album: &Album) -> Rc<Self> {
-        let keys = album.artwork_keys();
-        let has_custom = ui.core.db.has_custom_cover(&keys);
+    fn build(ui: &Rc<Ui>, subject: &Subject) -> Rc<Self> {
+        let has_custom = subject.has_custom_cover(&ui.core.db);
         let crop = CropView::new();
         let editor = Rc::new(Self {
             ui: Rc::clone(ui),
-            album: album.clone(),
-            keys,
+            subject: subject.clone(),
             dialog: adw::Dialog::builder()
                 .title("Artwork")
                 .follows_content_size(false)
@@ -319,7 +510,9 @@ impl Editor {
         self.tiles
             .borrow()
             .keys()
-            .filter(|id| id.starts_with("file:") || id.starts_with("embedded:"))
+            .filter(|id| {
+                id.starts_with("file:") || id.starts_with("embedded:") || id.starts_with("album:")
+            })
             .count()
     }
 
@@ -361,8 +554,8 @@ impl Editor {
         header.set_show_start_title_buttons(false);
         header.set_show_end_title_buttons(false);
         header.set_title_widget(Some(&adw::WindowTitle::new(
-            "Artwork",
-            &format!("{} · {}", self.album.title, self.album.artist),
+            if self.subject.is_playlist() { "Playlist Cover" } else { "Artwork" },
+            &self.subject.subtitle(),
         )));
 
         let columns = gtk::Box::new(gtk::Orientation::Horizontal, 28);
@@ -489,7 +682,7 @@ impl Editor {
         section.append(&caption);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 20);
         row.set_valign(gtk::Align::End);
-        for (side, radius, name) in [(120, 14.0, "Album"), (48, 8.0, "List"), (32, 6.0, "Player")] {
+        for (side, radius, name) in self.subject.previews() {
             let item = gtk::Box::new(gtk::Orientation::Vertical, 4);
             item.set_valign(gtk::Align::End);
             let area = preview_area(&self.crop, side, radius);
@@ -511,7 +704,7 @@ impl Editor {
         column.set_margin_end(4);
         column.append(&self.source_actions());
 
-        self.files_section.append(&section_header("In Your Files", None));
+        self.files_section.append(&section_header(self.subject.shelf_title(), None));
         self.files_section.append(&self.files_flow);
         self.files_section.set_visible(false);
         column.append(&self.files_section);
@@ -571,11 +764,9 @@ impl Editor {
         let section = gtk::Box::new(gtk::Orientation::Vertical, 8);
         section.append(&section_header("Find Online", Some(&self.online_spinner)));
         let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        self.search_entry.set_text(&artwork_search::default_query(
-            &self.album.title,
-            &self.album.artist,
-        ));
-        self.search_entry.set_placeholder_text(Some("Artist and album"));
+        self.search_entry.set_text(&self.subject.default_query());
+        self.search_entry
+            .set_placeholder_text(Some(self.subject.search_placeholder()));
         self.search_entry
             .update_property(&[gtk::accessible::Property::Label("Search for covers online")]);
         let search = gtk::Button::with_label("Search");
@@ -612,13 +803,13 @@ impl Editor {
         bar.set_margin_end(24);
         bar.set_margin_top(10);
         bar.set_margin_bottom(14);
-        let reset_content = button_content("edit-undo-symbolic", "Use Original Artwork");
+        let reset_content = button_content("edit-undo-symbolic", self.subject.reset_label());
         self.reset.set_child(Some(&reset_content));
         self.reset.add_css_class("flat");
         self.reset.add_css_class("destructive-action");
         self.reset.set_visible(self.has_custom.get());
         self.reset
-            .update_property(&[gtk::accessible::Property::Label("Use Original Artwork")]);
+            .update_property(&[gtk::accessible::Property::Label(self.subject.reset_label())]);
         {
             let weak = Rc::downgrade(self);
             self.reset.connect_clicked(move |_| {
@@ -972,18 +1163,14 @@ impl Editor {
     }
 
     fn load_current(self: &Rc<Self>) {
-        let (title, artist, path) = (
-            self.album.title.clone(),
-            self.album.artist.clone(),
-            self.ui.core.db_path.clone(),
-        );
+        let (subject, path) = (self.subject.clone(), self.ui.core.db_path.clone());
         let token = self.bump_load_token();
         let weak = Rc::downgrade(self);
         spawn_work(
             "flaccy-artwork-current",
             move || {
                 let db = Db::open(&path).ok()?;
-                let bytes = db.fetch_album_artwork(&title, &artist)?;
+                let bytes = subject.current_cover(&db)?;
                 decode_payload(Payload::Bytes(bytes)).ok()
             },
             move |loaded| {
@@ -1088,9 +1275,12 @@ impl Editor {
     }
 
     fn start_local_shelf(self: &Rc<Self>) {
+        let Subject::Album(album) = &self.subject else {
+            self.start_playlist_shelf();
+            return;
+        };
         let root = self.ui.core.music_root();
-        let tracks: Vec<(String, i32)> = self
-            .album
+        let tracks: Vec<(String, i32)> = album
             .tracks
             .iter()
             .map(|track| (track.rel_path.clone(), track.track_number))
@@ -1120,13 +1310,68 @@ impl Editor {
         );
     }
 
+    /// The covers of the albums the playlist draws from, one tile each in
+    /// playlist order and captioned with the album's title. They come from the
+    /// database's hoisted covers, so nothing is read off the disk.
+    fn start_playlist_shelf(self: &Rc<Self>) {
+        let Subject::Playlist { tracks, .. } = &self.subject else {
+            return;
+        };
+        let albums = playlist_cover::shelf_albums(
+            &tracks
+                .iter()
+                .map(|track| (track.album.clone(), track.artist.clone()))
+                .collect::<Vec<_>>(),
+        );
+        let path = self.ui.core.db_path.clone();
+        let weak = Rc::downgrade(self);
+        spawn_stream(
+            "flaccy-artwork-playlist-shelf",
+            move |tx| {
+                let Ok(db) = Db::open(&path) else { return };
+                let mut seen = std::collections::HashSet::new();
+                for (title, artist) in albums {
+                    let Some(bytes) = db.fetch_album_artwork(&title, &artist) else {
+                        continue;
+                    };
+                    if !seen.insert(local_artwork::content_hash(&bytes)) {
+                        continue;
+                    }
+                    let Some((width, height)) = artwork_image::dimensions(&bytes) else {
+                        continue;
+                    };
+                    let thumbnail = artwork_image::thumbnail(&bytes, LOCAL_THUMBNAIL);
+                    let cover = LocalCover {
+                        caption: title.clone(),
+                        origin: Origin::Embedded(bytes),
+                        width,
+                        height,
+                    };
+                    if tx.send_blocking((cover, thumbnail, format!("album:{title}|{artist}"))).is_err() {
+                        break;
+                    }
+                }
+            },
+            move |(cover, thumbnail, id)| {
+                if let Some(editor) = weak.upgrade() {
+                    editor.add_local_tile_with_id(cover, thumbnail, id);
+                }
+            },
+        );
+    }
+
     fn add_local_tile(self: &Rc<Self>, cover: LocalCover, thumbnail: Option<RgbaImage>) {
-        let (id, payload) = match &cover.origin {
-            Origin::File(path) => (format!("file:{}", path.display()), Payload::Path(path.clone())),
-            Origin::Embedded(bytes) => (
-                format!("embedded:{}", cover.caption),
-                Payload::Bytes(bytes.clone()),
-            ),
+        let id = match &cover.origin {
+            Origin::File(path) => format!("file:{}", path.display()),
+            Origin::Embedded(_) => format!("embedded:{}", cover.caption),
+        };
+        self.add_local_tile_with_id(cover, thumbnail, id);
+    }
+
+    fn add_local_tile_with_id(self: &Rc<Self>, cover: LocalCover, thumbnail: Option<RgbaImage>, id: String) {
+        let payload = match &cover.origin {
+            Origin::File(path) => Payload::Path(path.clone()),
+            Origin::Embedded(bytes) => Payload::Bytes(bytes.clone()),
         };
         let dimensions = format!("{}×{}", cover.width, cover.height);
         let Tile { button, art } = tile(&cover.caption, Some(&dimensions), &cover.caption);
@@ -1156,7 +1401,15 @@ impl Editor {
         let token = self.search_token.get() + 1;
         self.search_token.set(token);
         let query = self.search_entry.text().to_string();
-        let request = Request::new(&query, &self.album.title, &self.album.artist);
+        if self.subject.is_playlist() && query.trim().is_empty() {
+            self.clear_online();
+            self.online_spinner.stop();
+            self.online_status
+                .set_label("Search Apple Music, Deezer and the Cover Art Archive.");
+            self.online_status.set_visible(true);
+            return;
+        }
+        let request = Request::new(&query, self.subject.title(), self.subject.credit());
         self.clear_online();
         self.online_spinner.start();
         self.online_status.set_visible(false);
@@ -1310,7 +1563,7 @@ impl Editor {
         self.save.set_sensitive(false);
         self.spinner.start();
         let chain = source.chain();
-        let keys = self.keys.clone();
+        let subject = self.subject.clone();
         let path = self.ui.core.db_path.clone();
         let weak = Rc::downgrade(self);
         spawn_work(
@@ -1319,7 +1572,7 @@ impl Editor {
                 let jpeg = artwork_image::render_jpeg(chain.full(), &framing)
                     .ok_or_else(|| "the cover could not be rendered".to_string())?;
                 let db = Db::open(&path).map_err(|err| err.to_string())?;
-                db.set_custom_cover(&keys, &jpeg).map_err(|err| err.to_string())?;
+                subject.save_cover(&db, &jpeg).map_err(|err| err.to_string())?;
                 Ok(jpeg.len())
             },
             move |result| {
@@ -1332,11 +1585,11 @@ impl Editor {
                             "artwork",
                             &format!(
                                 "custom cover saved for {} ({} KB)",
-                                editor.album.title,
+                                editor.subject.title(),
                                 bytes / 1024
                             ),
                         );
-                        editor.ui.core.album_artwork_changed(&editor.keys);
+                        editor.subject.announce_change(&editor.ui.core);
                         editor.ui.core.toast("Artwork updated");
                         editor.dialog.force_close();
                     }
@@ -1352,10 +1605,16 @@ impl Editor {
 
     fn confirm_reset(self: &Rc<Self>) {
         let alert = adw::AlertDialog::new(
-            Some("Use the original artwork?"),
-            Some("Your chosen cover will be removed and the artwork from the music files is used again."),
+            Some(self.subject.reset_heading()),
+            Some(self.subject.reset_body()),
         );
-        alert.add_responses(&[("cancel", "Cancel"), ("original", "Use Original")]);
+        alert.add_responses(&[
+            ("cancel", "Cancel"),
+            (
+                "original",
+                if self.subject.is_playlist() { "Use Automatic" } else { "Use Original" },
+            ),
+        ]);
         alert.set_response_appearance("original", adw::ResponseAppearance::Destructive);
         alert.set_default_response(Some("cancel"));
         alert.set_close_response("cancel");
@@ -1371,14 +1630,14 @@ impl Editor {
     }
 
     pub fn reset_now(self: &Rc<Self>) {
-        let keys = self.keys.clone();
+        let subject = self.subject.clone();
         let path = self.ui.core.db_path.clone();
         let weak = Rc::downgrade(self);
         spawn_work(
             "flaccy-artwork-reset",
             move || -> Result<(), String> {
                 let db = Db::open(&path).map_err(|err| err.to_string())?;
-                db.clear_custom_cover(&keys).map_err(|err| err.to_string())
+                subject.clear_cover(&db).map_err(|err| err.to_string())
             },
             move |result| {
                 let Some(editor) = weak.upgrade() else { return };
@@ -1386,10 +1645,10 @@ impl Editor {
                     Ok(()) => {
                         crate::logger::info(
                             "artwork",
-                            &format!("custom cover cleared for {}", editor.album.title),
+                            &format!("custom cover cleared for {}", editor.subject.title()),
                         );
-                        editor.ui.core.album_artwork_changed(&editor.keys);
-                        editor.ui.core.toast("Original artwork restored");
+                        editor.subject.announce_change(&editor.ui.core);
+                        editor.ui.core.toast(editor.subject.reset_toast());
                         editor.dialog.force_close();
                     }
                     Err(message) => {
@@ -1441,6 +1700,24 @@ impl Editor {
             .map(|(_, tile)| tile.button.clone())
             .next();
         button.map(|button| button.emit_clicked()).is_some()
+    }
+
+    pub fn click_first_files_tile(&self) -> bool {
+        let button = self
+            .tiles
+            .borrow()
+            .iter()
+            .filter(|(id, tile)| {
+                (id.starts_with("album:") || id.starts_with("file:") || id.starts_with("embedded:"))
+                    && tile.button.is_sensitive()
+            })
+            .map(|(_, tile)| tile.button.clone())
+            .next();
+        button.map(|button| button.emit_clicked()).is_some()
+    }
+
+    pub fn search_text(&self) -> String {
+        self.search_entry.text().to_string()
     }
 
     pub fn online_status_text(&self) -> Option<String> {
@@ -1530,6 +1807,21 @@ pub fn attach_image_drop(
     ui: &Rc<Ui>,
     album_for: impl Fn() -> Option<Album> + 'static,
 ) {
+    attach_subject_drop(widget, ui, move || album_for().map(Subject::Album));
+}
+
+/// The same drop target for a playlist's cover: whatever is dropped opens the
+/// editor for that playlist with the picture already framed.
+pub fn attach_playlist_image_drop(widget: &impl IsA<gtk::Widget>, ui: &Rc<Ui>, playlist_id: i64) {
+    let resolver = Rc::clone(ui);
+    attach_subject_drop(widget, ui, move || Some(playlist_subject(&resolver, playlist_id)));
+}
+
+fn attach_subject_drop(
+    widget: &impl IsA<gtk::Widget>,
+    ui: &Rc<Ui>,
+    subject_for: impl Fn() -> Option<Subject> + 'static,
+) {
     let target = gtk::DropTarget::new(glib::Type::INVALID, gdk::DragAction::COPY);
     target.set_types(&[
         gdk::FileList::static_type(),
@@ -1538,10 +1830,10 @@ pub fn attach_image_drop(
     ]);
     let ui = Rc::clone(ui);
     target.connect_drop(move |_, value, _, _| {
-        let (Some(album), Some(payload)) = (album_for(), payload_from_value(value)) else {
+        let (Some(subject), Some(payload)) = (subject_for(), payload_from_value(value)) else {
             return false;
         };
-        present(&ui, &album, Some(payload));
+        present_subject(&ui, subject, Some(payload));
         true
     });
     let hovered = widget.clone().upcast::<gtk::Widget>();
@@ -1559,6 +1851,36 @@ pub fn attach_image_drop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn playlist(id: i64, name: &str) -> Subject {
+        Subject::Playlist {
+            id,
+            name: name.to_string(),
+            tracks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_playlist_is_stored_under_the_one_reserved_key() {
+        let subject = playlist(7, "Road Trip");
+        assert_eq!(
+            subject.artwork_keys(),
+            vec![("playlist:7".to_string(), playlist_cover::ARTIST.to_string())]
+        );
+        assert_eq!(subject.key(), "playlist:7");
+        assert_ne!(subject.key(), playlist(8, "Road Trip").key());
+    }
+
+    #[test]
+    fn a_playlist_search_waits_for_the_person_and_says_what_it_holds() {
+        let subject = playlist(1, "Road Trip");
+        assert_eq!(subject.default_query(), "");
+        assert_eq!(subject.subtitle(), "Road Trip · 0 tracks");
+        assert_eq!(track_count_label(1), "1 track");
+        assert_eq!(track_count_label(2), "2 tracks");
+        assert_eq!(subject.reset_label(), "Use Automatic Cover");
+        assert_eq!(subject.previews().len(), 2);
+    }
 
     #[test]
     fn a_link_is_a_link_and_only_the_first_line_counts() {

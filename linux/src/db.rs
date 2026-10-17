@@ -475,6 +475,9 @@ impl Db {
         let _ = self
             .conn
             .execute("ALTER TABLE albumInfo ADD COLUMN customCoverData BLOB", []);
+        let _ = self
+            .conn
+            .execute("ALTER TABLE playlists ADD COLUMN customCoverData BLOB", []);
         Ok(())
     }
 
@@ -641,6 +644,9 @@ impl Db {
     /// outranks every embedded and downloaded cover, else the hoisted or
     /// enriched one.
     pub fn fetch_album_artwork(&self, title: &str, artist: &str) -> Option<Vec<u8>> {
+        if let Some(playlist_id) = flaccy_shared::playlist_cover::playlist_id(title, artist) {
+            return self.playlist_cover(playlist_id);
+        }
         self.conn
             .query_row(
                 "SELECT COALESCE(customCoverData, coverArtData) FROM albumInfo
@@ -701,6 +707,50 @@ impl Db {
                 .flatten()
                 .is_some()
         })
+    }
+
+    /// The picture the person chose for a playlist, or None while it shows the
+    /// automatic mosaic of its albums.
+    pub fn playlist_cover(&self, playlist_id: i64) -> Option<Vec<u8>> {
+        self.conn
+            .query_row(
+                "SELECT customCoverData FROM playlists WHERE id = ?1",
+                params![playlist_id],
+                |row| row.get::<_, Option<Vec<u8>>>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
+    }
+
+    pub fn set_playlist_cover(&self, playlist_id: i64, data: &[u8]) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE playlists SET customCoverData = ?1 WHERE id = ?2",
+            params![data, playlist_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_playlist_cover(&self, playlist_id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE playlists SET customCoverData = NULL WHERE id = ?1",
+            params![playlist_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn has_playlist_cover(&self, playlist_id: i64) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM playlists WHERE id = ?1 AND customCoverData IS NOT NULL",
+                params![playlist_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .is_some()
     }
 
     pub fn delete_tracks_not_in(&self, keep: &HashSet<String>) -> Result<usize, rusqlite::Error> {
@@ -3724,6 +3774,89 @@ mod cleanup_tests {
         drop(db);
         let reopened = Db::open(&path).expect("a second open is a no-op");
         assert_eq!(reopened.fetch_album_artwork("Old", "Band"), Some(vec![4]));
+        drop(reopened);
+        remove_all(&path);
+    }
+
+    #[test]
+    fn a_playlist_cover_is_stored_read_through_the_reserved_key_and_cleared() {
+        let temp = TempDb::open();
+        let id = temp.db.create_playlist("Road Trip").expect("playlist");
+        let other = temp.db.create_playlist("Gym").expect("playlist");
+        assert!(!temp.db.has_playlist_cover(id));
+        assert_eq!(temp.db.playlist_cover(id), None);
+
+        temp.db.set_playlist_cover(id, &[3, 1, 4]).expect("save");
+        let title = flaccy_shared::playlist_cover::title_for(id);
+        let artist = flaccy_shared::playlist_cover::ARTIST;
+        assert_eq!(temp.db.fetch_album_artwork(&title, artist), Some(vec![3, 1, 4]));
+        assert!(temp.db.has_playlist_cover(id));
+        assert!(!temp.db.has_playlist_cover(other), "another playlist is untouched");
+
+        temp.db.rename_playlist(id, "Road Trip 2").expect("rename");
+        assert_eq!(temp.db.playlist_cover(id), Some(vec![3, 1, 4]), "a rename keeps the cover");
+
+        temp.db.clear_playlist_cover(id).expect("clear");
+        assert_eq!(temp.db.fetch_album_artwork(&title, artist), None);
+        assert!(!temp.db.has_playlist_cover(id));
+    }
+
+    #[test]
+    fn a_playlist_key_never_answers_for_an_album_and_an_album_never_for_a_playlist() {
+        let temp = TempDb::open();
+        let id = temp.db.create_playlist("Mix").expect("playlist");
+        temp.db.set_playlist_cover(id, &[9]).expect("save");
+        temp.db
+            .set_custom_cover(&keys(&[("playlist:1", "Band")]), &[7])
+            .expect("album save");
+        assert_eq!(temp.db.fetch_album_artwork("playlist:1", "Band"), Some(vec![7]));
+        assert_eq!(
+            temp.db.fetch_album_artwork(
+                &flaccy_shared::playlist_cover::title_for(id),
+                flaccy_shared::playlist_cover::ARTIST
+            ),
+            Some(vec![9])
+        );
+    }
+
+    #[test]
+    fn deleting_a_playlist_takes_its_cover_with_it() {
+        let temp = TempDb::open();
+        let id = temp.db.create_playlist("Gone").expect("playlist");
+        temp.db.set_playlist_cover(id, &[1]).expect("save");
+        temp.db.delete_playlist(id).expect("delete");
+        assert_eq!(temp.db.playlist_cover(id), None);
+    }
+
+    #[test]
+    fn a_library_from_before_playlist_covers_gains_the_column() {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "flaccy-legacy-playlist-test-{}-{unique}.sqlite",
+            std::process::id()
+        ));
+        remove_all(&path);
+        {
+            let legacy = Connection::open(&path).expect("legacy db");
+            legacy
+                .execute_batch(
+                    "CREATE TABLE playlists (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        createdAt DATETIME NOT NULL
+                    );
+                    INSERT INTO playlists (name, createdAt) VALUES ('Old', 0);",
+                )
+                .expect("legacy schema");
+        }
+        let db = Db::open(&path).expect("migrates");
+        let id = db.fetch_playlists()[0].id;
+        db.set_playlist_cover(id, &[5]).expect("the column exists");
+        assert_eq!(db.playlist_cover(id), Some(vec![5]));
+        drop(db);
+        let reopened = Db::open(&path).expect("a second open is a no-op");
+        assert_eq!(reopened.playlist_cover(id), Some(vec![5]));
         drop(reopened);
         remove_all(&path);
     }

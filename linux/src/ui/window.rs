@@ -1208,6 +1208,12 @@ fn register_actions(app: &adw::Application, ui: &Rc<Ui>, search: &gtk::SearchEnt
     add_int64_action(ui, "playlist-delete", |ui, id| {
         ui::playlists::confirm_delete_playlist(ui, id);
     });
+    add_int64_action(ui, "playlist-cover-edit", |ui, id| {
+        ui::artwork_editor::present_playlist(ui, id, None);
+    });
+    add_int64_action(ui, "playlist-cover-reset", |ui, id| {
+        ui::playlist_cover::confirm_reset(ui, id);
+    });
 }
 
 /// Opens the system file manager with the given file selected (portal
@@ -1795,6 +1801,12 @@ fn schedule_demo_detail(ui: &Rc<Ui>) {
         let ui = Rc::clone(ui);
         glib::timeout_add_local_once(std::time::Duration::from_millis(1400), move || {
             ui::artwork_demo::open(&ui, &spec);
+        });
+    }
+    if let Ok(mode) = std::env::var("FLACCY_DEMO_PLAYLIST_COVER") {
+        let ui = Rc::clone(ui);
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1400), move || {
+            ui::playlist_cover_demo::open(&ui, &mode);
         });
     }
     if let Ok(mode) = std::env::var("FLACCY_DEMO_EQ_UI") {

@@ -129,7 +129,7 @@ fn embedded_picture(path: &Path) -> Option<Vec<u8>> {
         .map(|picture| picture.data().to_vec())
 }
 
-fn content_hash(bytes: &[u8]) -> u64 {
+pub fn content_hash(bytes: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
     bytes.hash(&mut hasher);
     hasher.finish()

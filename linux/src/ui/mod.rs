@@ -16,6 +16,8 @@ pub mod guide;
 pub mod lyrics_panel;
 pub mod lyrics_style;
 pub mod now_playing;
+pub mod playlist_cover;
+pub mod playlist_cover_demo;
 pub mod playlists;
 pub mod prefs;
 pub mod queue_panel;

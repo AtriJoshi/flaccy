@@ -20,6 +20,11 @@
   box-shadow: 0 1px 4px alpha(#000, 0.28), 0 4px 16px alpha(#000, 0.16);
 }
 
+.playlist-thumb {
+  border-radius: 8px;
+  box-shadow: 0 1px 3px alpha(#000, 0.28);
+}
+
 .cover-large {
   border-radius: 14px;
   box-shadow:
