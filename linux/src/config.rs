@@ -18,6 +18,7 @@ pub struct Config {
     pub import_page_cursor: u32,
     pub sidebar_index: i32,
     pub album_sort: String,
+    pub playlist_sort: String,
     /// The Songs and Albums quick-pivot chips (`LibraryFilter::id`) and the
     /// time range the Songs "Most Played" chip counts over (`Period::api_value`).
     pub songs_filter: String,
@@ -95,6 +96,7 @@ impl Default for Config {
             import_page_cursor: 1,
             sidebar_index: 0,
             album_sort: "artist".to_string(),
+            playlist_sort: "name".to_string(),
             songs_filter: "all".to_string(),
             songs_range: "1month".to_string(),
             albums_filter: "all".to_string(),

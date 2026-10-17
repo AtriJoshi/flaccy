@@ -1305,3 +1305,64 @@ textview.eq-import-text {
 .artwork-pencil:focus-visible {
   opacity: 1;
 }
+
+/* ---- playlists ---------------------------------------------------------- */
+.playlist-cover-icon {
+  opacity: 0.45;
+  color: white;
+  -gtk-icon-shadow: 0 1px 6px alpha(#000, 0.4);
+}
+
+.playlist-fab {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  color: @accent_fg_color;
+  background-image: linear-gradient(160deg, lighter(@accent_bg_color), @accent_bg_color);
+  box-shadow: 0 4px 14px alpha(#000, 0.45), 0 0 0 1px alpha(#fff, 0.12) inset;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 160ms ease, transform 180ms ease, box-shadow 160ms ease;
+}
+
+.playlist-tile:hover .playlist-fab,
+.playlist-tile:focus-within .playlist-fab,
+.playlist-fab:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.playlist-fab:hover {
+  box-shadow: 0 6px 20px alpha(@accent_bg_color, 0.55), 0 0 0 1px alpha(#fff, 0.18) inset;
+}
+
+.playlist-fab:disabled {
+  opacity: 0;
+}
+
+.playlist-eyebrow {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: @accent_color;
+}
+
+.cover-thumb {
+  border-radius: 6px;
+  box-shadow: 0 1px 3px alpha(#000, 0.3);
+}
+
+.playlist-drag-handle {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+row:hover .playlist-drag-handle {
+  opacity: 0.4;
+}
+
+.playlist-picker-new {
+  color: @accent_color;
+  min-width: 48px;
+}

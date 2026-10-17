@@ -73,7 +73,7 @@ pub struct PendingLoveOp {
 pub struct PlaylistRow {
     pub id: i64,
     pub name: String,
-    pub track_count: i64,
+    pub created_at: i64,
 }
 
 pub struct PlaylistTrackRow {
@@ -1171,9 +1171,7 @@ impl Db {
 
     pub fn fetch_playlists(&self) -> Vec<PlaylistRow> {
         let Ok(mut stmt) = self.conn.prepare(
-            "SELECT p.id, p.name,
-                    (SELECT COUNT(*) FROM playlistTracks pt WHERE pt.playlistId = p.id)
-             FROM playlists p ORDER BY p.createdAt",
+            "SELECT p.id, p.name, p.createdAt FROM playlists p ORDER BY p.createdAt, p.id",
         ) else {
             return Vec::new();
         };
@@ -1181,9 +1179,29 @@ impl Db {
             Ok(PlaylistRow {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                track_count: row.get(2)?,
+                created_at: match row.get::<_, rusqlite::types::Value>(2)? {
+                    rusqlite::types::Value::Text(text) => unix_from_string(&text),
+                    rusqlite::types::Value::Integer(seconds) => seconds,
+                    rusqlite::types::Value::Real(seconds) => seconds as i64,
+                    _ => 0,
+                },
             })
         });
+        match rows {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Every playlist's tracks in play order, as (playlist id, rel path) pairs,
+    /// so the playlists grid can resolve all of them with one query.
+    pub fn all_playlist_tracks(&self) -> Vec<(i64, String)> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT playlistId, trackFileURL FROM playlistTracks ORDER BY playlistId, position",
+        ) else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)));
         match rows {
             Ok(rows) => rows.flatten().collect(),
             Err(_) => Vec::new(),

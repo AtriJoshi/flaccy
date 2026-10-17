@@ -1811,10 +1811,18 @@ pub fn attach_image_drop(
 }
 
 /// The same drop target for a playlist's cover: whatever is dropped opens the
-/// editor for that playlist with the picture already framed.
-pub fn attach_playlist_image_drop(widget: &impl IsA<gtk::Widget>, ui: &Rc<Ui>, playlist_id: i64) {
+/// editor for that playlist with the picture already framed. `playlist_for`
+/// names the playlist at the moment of the drop, so a widget reused for
+/// another playlist stays correct.
+pub fn attach_playlist_image_drop(
+    widget: &impl IsA<gtk::Widget>,
+    ui: &Rc<Ui>,
+    playlist_for: impl Fn() -> Option<i64> + 'static,
+) {
     let resolver = Rc::clone(ui);
-    attach_subject_drop(widget, ui, move || Some(playlist_subject(&resolver, playlist_id)));
+    attach_subject_drop(widget, ui, move || {
+        playlist_for().map(|playlist_id| playlist_subject(&resolver, playlist_id))
+    });
 }
 
 fn attach_subject_drop(

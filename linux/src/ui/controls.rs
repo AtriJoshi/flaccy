@@ -25,6 +25,48 @@ pub fn bind_adaptive_grid_columns(grid: &gtk::GridView, tile_width: i32) {
     });
 }
 
+/// The soft top-down color wash behind a detail page's hero, tinted by the
+/// cover's dominant color once the artwork lands (store it in `dominant` and
+/// queue a redraw). Re-tints when the system switches between light and dark.
+pub fn hero_backdrop(dominant: &Rc<RefCell<Option<(u8, u8, u8)>>>) -> gtk::DrawingArea {
+    let backdrop = gtk::DrawingArea::new();
+    backdrop.set_hexpand(true);
+    backdrop.set_vexpand(true);
+    {
+        let dominant = Rc::clone(dominant);
+        backdrop.set_draw_func(move |_, cr, width, height| {
+            let Some((r, g, b)) = *dominant.borrow() else {
+                return;
+            };
+            let dark = adw::StyleManager::default().is_dark();
+            let blend = |channel: u8| {
+                let value = channel as f64 / 255.0;
+                if dark {
+                    value * 0.55
+                } else {
+                    value * 0.45 + 0.98 * 0.55
+                }
+            };
+            let (r, g, b) = (blend(r), blend(g), blend(b));
+            let gradient = gtk::cairo::LinearGradient::new(0.0, 0.0, 0.0, height as f64);
+            gradient.add_color_stop_rgba(0.0, r, g, b, 0.85);
+            gradient.add_color_stop_rgba(0.7, r, g, b, 0.0);
+            let _ = cr.set_source(&gradient);
+            cr.rectangle(0.0, 0.0, width as f64, height as f64);
+            let _ = cr.fill();
+        });
+    }
+    {
+        let weak = backdrop.downgrade();
+        adw::StyleManager::default().connect_dark_notify(move |_| {
+            if let Some(backdrop) = weak.upgrade() {
+                backdrop.queue_draw();
+            }
+        });
+    }
+    backdrop
+}
+
 /// Reflects Last.fm love state on a heart button; shared by the mini transport
 /// and the full-window player so both stay identical.
 pub fn set_love_appearance(button: &gtk::Button, loved: bool) {

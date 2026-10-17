@@ -1,5 +1,6 @@
 use crate::events::AppEvent;
-use crate::ui::{artwork, Ui};
+use crate::ui::mosaic::{AlbumRef, Mosaic, OnColor};
+use crate::ui::Ui;
 use adw::prelude::*;
 use flaccy_shared::playlist_cover;
 use std::cell::{Cell, RefCell};
@@ -9,7 +10,9 @@ use std::rc::Rc;
 /// one, otherwise a mosaic of up to four of its albums laid out like the Apple
 /// clients (one full, two halves, one large beside two stacked, a 2×2 grid),
 /// otherwise the palette placeholder. It repaints itself when the cover is
-/// chosen or reset.
+/// chosen or reset. A side of 0 makes the cover follow the width it is given,
+/// and `bind` points a reused cover at another playlist.
+#[derive(Clone)]
 pub struct PlaylistArt {
     host: gtk::Overlay,
     state: Rc<State>,
@@ -19,12 +22,11 @@ const STATE_KEY: &str = "flaccy-playlist-art";
 
 struct State {
     ui: Rc<Ui>,
-    playlist_id: i64,
-    name: String,
-    side: i32,
     host: gtk::glib::WeakRef<gtk::Overlay>,
-    content: RefCell<Option<gtk::Widget>>,
-    albums: RefCell<Vec<(String, String)>>,
+    playlist_id: Cell<i64>,
+    name: RefCell<String>,
+    albums: RefCell<Vec<AlbumRef>>,
+    on_color: RefCell<Option<OnColor>>,
     token: Cell<u64>,
 }
 
@@ -35,34 +37,29 @@ impl PlaylistArt {
         name: &str,
         side: i32,
         css_class: &str,
-        albums: Vec<(String, String)>,
+        albums: Vec<AlbumRef>,
     ) -> Self {
-        let spacer = gtk::Box::builder()
-            .width_request(side)
-            .height_request(side)
-            .build();
-        let host = gtk::Overlay::builder()
-            .child(&spacer)
-            .hexpand(false)
-            .vexpand(false)
-            .halign(gtk::Align::Start)
-            .valign(gtk::Align::Start)
-            .overflow(gtk::Overflow::Hidden)
-            .build();
+        let mosaic = Mosaic::new();
+        mosaic.set_fixed_size(side);
+        let host = mosaic.widget().clone();
         host.add_css_class(css_class);
+        if side > 0 {
+            host.set_halign(gtk::Align::Start);
+            host.set_valign(gtk::Align::Start);
+        }
         let state = Rc::new(State {
             ui: Rc::clone(ui),
-            playlist_id,
-            name: name.to_string(),
-            side,
             host: host.downgrade(),
-            content: RefCell::new(None),
+            playlist_id: Cell::new(playlist_id),
+            name: RefCell::new(name.to_string()),
             albums: RefCell::new(albums),
+            on_color: RefCell::new(None),
             token: Cell::new(0),
         });
         unsafe {
             host.set_data(STATE_KEY, Rc::clone(&state));
         }
+        state.show_mosaic();
         state.refresh();
         let weak = Rc::downgrade(&state);
         ui.core.hub.subscribe_widget(&host, move |_, event| {
@@ -70,135 +67,92 @@ impl PlaylistArt {
                 return;
             };
             let Some(state) = weak.upgrade() else { return };
-            if playlist_cover::playlist_id(title, artist) == Some(state.playlist_id) {
+            if playlist_cover::playlist_id(title, artist) == Some(state.playlist_id.get()) {
                 state.refresh();
             }
         });
         Self { host, state }
     }
 
+    /// Recovers the cover from the widget `widget()` returned, for virtualized
+    /// factories that only keep the widget tree across row recycling.
+    pub fn from_widget(widget: &gtk::Widget) -> Option<Self> {
+        let host = widget.clone().downcast::<gtk::Overlay>().ok()?;
+        let state = unsafe { host.data::<Rc<State>>(STATE_KEY)?.as_ref().clone() };
+        Some(Self { host, state })
+    }
+
     pub fn widget(&self) -> gtk::Overlay {
         self.host.clone()
     }
 
-    /// Replaces the albums the automatic mosaic is drawn from, repainting only
-    /// when they changed.
-    pub fn set_albums(&self, albums: Vec<(String, String)>) {
-        if *self.state.albums.borrow() == albums {
-            return;
+    /// Resizes a pinned cover.
+    pub fn set_side(&self, side: i32) {
+        if let Some(mosaic) = self.state.mosaic() {
+            mosaic.set_fixed_size(side);
         }
+        self.host.set_halign(gtk::Align::Start);
+        self.host.set_valign(gtk::Align::Start);
+    }
+
+    /// Reports the dominant color of whatever the cover shows, for a page that
+    /// tints itself after its cover.
+    pub fn set_on_color(&self, on_color: OnColor) {
+        *self.state.on_color.borrow_mut() = Some(on_color);
+        self.state.refresh();
+    }
+
+    /// Points the cover at another playlist and repaints it.
+    pub fn bind(&self, playlist_id: i64, name: &str, albums: Vec<AlbumRef>) {
+        self.state.playlist_id.set(playlist_id);
+        *self.state.name.borrow_mut() = name.to_string();
         *self.state.albums.borrow_mut() = albums;
+        self.state.show_mosaic();
         self.state.refresh();
     }
 }
 
 impl State {
+    fn mosaic(&self) -> Option<Mosaic> {
+        Mosaic::from_root(&self.host.upgrade()?)
+    }
+
     fn refresh(self: &Rc<Self>) {
+        let Some(mosaic) = self.mosaic() else { return };
         let token = self.token.get() + 1;
         self.token.set(token);
         let weak = Rc::downgrade(self);
         self.ui.core.artwork.request(
-            &playlist_cover::title_for(self.playlist_id),
+            &playlist_cover::title_for(self.playlist_id.get()),
             playlist_cover::ARTIST,
-            self.side as u32,
-            move |texture, _| {
+            mosaic.single_px(),
+            move |texture, color| {
                 let Some(state) = weak.upgrade() else { return };
                 if token != state.token.get() {
                     return;
                 }
                 match texture {
-                    Some(texture) => state.show_picture(texture),
+                    Some(texture) => {
+                        if let Some(mosaic) = state.mosaic() {
+                            mosaic.set_picture(texture);
+                        }
+                        let on_color = state.on_color.borrow().clone();
+                        if let (Some(on_color), Some(color)) = (on_color, color) {
+                            on_color(color);
+                        }
+                    }
                     None => state.show_mosaic(),
                 }
             },
         );
     }
 
-    /// Replaces what the cover shows. The content is an overlay over a spacer
-    /// of exactly the cover's side, so however large a texture is, it is
-    /// allocated that square and nothing more.
-    fn show(&self, content: &impl IsA<gtk::Widget>) {
-        let Some(host) = self.host.upgrade() else { return };
-        if let Some(previous) = self.content.borrow_mut().take() {
-            host.remove_overlay(&previous);
-        }
-        host.add_overlay(content);
-        host.set_clip_overlay(content, true);
-        *self.content.borrow_mut() = Some(content.clone().upcast());
-    }
-
-    fn show_picture(&self, texture: &gtk::gdk::MemoryTexture) {
-        let picture = fill_picture();
-        picture.set_paintable(Some(texture));
-        self.show(&picture);
-    }
-
     fn show_mosaic(&self) {
+        let Some(mosaic) = self.mosaic() else { return };
+        let name = self.name.borrow().clone();
         let albums = self.albums.borrow().clone();
-        if albums.is_empty() {
-            let picture = fill_picture();
-            picture.set_paintable(Some(&self.ui.core.artwork.placeholder(&self.name)));
-            self.show(&picture);
-            return;
-        }
-        let request = if albums.len() == 1 { self.side } else { self.side / 2 } as u32;
-        let tiles: Vec<gtk::Picture> = albums
-            .iter()
-            .map(|(title, artist)| {
-                let picture = fill_picture();
-                picture.set_paintable(Some(
-                    &self.ui.core.artwork.placeholder(&format!("{title}|{artist}")),
-                ));
-                artwork::follow_picture(&self.ui.core, &picture, title, artist, request);
-                picture
-            })
-            .collect();
-        self.show(&layout(&tiles));
-    }
-}
-
-/// A picture that fills whatever it is given, cropping the overflow.
-fn fill_picture() -> gtk::Picture {
-    let picture = gtk::Picture::builder()
-        .content_fit(gtk::ContentFit::Cover)
-        .can_shrink(true)
-        .hexpand(true)
-        .vexpand(true)
-        .build();
-    picture.set_overflow(gtk::Overflow::Hidden);
-    picture
-}
-
-fn split(orientation: gtk::Orientation, children: &[&gtk::Widget]) -> gtk::Box {
-    let container = gtk::Box::builder()
-        .orientation(orientation)
-        .homogeneous(true)
-        .hexpand(true)
-        .vexpand(true)
-        .build();
-    for child in children {
-        container.append(*child);
-    }
-    container
-}
-
-/// One tile fills the square, two split it in halves, three give the first a
-/// half and stack the others beside it, four make a grid.
-fn layout(tiles: &[gtk::Picture]) -> gtk::Widget {
-    use gtk::Orientation::{Horizontal, Vertical};
-    let widget = |index: usize| tiles[index].clone().upcast::<gtk::Widget>();
-    match tiles.len() {
-        1 => widget(0),
-        2 => split(Horizontal, &[&widget(0), &widget(1)]).upcast(),
-        3 => {
-            let column = split(Vertical, &[&widget(1), &widget(2)]);
-            split(Horizontal, &[&widget(0), column.upcast_ref()]).upcast()
-        }
-        _ => {
-            let top = split(Horizontal, &[&widget(0), &widget(1)]);
-            let bottom = split(Horizontal, &[&widget(2), &widget(3)]);
-            split(Vertical, &[top.upcast_ref(), bottom.upcast_ref()]).upcast()
-        }
+        let on_color = self.on_color.borrow().clone();
+        mosaic.set_covers(&self.ui, &name, &albums, on_color);
     }
 }
 
@@ -228,7 +182,10 @@ pub fn confirm_reset(ui: &Rc<Ui>, playlist_id: i64) {
                 ui.core.toast("Automatic cover restored");
             }
             Err(err) => {
-                crate::logger::error("artwork", &format!("resetting playlist cover failed: {err}"));
+                crate::logger::error(
+                    "artwork",
+                    &format!("resetting playlist cover failed: {err}"),
+                );
                 ui.core.toast("Couldn't restore the automatic cover");
             }
         }
