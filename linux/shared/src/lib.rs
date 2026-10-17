@@ -17,4 +17,5 @@ pub mod library_debut;
 pub mod library_filter;
 pub mod library_surface;
 pub mod load_progress;
+pub mod lyrics;
 pub mod playlist_cover;
