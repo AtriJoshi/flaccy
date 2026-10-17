@@ -74,6 +74,13 @@ final class ArtworkTileView: NSView {
         CATransaction.commit()
     }
 
+    #if DEBUG
+    var displayedImage: CGImage? {
+        guard !imageLayer.isHidden, let contents = imageLayer.contents else { return nil }
+        return (contents as! CGImage)
+    }
+    #endif
+
     func stopShimmer() {
         setShimmering(false)
     }

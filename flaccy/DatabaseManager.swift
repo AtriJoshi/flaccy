@@ -880,6 +880,7 @@ nonisolated final class DatabaseManager: Sendable {
                         UPDATE albumInfo SET
                             coverArtURL = COALESCE(coverArtURL, (SELECT coverArtURL FROM albumInfo WHERE title = :vt AND artist = :va)),
                             coverArtData = COALESCE(coverArtData, (SELECT coverArtData FROM albumInfo WHERE title = :vt AND artist = :va)),
+                            customCoverData = COALESCE(customCoverData, (SELECT customCoverData FROM albumInfo WHERE title = :vt AND artist = :va)),
                             musicBrainzID = COALESCE(musicBrainzID, (SELECT musicBrainzID FROM albumInfo WHERE title = :vt AND artist = :va)),
                             year = COALESCE(year, (SELECT year FROM albumInfo WHERE title = :vt AND artist = :va)),
                             genre = COALESCE(genre, (SELECT genre FROM albumInfo WHERE title = :vt AND artist = :va)),

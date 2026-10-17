@@ -19,7 +19,10 @@ final class AlbumGridItem: NSCollectionViewItem {
     private let badgeContainer = NSView()
     private let lovedHeart = NSImageView()
     private var currentAlbumID: String?
+    private var currentAlbum: Album?
+    private var artworkObserver: ArtworkChangeObserver?
     private var isHovering = false
+    private var isDropTargeted = false
 
     override func loadView() {
         view = AlbumGridItemView(owner: self)
@@ -106,6 +109,10 @@ final class AlbumGridItem: NSCollectionViewItem {
     func configure(with album: Album, loved: Bool) {
         let albumID = album.id
         currentAlbumID = albumID
+        currentAlbum = album
+        if artworkObserver == nil {
+            artworkObserver = ArtworkChangeObserver { [weak self] in self?.refreshArtwork() }
+        }
         titleLabel.stringValue = album.title
         artistLabel.stringValue = album.artist
         titleLabel.toolTip = album.title
@@ -131,20 +138,48 @@ final class AlbumGridItem: NSCollectionViewItem {
         }
     }
 
+    /// Reloads this tile's cover after the person changed one, leaving the old
+    /// picture up until the new one has decoded. Only a tile showing an album
+    /// pays for it, and every other album's thumbnail is still in the cache.
+    private func refreshArtwork() {
+        guard let album = currentAlbum, let albumID = currentAlbumID else { return }
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: album.title, artist: album.artist) { [weak self] image in
+            guard let self, self.currentAlbumID == albumID else { return }
+            if let image {
+                self.artworkTile.showImage(image)
+            } else {
+                self.artworkTile.showPlaceholder(seed: albumID, shimmering: false)
+            }
+        }
+    }
+
+    #if DEBUG
+    var debugShownImage: CGImage? { artworkTile.displayedImage }
+    #endif
+
+    func setDropTargeted(_ targeted: Bool) {
+        isDropTargeted = targeted
+        applyBorder()
+    }
+
+    private func applyBorder() {
+        artworkTile.layer?.borderWidth = isSelected || isDropTargeted ? 2.5 : 0
+        artworkTile.layer?.borderColor = NSColor.controlAccentColor.cgColor
+    }
+
     func setLoved(_ loved: Bool) {
         lovedHeart.isHidden = !loved
     }
 
     override var isSelected: Bool {
-        didSet {
-            artworkTile.layer?.borderWidth = isSelected ? 2.5 : 0
-            artworkTile.layer?.borderColor = NSColor.controlAccentColor.cgColor
-        }
+        didSet { applyBorder() }
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         currentAlbumID = nil
+        currentAlbum = nil
+        isDropTargeted = false
         isHovering = false
         applyScale(1)
         onDoubleClick = nil

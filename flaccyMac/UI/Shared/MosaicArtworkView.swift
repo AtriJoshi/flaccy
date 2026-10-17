@@ -7,9 +7,17 @@ final class MosaicArtworkView: NSView {
 
     private var tileLayers: [CALayer] = []
     private var currentKey: String?
+    private var lastTracks: [Track] = []
+    private var lastSeed = ""
+    private var artworkObserver: ArtworkChangeObserver?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        artworkObserver = ArtworkChangeObserver { [weak self] in
+            guard let self, !self.lastTracks.isEmpty else { return }
+            self.currentKey = nil
+            self.configure(with: self.lastTracks, fallbackSeed: self.lastSeed)
+        }
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
@@ -20,6 +28,8 @@ final class MosaicArtworkView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(with tracks: [Track], fallbackSeed: String) {
+        lastTracks = tracks
+        lastSeed = fallbackSeed
         var seenAlbums = [String]()
         var albumPairs = [(title: String, artist: String)]()
         for track in tracks {

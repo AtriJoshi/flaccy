@@ -42,6 +42,7 @@ final class TransportBarViewController: NSViewController {
     private var pendingChaseTime: TimeInterval?
     private var chaseGeneration = 0
     private var currentArtworkKey: String?
+    private var artworkObserver: ArtworkChangeObserver?
 
     override func loadView() {
         let content = NSView()
@@ -126,6 +127,7 @@ final class TransportBarViewController: NSViewController {
         super.viewDidLoad()
         observePlayback()
         refreshEverything()
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.reloadArtwork() }
     }
 
     deinit {
@@ -419,6 +421,22 @@ final class TransportBarViewController: NSViewController {
         AlbumArtworkCache.shared.loadThumbnail(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
             guard let self, self.currentArtworkKey == key, let image else { return }
             self.showArtwork(image)
+        }
+    }
+
+    /// Asks the cache again for the playing track's cover after the person
+    /// changed it, keeping the old picture up until the new one arrives.
+    private func reloadArtwork() {
+        guard let track = player.currentTrack else { return }
+        let key = "\(track.albumTitle)\u{0}\(track.artist)"
+        currentArtworkKey = key
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
+            guard let self, self.currentArtworkKey == key else { return }
+            if let image {
+                self.showArtwork(image)
+            } else {
+                self.applyArtworkPlaceholder(seed: "\(track.albumTitle)|\(track.artist)")
+            }
         }
     }
 

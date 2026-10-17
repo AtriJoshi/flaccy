@@ -8,9 +8,12 @@ final class RemoteArtworkView: NSView {
     private let imageView = NSImageView()
     private let placeholder = CAGradientLayer()
     private var loadToken = UUID()
+    private var localKey: (album: String, artist: String)?
+    private var artworkObserver: ArtworkChangeObserver?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.reloadLocal() }
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
@@ -44,6 +47,7 @@ final class RemoteArtworkView: NSView {
     func configure(localAlbum: String?, localArtist: String?, remoteURL: String?, placeholderSeed: String) {
         let token = UUID()
         loadToken = token
+        localKey = localAlbum.flatMap { album in localArtist.map { (album, $0) } }
         showPlaceholder(seed: placeholderSeed)
 
         if let localAlbum, let localArtist,
@@ -67,6 +71,17 @@ final class RemoteArtworkView: NSView {
             return
         }
         loadRemote(remoteURL, token: token)
+    }
+
+    /// Asks the local cache again after the person changed a cover, leaving
+    /// whatever is showing in place when the library has nothing for this one.
+    private func reloadLocal() {
+        guard let localKey else { return }
+        let token = loadToken
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: localKey.album, artist: localKey.artist) { [weak self] image in
+            guard let self, self.loadToken == token, let image else { return }
+            self.show(image)
+        }
     }
 
     private func loadRemote(_ urlString: String?, token: UUID) {

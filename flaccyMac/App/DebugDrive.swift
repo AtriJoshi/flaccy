@@ -11,6 +11,7 @@ enum DebugDrive {
 
     static func runIfRequested(window: NSWindow?) {
         DebugStatsDrive.runIfRequested()
+        DebugArtworkDrive.runIfRequested(window: window)
         if let target = value(after: "--dump-log") {
             Task {
                 try? await Task.sleep(for: .seconds(8))
@@ -611,7 +612,7 @@ enum DebugDrive {
     /// Captures the window's first sheet — the paywall, pair it with
     /// `--trial-day N` to render any day of the runway — through the same
     /// cached-display path the Stage B drive uses for sheets.
-    private static func captureSheet(of window: NSWindow?, name: String) {
+    static func captureSheet(of window: NSWindow?, name: String) {
         guard let sheet = window?.sheets.first else {
             AppLogger.error("DebugDrive: no sheet to capture for \(name)", category: .general)
             return
@@ -672,7 +673,7 @@ enum DebugDrive {
         screen.view.window?.undoManager
     }
 
-    private static func capture(window: NSWindow?, name: String) {
+    static func capture(window: NSWindow?, name: String) {
         if let window {
             AppLogger.info(
                 "DebugDrive: capture \(name) — frame \(window.frame), screen \(window.screen?.frame ?? .zero), backingScale \(window.backingScaleFactor)",

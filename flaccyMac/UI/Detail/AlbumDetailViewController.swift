@@ -13,6 +13,8 @@ final class AlbumDetailViewController: NSViewController {
     private let backdrop = AmbientBackdropView()
     private let scrollView = NSScrollView()
     private let artworkTile = ArtworkTileView()
+    private let coverOverlay = ArtworkEditOverlayView()
+    private var artworkObserver: ArtworkChangeObserver?
     private let titleLabel = NSTextField(wrappingLabelWithString: "")
     private let artistButton = NSButton()
     private let metaLabel = NSTextField(labelWithString: "")
@@ -94,7 +96,9 @@ final class AlbumDetailViewController: NSViewController {
             self?.onSelectArtist?(name)
         }
 
+        coverOverlay.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(artworkTile)
+        document.addSubview(coverOverlay)
         document.addSubview(headerText)
         document.addSubview(tracksStack)
         document.addSubview(footerLabel)
@@ -125,6 +129,11 @@ final class AlbumDetailViewController: NSViewController {
             artworkTile.widthAnchor.constraint(equalToConstant: 232),
             artworkTile.heightAnchor.constraint(equalToConstant: 232),
 
+            coverOverlay.topAnchor.constraint(equalTo: artworkTile.topAnchor),
+            coverOverlay.leadingAnchor.constraint(equalTo: artworkTile.leadingAnchor),
+            coverOverlay.trailingAnchor.constraint(equalTo: artworkTile.trailingAnchor),
+            coverOverlay.bottomAnchor.constraint(equalTo: artworkTile.bottomAnchor),
+
             headerText.leadingAnchor.constraint(equalTo: artworkTile.trailingAnchor, constant: 28),
             headerText.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -32),
             headerText.bottomAnchor.constraint(equalTo: artworkTile.bottomAnchor),
@@ -149,6 +158,8 @@ final class AlbumDetailViewController: NSViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(libraryUpdated), name: Library.didUpdateNotification, object: nil
         )
+        configureCoverOverlay()
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.refreshArtwork() }
         populate()
         loadArtworkAndPalette()
         similarRow.load(artist: album.artist)
@@ -285,6 +296,42 @@ final class AlbumDetailViewController: NSViewController {
                 self.applyPaletteFromImage(image, animated: true)
             } else {
                 self.artworkTile.stopShimmer()
+            }
+        }
+    }
+
+    #if DEBUG
+    var debugShownImage: CGImage? { artworkTile.displayedImage }
+    #endif
+
+    private func configureCoverOverlay() {
+        coverOverlay.onEdit = { [weak self] in
+            guard let self else { return }
+            MacArtworkEditor.present(for: self.album, from: self.view.window)
+        }
+        coverOverlay.onDrop = { [weak self] input in
+            guard let self else { return }
+            MacArtworkEditor.present(for: self.album, initial: input, from: self.view.window)
+        }
+        coverOverlay.onMenu = { [weak self, weak coverOverlay] in
+            guard let self else { return nil }
+            return MacTrackMenuFactory.menu(for: self.album, anchor: coverOverlay, includeViewAlbum: false)
+        }
+    }
+
+    /// Repaints the cover and the colours derived from it after the person
+    /// changed it, keeping the old picture up until the new one has decoded so
+    /// the header never flashes its placeholder.
+    private func refreshArtwork() {
+        let expected = album.id
+        AlbumArtworkCache.shared.loadArtwork(forAlbum: album.title, artist: album.artist) { [weak self] image in
+            guard let self, self.album.id == expected else { return }
+            if let image {
+                self.artworkTile.showImage(image)
+                self.applyPaletteFromImage(image, animated: true)
+            } else {
+                self.artworkTile.showPlaceholder(seed: self.album.id, shimmering: false)
+                self.applyPaletteFromImage(nil, animated: true)
             }
         }
     }

@@ -28,6 +28,8 @@ final class ArtistDetailViewController: NSViewController {
     private var appearsOn: [Album] = []
     private var popularRows: [(row: DetailTrackRowView, track: Track)] = []
     private var popularPlayingURL: URL?
+    private var usesAlbumCoverAsPhoto = false
+    private var artworkObserver: ArtworkChangeObserver?
 
     init(artist: String) {
         self.artistName = artist
@@ -156,6 +158,7 @@ final class ArtistDetailViewController: NSViewController {
         )
         refresh()
         loadPhotoAndPalette()
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.reloadAlbumCoverPhoto() }
         loadEnrichment()
         similarRow.load(artist: artistName)
         AppLogger.info("Artist detail opened: \(artistName)", category: .ui)
@@ -291,6 +294,7 @@ final class ArtistDetailViewController: NSViewController {
                 self.photoTile.showImage(photo)
                 self.applyPalette(from: photo, animated: true)
             } else if let first = self.albums.first {
+                self.usesAlbumCoverAsPhoto = true
                 AlbumArtworkCache.shared.loadThumbnail(
                     forAlbum: first.title, artist: first.artist
                 ) { [weak self] image in
@@ -305,6 +309,17 @@ final class ArtistDetailViewController: NSViewController {
             } else {
                 self.photoTile.stopShimmer()
             }
+        }
+    }
+
+    /// An artist with no photo wears their first album's cover, so a changed
+    /// cover has to reach this header too.
+    private func reloadAlbumCoverPhoto() {
+        guard usesAlbumCoverAsPhoto, let first = albums.first else { return }
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: first.title, artist: first.artist) { [weak self] image in
+            guard let self, let image else { return }
+            self.photoTile.showImage(image)
+            self.applyPalette(from: image, animated: true)
         }
     }
 
@@ -426,10 +441,12 @@ private final class AlbumShelfCard: NSView {
     private let tile = ArtworkTileView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let yearLabel = NSTextField(labelWithString: "")
+    private var artworkObserver: ArtworkChangeObserver?
 
     init(album: Album) {
         self.album = album
         super.init(frame: .zero)
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.reloadCover() }
 
         tile.cornerRadius = 10
         tile.translatesAutoresizingMaskIntoConstraints = false
@@ -479,6 +496,17 @@ private final class AlbumShelfCard: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func reloadCover() {
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: album.title, artist: album.artist) { [weak self] image in
+            guard let self else { return }
+            if let image {
+                self.tile.showImage(image)
+            } else {
+                self.tile.showPlaceholder(seed: self.album.id, shimmering: false)
+            }
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         onOpen?()

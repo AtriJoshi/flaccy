@@ -10,6 +10,7 @@ TEAM = 'P4DQK6SRKR'
 SHARED_IOS_FILES = %w[
   Album.swift
   AlbumArtworkCache.swift
+  AlbumArtworkEditor.swift
   AppLogger.swift
   ArtworkPalette.swift
   AudioPlayer.swift
@@ -39,6 +40,7 @@ SHARED_IOS_FILES = %w[
   LibraryStartupProbe.swift
   LibraryViewModel.swift
   ListeningGuideContent.swift
+  LocalArtworkFinder.swift
   Localizable.xcstrings
   LovedTracksService.swift
   LyricsService.swift

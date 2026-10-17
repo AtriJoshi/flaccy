@@ -146,6 +146,9 @@ enum MacTrackMenuFactory {
         menu.addItem(ClosureMenuItem(title: String(localized: "Enrich Metadata"), systemImage: "sparkles") {
             enrichAlbum(album, in: window)
         })
+        menu.addItem(ClosureMenuItem(title: String(localized: "Edit Artwork…"), systemImage: "photo") {
+            MacArtworkEditor.present(for: album, from: window)
+        })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem(
             title: LibraryRoot.shared.isUsingDefaultRoot ? "Move to Trash…" : "Remove from Library…",

@@ -9,6 +9,7 @@ final class MenuBarExtraController: NSObject, NSMenuDelegate {
     var onOpenApp: (() -> Void)?
 
     private var statusItem: NSStatusItem?
+    private var artworkObserver: ArtworkChangeObserver?
 
     func bootstrap() {
         if MenuBarExtraSetting.isEnabled {
@@ -23,6 +24,10 @@ final class MenuBarExtraController: NSObject, NSMenuDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(playbackChanged), name: AudioPlayer.playbackStateDidChange, object: nil
         )
+        artworkObserver = ArtworkChangeObserver {
+            guard let track = AudioPlayer.shared.currentTrack else { return }
+            AlbumArtworkCache.shared.preloadThumbnail(forAlbum: track.albumTitle, artist: track.artist)
+        }
     }
 
     deinit {

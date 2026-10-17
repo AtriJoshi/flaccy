@@ -292,6 +292,9 @@ final class ArtistGridItem: NSCollectionViewItem {
     private let nameLabel = NSTextField(labelWithString: "")
     private let countLabel = NSTextField(labelWithString: "")
     private var currentArtist: String?
+    private var currentFirstAlbum: Album?
+    private var usesAlbumCover = false
+    private var artworkObserver: ArtworkChangeObserver?
     private var photoTask: Task<Void, Never>?
 
     override func loadView() {
@@ -333,8 +336,23 @@ final class ArtistGridItem: NSCollectionViewItem {
         artworkTile.cornerRadius = artworkTile.bounds.width / 2
     }
 
+    /// An artist with no photo wears their first album's cover; this reloads it
+    /// after the person changed that cover, only on tiles that are wearing one.
+    private func reloadAlbumCover() {
+        guard usesAlbumCover, let name = currentArtist, let first = currentFirstAlbum else { return }
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: first.title, artist: first.artist) { [weak self] image in
+            guard let self, self.currentArtist == name, let image else { return }
+            self.artworkTile.showImage(image)
+        }
+    }
+
     func configure(name: String, albums: [Album]) {
         currentArtist = name
+        currentFirstAlbum = albums.first
+        usesAlbumCover = false
+        if artworkObserver == nil {
+            artworkObserver = ArtworkChangeObserver { [weak self] in self?.reloadAlbumCover() }
+        }
         nameLabel.stringValue = name
         nameLabel.toolTip = name
         let trackCount = albums.reduce(0) { $0 + $1.tracks.count }
@@ -352,6 +370,7 @@ final class ArtistGridItem: NSCollectionViewItem {
             if let photo {
                 self.artworkTile.showImage(photo)
             } else if let first = albums.first {
+                self.usesAlbumCover = true
                 AlbumArtworkCache.shared.loadThumbnail(forAlbum: first.title, artist: first.artist) { [weak self] image in
                     guard let self, self.currentArtist == name else { return }
                     if let image {

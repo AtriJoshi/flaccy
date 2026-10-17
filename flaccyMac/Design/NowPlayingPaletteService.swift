@@ -17,12 +17,17 @@ final class NowPlayingPaletteService: NSObject {
 
     private(set) var current: ArtworkPalette = ArtworkPaletteExtractor.fallbackPalette(seed: "flaccy")
     private var currentKey: String?
+    private var artworkObserver: ArtworkChangeObserver?
 
     private override init() {
         super.init()
         NotificationCenter.default.addObserver(
             self, selector: #selector(trackChanged), name: AudioPlayer.trackDidChange, object: nil
         )
+        artworkObserver = ArtworkChangeObserver { [weak self] in
+            self?.currentKey = nil
+            self?.refresh()
+        }
         refresh()
     }
 

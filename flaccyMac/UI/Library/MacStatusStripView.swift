@@ -30,9 +30,16 @@ final class MacStatusStripView: NSView {
     private let background = NSVisualEffectView()
 
     private var coverKey: String?
+    private var coverTitle: String?
+    private var artworkObserver: ArtworkChangeObserver?
 
     init() {
         super.init(frame: .zero)
+        artworkObserver = ArtworkChangeObserver { [weak self] in
+            guard let self, let title = self.coverTitle else { return }
+            self.coverKey = nil
+            self.showCover(forTitle: title)
+        }
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
         alphaValue = 0
@@ -182,6 +189,7 @@ final class MacStatusStripView: NSView {
     /// the job has not named one, the spinner — so there is always exactly one
     /// thing in it and it is always the most specific thing available.
     private func showCover(forTitle title: String?) {
+        coverTitle = title
         guard let title, let album = Self.album(named: title) else {
             coverKey = nil
             cover.isHidden = true

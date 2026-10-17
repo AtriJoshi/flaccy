@@ -70,6 +70,7 @@ final class NowPlayingViewController: NSViewController {
     private var pendingChaseTime: TimeInterval?
     private var chaseGeneration = 0
     private var currentPaletteKey: String?
+    private weak var paletteArtwork: NSImage?
     private var currentTrackKey: String?
     private var isBreathing = false
 
@@ -642,8 +643,9 @@ final class NowPlayingViewController: NSViewController {
 
     private func updatePalette(state: NowPlayingViewModel.State, animated: Bool) {
         let key = "\(state.albumTitle)\u{0}\(state.artist)"
-        guard key != currentPaletteKey else { return }
+        guard key != currentPaletteKey || (state.artwork != nil && state.artwork !== paletteArtwork) else { return }
         currentPaletteKey = key
+        paletteArtwork = state.artwork
         ArtworkPaletteExtractor.palette(
             for: state.artwork,
             cacheKey: key,

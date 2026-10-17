@@ -61,6 +61,14 @@ final class AlbumGridViewController: NSViewController {
             guard let self else { return }
             self.setZoom(self.tileWidth * (1 + magnification))
         }
+        collectionView.registerForDraggedTypes(ArtworkInputReader.pasteboardTypes)
+        collectionView.onPictureDrop = { [weak self] indexPath, input in
+            self?.openArtworkEditor(at: indexPath, initial: input)
+        }
+        collectionView.onDropTargetChange = { [weak self] previous, current in
+            self?.setDropTarget(previous, false)
+            self?.setDropTarget(current, true)
+        }
 
         scrollView.documentView = collectionView
         scrollView.hasVerticalScroller = true
@@ -280,6 +288,16 @@ final class AlbumGridViewController: NSViewController {
         }
     }
 
+    private func openArtworkEditor(at indexPath: IndexPath, initial: ArtworkInput) {
+        guard let item = dataSource?.itemIdentifier(for: indexPath), let album = Self.album(from: item) else { return }
+        MacArtworkEditor.present(for: resolvedAlbum(album), initial: initial, from: view.window)
+    }
+
+    private func setDropTarget(_ indexPath: IndexPath?, _ targeted: Bool) {
+        guard let indexPath, let item = collectionView.item(at: indexPath) as? AlbumGridItem else { return }
+        item.setDropTargeted(targeted)
+    }
+
     private func setZoom(_ width: CGFloat) {
         let clamped = CGFloat(Double(width).clamped(to: Self.zoomRange))
         guard abs(clamped - tileWidth) > 0.5 else { return }
@@ -378,6 +396,11 @@ final class TypeSelectCollectionView: NSCollectionView {
 
     var onTypeAhead: ((String) -> Void)?
     var onMagnify: ((CGFloat) -> Void)?
+    var onPictureDrop: ((IndexPath, ArtworkInput) -> Void)?
+    var onDropTargetChange: ((IndexPath?, IndexPath?) -> Void)?
+
+    private lazy var dropRelay = ArtworkDropRelay(view: self)
+    private var dropTarget: IndexPath?
 
     private var buffer = ""
     private var resetTask: Task<Void, Never>?
@@ -401,6 +424,54 @@ final class TypeSelectCollectionView: NSCollectionView {
 
     override func magnify(with event: NSEvent) {
         onMagnify?(event.magnification)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dropRelay.endRelay()
+        return pictureOrRelayedOperation(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        pictureOrRelayedOperation(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        setDropTarget(nil)
+        dropRelay.relayExited(sender)
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        setDropTarget(nil)
+        dropRelay.relayEnded(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if dropRelay.isActive { return dropRelay.relayPerform(sender) }
+        defer { setDropTarget(nil) }
+        guard let indexPath = dropTarget, let input = ArtworkInputReader.input(from: sender.draggingPasteboard) else {
+            return false
+        }
+        onPictureDrop?(indexPath, input)
+        return true
+    }
+
+    /// A picture over an album tile targets that tile; anything else — music
+    /// files, folders — belongs to the window's import and is handed to it.
+    private func pictureOrRelayedOperation(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard dropRelay.carriesPicture(sender) else {
+            setDropTarget(nil)
+            return dropRelay.isActive ? dropRelay.operation : dropRelay.relayEntered(sender)
+        }
+        let path = indexPathForItem(at: convert(sender.draggingLocation, from: nil))
+        setDropTarget(path)
+        return path == nil ? [] : .copy
+    }
+
+    private func setDropTarget(_ path: IndexPath?) {
+        guard path != dropTarget else { return }
+        let previous = dropTarget
+        dropTarget = path
+        onDropTargetChange?(previous, path)
     }
 
     private func scheduleBufferReset() {

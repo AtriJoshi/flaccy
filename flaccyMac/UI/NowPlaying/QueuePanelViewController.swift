@@ -474,10 +474,13 @@ final class QueueTrackCellView: NSView {
     private let bars = PlayingBarsView()
     private let card = NSView()
     private var artworkKey: String?
+    private var artworkTrack: Track?
+    private var artworkObserver: ArtworkChangeObserver?
 
     init() {
         super.init(frame: .zero)
         wantsLayer = true
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.reloadArtwork() }
 
         card.wantsLayer = true
         card.layer?.cornerRadius = 10
@@ -555,6 +558,7 @@ final class QueueTrackCellView: NSView {
 
         let key = "\(track.albumTitle)\u{0}\(track.artist)"
         artworkKey = key
+        artworkTrack = track
         if let cached = track.artwork
             ?? AlbumArtworkCache.shared.thumbnail(forAlbum: track.albumTitle, artist: track.artist) {
             artworkView.image = cached
@@ -571,6 +575,21 @@ final class QueueTrackCellView: NSView {
 
     func setPlaying(_ playing: Bool) {
         bars.setPlaying(playing)
+    }
+
+    /// Asks the cache again for this row's cover after the person changed one,
+    /// keeping the old picture up until the new one arrives.
+    private func reloadArtwork() {
+        guard let track = artworkTrack, let key = artworkKey else { return }
+        AlbumArtworkCache.shared.loadThumbnail(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
+            guard let self, self.artworkKey == key else { return }
+            if let image {
+                self.artworkView.image = image
+                self.placeholder.isHidden = true
+            } else {
+                self.showPlaceholder(seed: "\(track.albumTitle)|\(track.artist)")
+            }
+        }
     }
 
     private func showPlaceholder(seed: String) {

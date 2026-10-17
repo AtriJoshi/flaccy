@@ -40,6 +40,7 @@ enum ArtworkPaletteExtractor {
 
     static func invalidate(title: String, artist: String) {
         cache.removeObject(forKey: "\(title)\0\(artist)" as NSString)
+        cache.removeObject(forKey: "np-\(title)\0\(artist)" as NSString)
     }
 
     static func palette(
