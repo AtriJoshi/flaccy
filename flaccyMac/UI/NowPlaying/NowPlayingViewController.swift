@@ -365,6 +365,12 @@ final class NowPlayingViewController: NSViewController {
         }
     }
 
+    /// Shows or hides one side column, fading it in. The layout pass runs after
+    /// the animation group, not inside it: laid out under implicit animation,
+    /// the glass surface and everything inside it keep the frame they had
+    /// while the column was hidden, so a freshly shown panel stays at its
+    /// fitting width instead of filling the column and clips its trailing
+    /// controls.
     private func setColumn(_ column: NSView, visible: Bool) {
         guard column.isHidden == visible else { return }
         let widthConstraint = column === lyricsColumn ? lyricsWidthConstraint : queueWidthConstraint
@@ -383,8 +389,8 @@ final class NowPlayingViewController: NSViewController {
             context.allowsImplicitAnimation = true
             column.animator().alphaValue = visible ? 1 : 0
             column.isHidden = !visible
-            self.view.layoutSubtreeIfNeeded()
         }
+        view.layoutSubtreeIfNeeded()
     }
 
     private func refreshCapsuleToggles() {
