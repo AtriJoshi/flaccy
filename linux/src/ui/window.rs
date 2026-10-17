@@ -146,7 +146,7 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
                     } else {
                         format!("{headline} — {detail}")
                     }));
-                    if state.is_determinate() {
+                    if state.is_determinate() || !state.is_active() {
                         progress.set_fraction(state.fraction_completed());
                     } else {
                         progress.pulse();
