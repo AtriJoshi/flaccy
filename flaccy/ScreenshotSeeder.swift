@@ -386,18 +386,18 @@ enum ScreenshotSeeder {
 
     private static func insertLyrics(db: DatabaseManager) {
         let synced = """
-        [00:11.40]Headlights bleed across the ceiling
-        [00:15.90]I count the seconds like they owe me
-        [00:20.60]A slow machine that keeps on turning
-        [00:25.30]Warm hum of everything you told me
-        [00:33.10]So let it idle, let it wander
-        [00:37.80]The engine of a quiet morning
-        [00:42.50]We are the miles we never squandered
-        [00:47.20]The long road learning how to hold me
-        [00:55.00]Slow machine, keep the light on
-        [00:59.70]Slow machine, don't let go
-        [01:04.40]Every ending is a corner
-        [01:09.10]Every corner, somewhere warmer
+        [00:11.40]<00:11.40>Headlights <00:12.65>bleed <00:13.36>across <00:14.18>the <00:14.67>ceiling<00:15.60>
+        [00:15.90]<00:15.90>I <00:16.17>count <00:16.87>the <00:17.35>seconds <00:18.26>like <00:18.85>they <00:19.44>owe <00:19.92>me<00:20.30>
+        [00:20.60]<00:20.60>A <00:20.87>slow <00:21.47>machine <00:22.39>that <00:22.99>keeps <00:23.70>on <00:24.08>turning<00:25.00>
+        [00:25.30]<00:25.30>Warm <00:25.99>hum <00:26.55>of <00:26.98>everything <00:28.42>you <00:28.98>told <00:29.66>me<00:30.10>
+        [00:33.10]<00:33.10>So <00:33.56>let <00:34.15>it <00:34.61>idle, <00:35.46>let <00:36.06>it <00:36.51>wander<00:37.50>
+        [00:37.80]<00:37.80>The <00:38.40>engine <00:39.40>of <00:39.87>a <00:40.20>quiet <00:41.07>morning<00:42.20>
+        [00:42.50]<00:42.50>We <00:42.74>are <00:43.05>the <00:43.36>miles <00:43.81>we <00:44.06>never <00:44.50>squandered<00:45.30>
+        [00:45.60]<00:45.60>The <00:46.48>long <00:47.55>road <00:48.63>learning <00:50.48>how <00:51.36>to <00:52.04>hold <00:53.12>me<00:53.80>
+        [00:55.00]<00:55.00>Slow <00:55.69>machine, <00:56.89>keep <00:57.58>the <00:58.14>light <00:58.96>on<00:59.40>
+        [00:59.70]<00:59.70>Slow <01:00.52>machine, <01:01.94>don't <01:02.91>let <01:03.58>go<01:04.10>
+        [01:04.40]<01:04.40>Every <01:05.44>ending <01:06.64>is <01:07.20>a <01:07.60>corner<01:08.80>
+        [01:09.10]<01:09.10>Every <01:09.95>corner, <01:11.05>somewhere <01:12.42>warmer<01:13.40>
         """
         let record = LyricsRecord(
             trackTitle: heroTrack,

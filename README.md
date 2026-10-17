@@ -65,7 +65,11 @@ Point flaccy at your music files. It scans the directory structure, sends file p
 - **Songlink sharing** — share any track as a universal link (Spotify, YouTube, Tidal, Apple Music…)
 
 ### Synced Lyrics
-- LRCLIB karaoke-style scrolling, current line highlighted, click/tap any line to seek — with `.lrc`/`.elrc` sidecar and embedded tag fallback, same resolution on every client
+- **Word by word** — a line whose words are timed fills in as it is sung, with a soft edge inside the word you are on. Timing comes from lrclib's Lyricsfile format (word timing is still rare there) or your own enhanced `.lrc`/`.elrc` files
+- **Lines know where they end** — a line stops being lit when it ends, an instrumental gap of four seconds or more shows three beats that light across it, backing vocals are smaller, and a `♪` line is a break rather than a lyric
+- **Timing control** — a clock button shifts the lyrics Earlier or Later in 0.1 s steps, remembered per song, for tracks whose timestamps run off the singing
+- **Karaoke-style scrolling** that follows the singer; click/tap any line to seek
+- **Finds lyrics for messy tags** — your `.lrc`/`.elrc` sidecar or embedded tag wins, then lrclib, which is also tried without "(Remastered)", "- 2011 Remaster" and featuring credits and asked again once when it is busy; same resolution on every client
 
 ### Music videos (Linux)
 - **Video lens in Now Playing** — the song's official music video, streamed, with your lossless file still doing the playing

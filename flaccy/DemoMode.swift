@@ -10,7 +10,7 @@ import UIKit
 /// `--seed-screenshots`; `DemoRouter` turns `FLACCY_ROUTE` into one screen.
 enum DemoMode {
 
-    static let version = 9
+    static let version = 10
     private static let versionKey = "flaccy.demo.version"
 
     static var environment: [String: String] { ProcessInfo.processInfo.environment }

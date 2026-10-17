@@ -16,6 +16,13 @@ embedded in its tracks, or a search of Apple Music, Deezer and the Cover Art Arc
 Dropping an image on a cover or an album tile opens the editor with it already framed.
 Nothing is written until Save; Use Original Artwork puts the files' own art back.
 
+Lyrics (Now Playing → Lyrics, or the sidebar): synced lines from lrclib, or from a `.lrc` / `.elrc`
+file beside the song or embedded in its tags. A line whose words are timed fills in as it is
+sung, with a soft edge inside the word you are on; an instrumental gap of four seconds or more
+shows three beats that light across it. The clock button shifts the lyrics earlier or later in
+0.1 s steps, remembered per song, for tracks whose timestamps run off the singing. Click a line
+to seek.
+
 An adaptive theme engine retints the whole app with the dominant color of whatever's
 playing — ambient gradient backdrops, glass surfaces, a glowing now-playing pulse — or
 pick one of seven curated palettes in Preferences. Works in light and dark.
