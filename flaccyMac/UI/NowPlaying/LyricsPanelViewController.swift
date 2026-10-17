@@ -34,9 +34,13 @@ final class LyricsPanelViewController: NSViewController {
     private let spinner = NSProgressIndicator()
     private let retryButton = NSButton(title: "", target: nil, action: nil)
     private let timingButton = NSButton()
+    private let timingNoteChip = NSButton()
+    private var timingNoteKind: LyricsTimingNoteKind?
+    private var timingNotePopover: NSPopover?
     private static let offsetStepMs = 100
     private static let offsetLimitMs = 10_000
     private static let seekLeadIn: TimeInterval = 0.15
+    private static let timingNoteFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
 
     private var lineViews: [LyricRowView] = []
     private var document = LyricsDocument()
@@ -76,7 +80,7 @@ final class LyricsPanelViewController: NSViewController {
             linesStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
             linesStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
             linesStack.bottomAnchor.constraint(lessThanOrEqualTo: documentView.bottomAnchor),
-            plainTextView.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 24),
+            plainTextView.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 44),
             plainTextView.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 20),
             plainTextView.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -20),
             plainTextView.bottomAnchor.constraint(lessThanOrEqualTo: documentView.bottomAnchor, constant: -24),
@@ -113,8 +117,22 @@ final class LyricsPanelViewController: NSViewController {
         timingButton.isHidden = true
         timingButton.target = self
         timingButton.action = #selector(showTimingMenu(_:))
-        timingButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(timingButton)
+
+        timingNoteChip.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
+        timingNoteChip.imagePosition = .imageLeading
+        timingNoteChip.bezelStyle = .accessoryBarAction
+        timingNoteChip.controlSize = .small
+        timingNoteChip.contentTintColor = .secondaryLabelColor
+        timingNoteChip.isHidden = true
+        timingNoteChip.target = self
+        timingNoteChip.action = #selector(toggleTimingNote(_:))
+
+        let timingControls = NSStackView(views: [timingNoteChip, timingButton])
+        timingControls.orientation = .horizontal
+        timingControls.alignment = .centerY
+        timingControls.spacing = 6
+        timingControls.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(timingControls)
 
         let stateStack = NSStackView(views: [stateIcon, stateLabel, spinner, retryButton])
         stateStack.orientation = .vertical
@@ -133,8 +151,8 @@ final class LyricsPanelViewController: NSViewController {
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
             stateStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stateStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            timingButton.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
-            timingButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            timingControls.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            timingControls.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
     }
 
@@ -350,6 +368,7 @@ final class LyricsPanelViewController: NSViewController {
             lyrics = found
             document = found.document
             timingButton.isHidden = false
+            showTimingNote(for: found.document)
             buildLineViews()
             progressChanged()
             return
@@ -358,6 +377,7 @@ final class LyricsPanelViewController: NSViewController {
             hideState()
             plainTextView.stringValue = plain
             plainTextView.isHidden = false
+            showTimingNote(for: found.document)
             scrollToTop()
             return
         }
@@ -471,6 +491,43 @@ final class LyricsPanelViewController: NSViewController {
         scrollTo(0)
     }
 
+    /// Computes the note once for the document just applied and shows or hides
+    /// the chip to match.
+    private func showTimingNote(for document: LyricsDocument) {
+        guard let kind = LyricsTimingNote.kind(for: document) else {
+            hideTimingNote()
+            return
+        }
+        timingNoteKind = kind
+        timingNoteChip.attributedTitle = NSAttributedString(
+            string: LyricsTimingNoteCopy.label(for: kind),
+            attributes: [.font: Self.timingNoteFont, .foregroundColor: NSColor.secondaryLabelColor]
+        )
+        timingNoteChip.toolTip = LyricsTimingNoteCopy.title(for: kind)
+        timingNoteChip.setAccessibilityLabel(LyricsTimingNoteCopy.label(for: kind))
+        timingNoteChip.setAccessibilityHelp(LyricsTimingNoteCopy.accessibilityHint)
+        timingNoteChip.isHidden = false
+    }
+
+    private func hideTimingNote() {
+        timingNoteKind = nil
+        timingNoteChip.isHidden = true
+        timingNotePopover?.close()
+    }
+
+    @objc private func toggleTimingNote(_ sender: NSButton) {
+        if let popover = timingNotePopover, popover.isShown {
+            popover.close()
+            return
+        }
+        guard let kind = timingNoteKind else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = TimingNoteViewController(kind: kind)
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        timingNotePopover = popover
+    }
+
     /// A menu under the clock button that shifts the lyrics earlier or later
     /// when they run ahead of or behind the singing.
     @objc private func showTimingMenu(_ sender: NSButton) {
@@ -522,6 +579,7 @@ final class LyricsPanelViewController: NSViewController {
     private func showState(icon: String?, text: String) {
         retryButton.isHidden = true
         timingButton.isHidden = true
+        hideTimingNote()
         clearLines()
         document = LyricsDocument()
         lyrics = nil
@@ -542,6 +600,48 @@ final class LyricsPanelViewController: NSViewController {
     private func hideState() {
         stateLabel.isHidden = true
         stateIcon.isHidden = true
+    }
+}
+
+/// The popover behind the timing note chip: what is missing from the lyrics'
+/// timing and where better timing comes from.
+private final class TimingNoteViewController: NSViewController {
+
+    private static let contentWidth: CGFloat = 280
+    private static let padding: CGFloat = 14
+
+    private let kind: LyricsTimingNoteKind
+
+    init(kind: LyricsTimingNoteKind) {
+        self.kind = kind
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    override func loadView() {
+        let textWidth = Self.contentWidth - 2 * Self.padding
+
+        let title = NSTextField(wrappingLabelWithString: LyricsTimingNoteCopy.title(for: kind))
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.textColor = .labelColor
+        title.preferredMaxLayoutWidth = textWidth
+
+        let body = NSTextField(wrappingLabelWithString: LyricsTimingNoteCopy.body(for: kind))
+        body.font = .systemFont(ofSize: 12)
+        body.textColor = .secondaryLabelColor
+        body.preferredMaxLayoutWidth = textWidth
+
+        let stack = NSStackView(views: [title, body])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: Self.padding, left: Self.padding, bottom: Self.padding, right: Self.padding)
+        stack.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        view = stack
     }
 }
 

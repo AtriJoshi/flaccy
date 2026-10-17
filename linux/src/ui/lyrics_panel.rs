@@ -5,7 +5,9 @@ use crate::ui::lyric_line::LyricLine;
 use crate::ui::screen::is_watched;
 use crate::ui::Ui;
 use adw::prelude::*;
-use flaccy_shared::lyrics::{Document, Line, LineProgress, INTERLUDE_BEATS};
+use flaccy_shared::lyrics::{
+    timing_note, Document, Line, LineProgress, TimingNote, INTERLUDE_BEATS,
+};
 use gtk::glib;
 use gtk::pango;
 use std::cell::{Cell, RefCell};
@@ -175,15 +177,23 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
         .build();
 
     let timing = Timing::new();
+    let synced_note = NoteChip::new();
+    let plain_note = NoteChip::new();
     let synced_overlay = gtk::Overlay::new();
     synced_overlay.set_child(Some(&synced_scroll));
     synced_overlay.add_overlay(&resume_reveal);
-    synced_overlay.add_overlay(&timing.button);
+    synced_overlay.add_overlay(&corner_cluster(&[
+        synced_note.button.upcast_ref(),
+        timing.button.upcast_ref(),
+    ]));
+    let plain_overlay = gtk::Overlay::new();
+    plain_overlay.set_child(Some(&plain_scroll));
+    plain_overlay.add_overlay(&corner_cluster(&[plain_note.button.upcast_ref()]));
 
     let stack = gtk::Stack::new();
     stack.add_named(&status, Some("status"));
     stack.add_named(&synced_overlay, Some("synced"));
-    stack.add_named(&plain_scroll, Some("plain"));
+    stack.add_named(&plain_overlay, Some("plain"));
     stack.set_vexpand(true);
 
     let panel = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -342,6 +352,8 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
         let sync_driver = Rc::clone(&sync_driver);
         let offset_label = timing.value.clone();
         let timing_button = timing.button.clone();
+        let synced_note = synced_note.clone();
+        let plain_note = plain_note.clone();
         Rc::new(move |result: &LyricsResult| {
             refresh.set(true);
             while let Some(child) = list.first_child() {
@@ -357,6 +369,8 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
             scroller.reset();
             retry.set_visible(false);
             timing_button.set_visible(false);
+            synced_note.show(None);
+            plain_note.show(None);
             let lyrics = match result {
                 LyricsResult::Found(lyrics) => lyrics,
                 LyricsResult::Missing => {
@@ -390,9 +404,11 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
                 state.borrow_mut().rows = rows;
                 offset_label.set_label(&offset_text(lyrics.offset_ms));
                 timing_button.set_visible(true);
+                synced_note.show(timing_note(document));
                 stack.set_visible_child_name("synced");
             } else if let Some(plain) = document.plain.as_deref() {
                 plain_view.set_label(plain);
+                plain_note.show(timing_note(document));
                 stack.set_visible_child_name("plain");
             } else {
                 status.set_title("No Lyrics Found");
@@ -587,10 +603,7 @@ impl Timing {
             .icon_name("preferences-system-time-symbolic")
             .tooltip_text("Lyrics timing")
             .popover(&popover)
-            .halign(gtk::Align::End)
-            .valign(gtk::Align::Start)
-            .margin_top(6)
-            .margin_end(6)
+            .valign(gtk::Align::Center)
             .visible(false)
             .build();
         button.add_css_class("flat");
@@ -604,6 +617,82 @@ impl Timing {
             value,
         }
     }
+}
+
+/// The quiet chip beside the timing control that names why a song's lyrics are
+/// not filled in word by word, and opens a popover with the reason.
+#[derive(Clone)]
+struct NoteChip {
+    button: gtk::MenuButton,
+    label: gtk::Label,
+    title: gtk::Label,
+    body: gtk::Label,
+}
+
+impl NoteChip {
+    fn new() -> Self {
+        let label = gtk::Label::new(None);
+        label.add_css_class("caption");
+        let face = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        face.append(&gtk::Image::from_icon_name("dialog-information-symbolic"));
+        face.append(&label);
+        let title = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        title.add_css_class("heading");
+        let body = gtk::Label::builder()
+            .xalign(0.0)
+            .wrap(true)
+            .max_width_chars(34)
+            .build();
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        content.set_margin_top(12);
+        content.set_margin_bottom(12);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
+        content.append(&title);
+        content.append(&body);
+        let button = gtk::MenuButton::builder()
+            .child(&face)
+            .popover(&gtk::Popover::builder().child(&content).build())
+            .valign(gtk::Align::Center)
+            .visible(false)
+            .build();
+        button.add_css_class("flat");
+        button.add_css_class("lyrics-note");
+        Self {
+            button,
+            label,
+            title,
+            body,
+        }
+    }
+
+    /// Words the chip for `note`, or hides it when the document needs none.
+    fn show(&self, note: Option<TimingNote>) {
+        if let Some(note) = note {
+            self.label.set_label(note.label);
+            self.title.set_label(note.title);
+            self.body.set_label(note.body);
+            self.button.set_tooltip_text(Some(note.title));
+        }
+        self.button.set_visible(note.is_some());
+    }
+}
+
+/// The top-end corner of a lyrics page: its small controls side by side, taking
+/// only the room they need so a click anywhere else still reaches the lines.
+fn corner_cluster(children: &[&gtk::Widget]) -> gtk::Box {
+    let cluster = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(4)
+        .halign(gtk::Align::End)
+        .valign(gtk::Align::Start)
+        .margin_top(6)
+        .margin_end(6)
+        .build();
+    for child in children {
+        cluster.append(*child);
+    }
+    cluster
 }
 
 /// "In sync", or the correction as a signed number of seconds.

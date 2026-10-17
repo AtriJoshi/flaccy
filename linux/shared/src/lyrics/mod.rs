@@ -11,6 +11,7 @@ mod lrc;
 mod lyricsfile;
 mod query;
 mod score;
+mod timing_note;
 
 pub use clock::{LineProgress, INTERLUDE_BEATS, OVERLAP_LOOKBACK};
 pub use document::{
@@ -22,3 +23,4 @@ pub use query::{clean_title, lead_artist, EDITION_KEYWORDS};
 pub use score::{
     best_candidate, score, similarity, Candidate, Wanted, ACCEPTED_SCORE, MAX_DURATION_DRIFT,
 };
+pub use timing_note::{timing_note, TimingNote, TimingNoteKind};

@@ -424,12 +424,22 @@ overlay-split-view > .sidebar-pane:backdrop {
   opacity: 1.0;
 }
 
-.lyrics-timing {
+.lyrics-timing,
+.lyrics-note {
   opacity: 0.45;
 }
 
+menubutton.lyrics-note > button {
+  padding: 2px 10px;
+  min-height: 0;
+  min-width: 0;
+  border-radius: 999px;
+}
+
 .lyrics-timing:hover,
-.lyrics-timing:checked {
+.lyrics-timing:checked,
+.lyrics-note:hover,
+.lyrics-note:checked {
   opacity: 1.0;
 }
 

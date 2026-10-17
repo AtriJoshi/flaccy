@@ -34271,6 +34271,70 @@
         }
       }
     },
+    "Explains how this song's lyrics are timed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erklärt, wie der Songtext dieses Songs getaktet ist"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explica cómo está sincronizada la letra de esta canción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explique comment les paroles de ce titre sont synchronisées"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spiega come è sincronizzato il testo di questo brano"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この曲の歌詞のタイミングについて説明します"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 곡의 가사 싱크 방식을 설명합니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyjaśnia, jak zsynchronizowany jest tekst tego utworu"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explica como a letra desta música está sincronizada"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "说明这首歌的歌词是如何计时的"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "說明這首歌的歌詞是如何計時的"
+          }
+        }
+      }
+    },
     "Explorer": {
       "localizations": {
         "de": {
@@ -46343,6 +46407,70 @@
         }
       }
     },
+    "Line by line": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeile für Zeile"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Línea a línea"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ligne par ligne"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riga per riga"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "行ごと"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "줄 단위"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linia po linii"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Linha a linha"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逐行"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逐行"
+          }
+        }
+      }
+    },
     "Link copied": {
       "localizations": {
         "de": {
@@ -55277,6 +55405,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "未同步"
+          }
+        }
+      }
+    },
+    "Not timed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ohne Timing"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin sincronizar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non synchronisées"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non sincronizzato"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タイミングなし"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "싱크 없음"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bez synchronizacji"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem sincronização"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未计时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未計時"
           }
         }
       }
@@ -82567,6 +82759,70 @@
         }
       }
     },
+    "These lyrics aren't timed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieser Songtext ist nicht getaktet"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta letra no está sincronizada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ces paroles ne sont pas synchronisées"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo testo non è sincronizzato"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この歌詞にはタイミングがありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 가사는 싱크되어 있지 않습니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ten tekst nie jest zsynchronizowany"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta letra não está sincronizada"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这些歌词没有计时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這些歌詞沒有計時"
+          }
+        }
+      }
+    },
     "This Card": {
       "localizations": {
         "de": {
@@ -82883,6 +83139,134 @@
           "stringUnit": {
             "state": "translated",
             "value": "這會移除該預設。使用它的項目將恢復為平坦。"
+          }
+        }
+      }
+    },
+    "This song has lyrics but no timing, so they can't follow the music. Timing comes from lrclib when a contributor adds it, or from a .lrc or .elrc file saved next to the song.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieser Song hat einen Songtext, aber kein Timing – er kann der Musik daher nicht folgen. Das Timing kommt von lrclib, wenn jemand es beisteuert, oder aus einer .lrc- oder .elrc-Datei neben dem Song."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta canción tiene letra, pero sin sincronización, así que no puede seguir la música. La sincronización viene de lrclib cuando alguien la aporta, o de un archivo .lrc o .elrc guardado junto a la canción."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce titre a des paroles mais aucune synchronisation : elles ne peuvent donc pas suivre la musique. La synchronisation vient de lrclib quand un contributeur l'ajoute, ou d'un fichier .lrc ou .elrc placé à côté du morceau."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo brano ha un testo ma nessuna sincronizzazione, quindi non può seguire la musica. La sincronizzazione arriva da lrclib quando un contributore la aggiunge, oppure da un file .lrc o .elrc salvato accanto al brano."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この曲には歌詞はありますがタイミング情報がないため、音楽に合わせて動かせません。タイミングはlrclibに投稿された場合や、曲と同じ場所に置いた.lrcまたは.elrcファイルから取得されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 곡에는 가사는 있지만 싱크 정보가 없어 음악을 따라갈 수 없습니다. 싱크는 기여자가 lrclib에 추가했거나, 곡 옆에 저장된 .lrc 또는 .elrc 파일에서 가져옵니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ten utwór ma tekst, ale bez synchronizacji, więc nie może podążać za muzyką. Synchronizacja pochodzi z lrclib, gdy ktoś ją doda, albo z pliku .lrc lub .elrc zapisanego obok utworu."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta música tem letra, mas sem sincronização, então ela não consegue acompanhar o som. A sincronização vem do lrclib quando alguém a adiciona, ou de um arquivo .lrc ou .elrc salvo ao lado da música."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这首歌有歌词但没有计时，因此无法跟随音乐。计时来自 lrclib 上贡献者的添加，或来自保存在歌曲旁边的 .lrc 或 .elrc 文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這首歌有歌詞但沒有計時，因此無法跟隨音樂。計時來自 lrclib 上貢獻者的新增，或來自存放在歌曲旁邊的 .lrc 或 .elrc 檔案。"
+          }
+        }
+      }
+    },
+    "This song's lyrics are timed one line at a time, so Flaccy lights the line being sung but can't fill it word by word. Word timing is still rare: it comes from lrclib when a contributor adds it, or from an enhanced .elrc file saved next to the song.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Songtext dieses Songs ist zeilenweise getaktet. Flaccy hebt daher die gerade gesungene Zeile hervor, kann sie aber nicht Wort für Wort füllen. Wortgenaues Timing ist noch selten: Es stammt von lrclib, wenn jemand es beisteuert, oder aus einer erweiterten .elrc-Datei neben dem Song."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La letra de esta canción está sincronizada línea a línea, así que Flaccy ilumina la línea que suena, pero no puede rellenarla palabra por palabra. La sincronización por palabras sigue siendo rara: viene de lrclib cuando alguien la aporta, o de un archivo .elrc mejorado guardado junto a la canción."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les paroles de ce titre sont synchronisées ligne par ligne : Flaccy éclaire la ligne chantée, mais ne peut pas la remplir mot par mot. La synchronisation par mot reste rare : elle vient de lrclib quand un contributeur l'ajoute, ou d'un fichier .elrc enrichi placé à côté du morceau."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il testo di questo brano è sincronizzato riga per riga, quindi Flaccy illumina la riga cantata ma non può riempirla parola per parola. La sincronizzazione per parola è ancora rara: arriva da lrclib quando un contributore la aggiunge, oppure da un file .elrc avanzato salvato accanto al brano."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この曲の歌詞は1行ずつタイミングが付いているため、Flaccyは歌われている行をハイライトしますが、単語ごとに塗りつぶすことはできません。単語単位のタイミングはまだ少なく、lrclibに投稿された場合や、曲と同じ場所に置いた拡張版の.elrcファイルから取得されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 곡의 가사는 한 줄씩 싱크되어 있어 Flaccy가 부르는 줄은 강조하지만 단어 단위로 채울 수는 없습니다. 단어 단위 싱크는 아직 드뭅니다. 기여자가 lrclib에 추가했거나, 곡 옆에 저장된 확장 .elrc 파일에서 가져옵니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tekst tego utworu jest zsynchronizowany linia po linii, więc Flaccy podświetla śpiewaną linię, ale nie może jej wypełniać słowo po słowie. Synchronizacja słów jest wciąż rzadka: pochodzi z lrclib, gdy ktoś ją doda, albo z rozszerzonego pliku .elrc zapisanego obok utworu."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A letra desta música está sincronizada linha a linha, então o Flaccy ilumina a linha cantada, mas não consegue preenchê-la palavra por palavra. A sincronização por palavra ainda é rara: vem do lrclib quando alguém a adiciona, ou de um arquivo .elrc avançado salvo ao lado da música."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这首歌的歌词按行计时，因此 Flaccy 会点亮正在演唱的那一行，但无法逐字填充。逐字计时仍然很少见：它来自 lrclib 上贡献者的添加，或来自保存在歌曲旁边的增强版 .elrc 文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這首歌的歌詞依行計時，因此 Flaccy 會點亮正在演唱的那一行，但無法逐字填滿。逐字計時仍然很少見：它來自 lrclib 上貢獻者的新增，或來自存放在歌曲旁邊的增強版 .elrc 檔案。"
           }
         }
       }
@@ -83267,6 +83651,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "隨著音樂同步捲動的歌詞，邊聽邊跟。"
+          }
+        }
+      }
+    },
+    "Timed line by line": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeilenweise getaktet"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizada línea a línea"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisées ligne par ligne"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizzato riga per riga"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "行単位のタイミング"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "줄 단위로 싱크됨"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronizacja linia po linii"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sincronizada linha a linha"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按行计时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "依行計時"
           }
         }
       }

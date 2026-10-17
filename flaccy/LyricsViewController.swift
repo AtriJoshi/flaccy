@@ -48,6 +48,9 @@ final class LyricsViewController: UIViewController {
     private lazy var retryButton: UIButton = makeRetryButton()
     private lazy var offsetItem = UIAction(title: "", attributes: .disabled) { _ in }
     private lazy var timingButton: UIButton = makeTimingButton()
+    private lazy var timingNoteChip: UIButton = makeTimingNoteChip()
+    private lazy var timingControls: UIStackView = makeTimingControls()
+    private var timingNoteKind: LyricsTimingNoteKind?
 
     init(track: String, artist: String, album: String) {
         self.trackTitle = track
@@ -121,6 +124,7 @@ final class LyricsViewController: UIViewController {
         cancelScroll()
         retryButton.isHidden = true
         timingButton.isHidden = true
+        hideTimingNote()
         document = LyricsDocument()
         lyrics = nil
         currentLineIndex = -1
@@ -181,7 +185,7 @@ final class LyricsViewController: UIViewController {
         plainTextView = UITextView()
         plainTextView.backgroundColor = .clear
         plainTextView.isEditable = false
-        plainTextView.textContainerInset = UIEdgeInsets(top: 28, left: 28, bottom: 48, right: 28)
+        plainTextView.textContainerInset = UIEdgeInsets(top: 64, left: 28, bottom: 48, right: 28)
         plainTextView.isHidden = true
         plainTextView.showsVerticalScrollIndicator = false
         plainTextView.translatesAutoresizingMaskIntoConstraints = false
@@ -194,7 +198,7 @@ final class LyricsViewController: UIViewController {
             plainTextView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
 
-        view.bringSubviewToFront(timingButton)
+        view.bringSubviewToFront(timingControls)
     }
 
     private func loadLyrics() {
@@ -235,8 +239,10 @@ final class LyricsViewController: UIViewController {
 
             if found.document.hasSynced {
                 showSyncedLyrics(found)
+                showTimingNote(for: found.document)
             } else if let plain = found.document.plain, !plain.isEmpty {
                 showPlainLyrics(plain)
+                showTimingNote(for: found.document)
             } else {
                 showStatus(String(localized: "No lyrics available"))
             }
@@ -304,13 +310,82 @@ final class LyricsViewController: UIViewController {
         button.showsMenuAsPrimaryAction = true
         button.accessibilityLabel = String(localized: "Lyrics timing")
         button.isHidden = true
-        button.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(button)
-        NSLayoutConstraint.activate([
-            button.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-        ])
         return button
+    }
+
+    /// The row in the top corner holding the timing note chip and, right of it,
+    /// the timing button. Hidden members collapse, so the button keeps its
+    /// corner while the chip comes and goes.
+    private func makeTimingControls() -> UIStackView {
+        let stack = UIStackView(arrangedSubviews: [timingNoteChip, timingButton])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+        ])
+        return stack
+    }
+
+    /// A quiet pill beside the clock that names why the words are not filled
+    /// in, and opens the longer reason.
+    private func makeTimingNoteChip() -> UIButton {
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: "info.circle")
+        config.imagePlacement = .leading
+        config.imagePadding = 5
+        config.baseForegroundColor = .white.withAlphaComponent(0.7)
+        config.background.backgroundColor = .white.withAlphaComponent(0.12)
+        config.cornerStyle = .capsule
+        config.contentInsets = NSDirectionalEdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12)
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.scaled(.footnote, size: 13, weight: .semibold)
+            return attributes
+        }
+        let button = TimingNoteChipButton(configuration: config, primaryAction: UIAction { [weak self] _ in
+            self?.presentTimingNote()
+        })
+        button.accessibilityHint = LyricsTimingNoteCopy.accessibilityHint
+        button.isHidden = true
+        return button
+    }
+
+    /// Computes the note once for the document just applied and shows or hides
+    /// the chip to match.
+    private func showTimingNote(for document: LyricsDocument) {
+        guard let kind = LyricsTimingNote.kind(for: document) else {
+            hideTimingNote()
+            return
+        }
+        timingNoteKind = kind
+        timingNoteChip.configuration?.title = LyricsTimingNoteCopy.label(for: kind)
+        timingNoteChip.isHidden = false
+    }
+
+    private func hideTimingNote() {
+        timingNoteKind = nil
+        timingNoteChip.isHidden = true
+        if presentedViewController is TimingNoteViewController {
+            dismiss(animated: false)
+        }
+    }
+
+    private func presentTimingNote() {
+        guard let kind = timingNoteKind, presentedViewController == nil else { return }
+        lineSelectionFeedback.impactOccurred()
+        let note = TimingNoteViewController(kind: kind)
+        note.modalPresentationStyle = .popover
+        if let popover = note.popoverPresentationController {
+            popover.sourceView = timingNoteChip
+            popover.sourceRect = timingNoteChip.bounds
+            popover.permittedArrowDirections = .up
+            popover.delegate = note
+        }
+        present(note, animated: true)
     }
 
     private func nudgeOffset(by delta: Int) {
@@ -857,5 +932,81 @@ private final class InterludeCell: UITableViewCell {
                 UIView.animate(withDuration: 0.26) { beat.alpha = target }
             }
         }
+    }
+}
+
+/// A button whose tap area is at least 44 pt tall however compact it is drawn.
+private final class TimingNoteChipButton: UIButton {
+
+    private static let minimumTapHeight: CGFloat = 44
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let missing = max(0, Self.minimumTapHeight - bounds.height)
+        return bounds.insetBy(dx: 0, dy: -missing / 2).contains(point)
+    }
+}
+
+/// The popover behind the timing note chip: what is missing from the lyrics'
+/// timing and where better timing comes from.
+private final class TimingNoteViewController: UIViewController, UIPopoverPresentationControllerDelegate {
+
+    private static let contentWidth: CGFloat = 280
+    private static let padding: CGFloat = 16
+
+    private let kind: LyricsTimingNoteKind
+
+    init(kind: LyricsTimingNoteKind) {
+        self.kind = kind
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        let title = UILabel()
+        title.text = LyricsTimingNoteCopy.title(for: kind)
+        title.font = .preferredFont(forTextStyle: .headline)
+        title.adjustsFontForContentSizeCategory = true
+        title.textColor = .label
+        title.numberOfLines = 0
+        title.accessibilityTraits = .header
+
+        let body = UILabel()
+        body.text = LyricsTimingNoteCopy.body(for: kind)
+        body.font = .preferredFont(forTextStyle: .subheadline)
+        body.adjustsFontForContentSizeCategory = true
+        body.textColor = .secondaryLabel
+        body.numberOfLines = 0
+
+        let stack = UIStackView(arrangedSubviews: [title, body])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: Self.padding),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.padding),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.padding),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Self.padding),
+            stack.widthAnchor.constraint(equalToConstant: Self.contentWidth - 2 * Self.padding),
+        ])
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        preferredContentSize = view.systemLayoutSizeFitting(
+            CGSize(width: Self.contentWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+    }
+
+    func adaptivePresentationStyle(for controller: UIPresentationController) -> UIModalPresentationStyle {
+        .none
     }
 }
