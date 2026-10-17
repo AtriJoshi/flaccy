@@ -7,7 +7,11 @@ struct LibraryView: View {
     @Environment(WatchAudioPlayer.self) private var player
     @Environment(WatchSyncStatus.self) private var syncStatus
 
-    let onOpenAlbum: (MediaAlbum) -> Void
+    @Environment(PendingRemovals.self) private var pending
+    @Environment(\.isLuminanceReduced) private var isDimmed
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    let onOpen: (Route) -> Void
     let onShowNowPlaying: () -> Void
 
     @AppStorage(WatchDebutSummaryView.storageKey) private var debutShown = false
@@ -17,12 +21,8 @@ struct LibraryView: View {
         Group {
             if store.isLoading && store.albums.isEmpty {
                 ScanProgressView(progress: store.loadProgress, fraction: store.loadFraction)
-            } else if store.isEmpty {
-                if syncStatus.isReceiving {
-                    ReceivingLibraryView()
-                } else {
-                    EmptyLibraryView(errorReason: syncStatus.lastErrorReason)
-                }
+            } else if isLibraryEmpty {
+                emptyState
             } else {
                 content
             }
@@ -33,6 +33,7 @@ struct LibraryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onShowNowPlaying) {
                         Image(systemName: "waveform")
+                            .foregroundStyle(.white)
                     }
                     .accessibilityLabel("Now Playing")
                 }
@@ -55,34 +56,83 @@ struct LibraryView: View {
     /// never for an empty library, exactly as the phone withholds it when the
     /// first build produced no albums.
     private func presentDebutIfEarned() {
-        guard !debutShown, !isShowingDebut, !store.isLoading, !store.albums.isEmpty else { return }
+        guard !debutShown, !isShowingDebut, !store.isLoading, !store.albums.isEmpty, !LibraryShots.forcesEmptyLibrary else { return }
         isShowingDebut = true
     }
 
+    private var visibleAlbums: [MediaAlbum] { pending.visible(store.albums) }
+
+    private var isLibraryEmpty: Bool {
+        LibraryShots.forcesEmptyLibrary || store.isEmpty || visibleAlbums.isEmpty
+    }
+
+    private var showsBatchBanner: Bool {
+        syncStatus.incoming.isActive || syncStatus.incoming.preparing
+    }
+
+    @ViewBuilder private var emptyState: some View {
+        if showsBatchBanner {
+            ScrollView { ReceivingBanner(batch: syncStatus.incoming, style: .prominent) }
+        } else if syncStatus.isReceiving {
+            ReceivingLibraryView()
+        } else {
+            EmptyLibraryView(errorReason: syncStatus.lastErrorReason)
+        }
+    }
+
     private var content: some View {
+        list(visibleAlbums)
+    }
+
+    private func list(_ albums: [MediaAlbum]) -> some View {
         List {
+            if let summary = player.resumeSummary {
+                Section {
+                    ContinueCard(
+                        title: summary.title,
+                        artist: summary.artist,
+                        albumTitle: summary.albumTitle,
+                        artworkData: summary.artworkData,
+                        action: continuePlayback
+                    )
+                }
+            }
+
+            if showsBatchBanner {
+                Section { ReceivingBanner(batch: syncStatus.incoming) }
+            }
+
             Section {
                 Button(action: shuffleAll) {
                     Label("Shuffle All", systemImage: "shuffle")
                         .font(.headline)
                 }
-                .listRowBackground(
-                    WatchTheme.accentGradient.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                )
+                .listRowBackground(shuffleBackground)
+                .accessibilityHint(Text("Plays everything on this watch in random order"))
             } header: {
                 jobHeader
             }
 
+            Section {
+                Button { onOpen(.artists) } label: {
+                    BrowseRow(
+                        symbol: "music.mic",
+                        title: "Artists",
+                        detail: WatchFormat.artists(ArtistGroup.groups(from: albums).count)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
             Section("Albums") {
-                ForEach(store.albums) { album in
-                    Button { onOpenAlbum(album) } label: {
-                        AlbumRow(album: album)
-                    }
-                    .buttonStyle(.plain)
+                Color.clear.frame(height: 0).id("albums").listRowBackground(Color.clear).accessibilityHidden(true)
+                ForEach(albums) { album in
+                    AlbumListRow(album: album) { onOpen(.album(album)) }
+                        .id(rowIdentity(of: album, in: albums))
                 }
             }
 
-            if syncStatus.isReceiving {
+            if syncStatus.isReceiving && !showsBatchBanner {
                 Section {
                     HStack(spacing: 8) {
                         ProgressView()
@@ -100,8 +150,44 @@ struct LibraryView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            if syncStatus.storage.totalBytes > 0 {
+                Section {
+                    Button { onOpen(.storage) } label: { storageRow }
+                        .buttonStyle(.plain)
+                        .id("end")
+                }
+            }
         }
         .listStyle(.carousel)
+        .albumRemovalFlow()
+        .screenshotScroll()
+    }
+
+    /// The first album answers to the `firstalbum` landmark of `--shot-scroll`;
+    /// every other row keeps its own identity.
+    private func rowIdentity(of album: MediaAlbum, in albums: [MediaAlbum]) -> String {
+        album.id == albums.first?.id ? "firstalbum" : album.id
+    }
+
+    private var shuffleBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(isDimmed ? AnyShapeStyle(Color.white.opacity(0.12)) : AnyShapeStyle(WatchTheme.accentGradient))
+    }
+
+    private var storageRow: some View {
+        let storage = syncStatus.storage
+        return BrowseRow(
+            symbol: syncStatus.lastErrorReason == .diskFull ? "exclamationmark.triangle.fill" : "internaldrive",
+            title: "Storage",
+            detail: String(localized: "\(WatchFormat.bytes(storage.usedBytes)) of music\u{00A0}· \(WatchFormat.bytes(storage.freeBytes)) free"),
+            tint: syncStatus.lastErrorReason == .diskFull ? .orange : nil
+        )
+    }
+
+    private func continuePlayback() {
+        player.resumePlayback()
+        onShowNowPlaying()
     }
 
     /// The phone's job, above the shuffle row: present only while the phone is
@@ -117,76 +203,6 @@ struct LibraryView: View {
         if !player.shuffleEnabled { player.toggleShuffle() }
         player.play(store.allTracks, startingAt: Int.random(in: store.allTracks.indices))
         onShowNowPlaying()
-    }
-}
-
-struct AlbumRow: View {
-    let album: MediaAlbum
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ArtworkView(data: album.artworkData, seed: album.id, cornerRadius: 8)
-                .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(album.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(album.artist)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
-struct EmptyLibraryView: View {
-    var errorReason: StoreFailureReason?
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 26))
-                    .foregroundStyle(WatchTheme.accentGradient)
-                Text("No Music Yet")
-                    .font(.headline)
-                Text("Sync songs from Flaccy on your iPhone.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                if let notice = SyncErrorNotice(reason: errorReason) {
-                    Label(notice.message, systemImage: notice.symbol)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 4)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-        }
-    }
-}
-
-struct ReceivingLibraryView: View {
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.large)
-                Text("Receiving from iPhone…")
-                    .font(.headline)
-                Text("Your music is transferring in the background.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-        }
     }
 }
 

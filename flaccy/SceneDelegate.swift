@@ -39,6 +39,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #if DEBUG
         PaywallShot.runIfRequested(in: window)
         SampleExercise.runIfRequested()
+        WatchSyncExercise.runIfRequested()
         EqualizerExercise.runIfRequested()
         EqualizerShots.runIfRequested(in: window)
         #endif
@@ -99,6 +100,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         TrialRunwayPresenter.refresh(in: window)
+        WatchSyncService.shared.resumeIfNeeded()
         Task {
             await RecapNotificationScheduler.shared.refreshSchedule()
         }

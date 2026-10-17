@@ -122,8 +122,9 @@ Dir.chdir(File.dirname(__FILE__) + '/..') do
   end
   puts "Added #{swift_files.count} swift files to watch target"
 
-  assets_ref = group.new_file('Assets.xcassets')
-  watch_target.resources_build_phase.add_file_reference(assets_ref)
+  %w[Assets.xcassets Localizable.xcstrings PrivacyInfo.xcprivacy].each do |resource|
+    watch_target.resources_build_phase.add_file_reference(group.new_file(resource))
+  end
   group.new_file('Info.plist')
 end
 

@@ -84,7 +84,7 @@ final class SettingsViewController: UITableViewController {
         case libraryRadio
         case crateDig
         case listeningGuide
-        case watchSync(syncedCount: Int)
+        case watchSync(syncedCount: Int, profile: WatchAudioProfile)
         case importFiles
         case rescanLibrary
         case groupAlbumEditions
@@ -362,7 +362,7 @@ final class SettingsViewController: UITableViewController {
         )
         snapshot.appendItems([.equalizer(summary: EqualizerCopy.settingsSummary), .gaplessPlayback, .autoplaySimilar, .libraryRadio, .crateDig], toSection: .playback)
         snapshot.appendItems([.listeningGuide], toSection: .guide)
-        snapshot.appendItems([.watchSync(syncedCount: WatchSyncService.shared.syncedPaths.count)], toSection: .watch)
+        snapshot.appendItems([.watchSync(syncedCount: WatchSyncService.shared.syncedCount, profile: WatchSyncService.shared.profile)], toSection: .watch)
         snapshot.appendItems(libraryRows(), toSection: .library)
         if libraryDebut != nil {
             snapshot.appendItems([.libraryDebutSummary], toSection: .setup)
@@ -530,15 +530,14 @@ final class SettingsViewController: UITableViewController {
             cell.accessibilityHint = String(localized: "Explains how Bluetooth, AAC, and lossless audio affect what you hear")
             cell.accessibilityIdentifier = "settings.row.listeningGuide"
 
-        case .watchSync(let syncedCount):
+        case .watchSync(let syncedCount, let profile):
             content.image = RowIcon.image(systemName: "applewatch", tint: .systemBlue)
             content.text = String(localized: "Sync Music to Watch")
-            if syncedCount > 0 { content.secondaryText = "\(syncedCount)" }
+            content.secondaryText = syncedCount > 0 ? "\(syncedCount) · \(profile.displayName)" : profile.displayName
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityLabel = String(localized: "Sync Music to Watch")
-            if syncedCount > 0 {
-                cell.accessibilityValue = String(localized: "\(syncedCount) tracks synced")
-            }
+            let spoken = [syncedCount > 0 ? String(localized: "\(syncedCount) tracks synced") : nil, profile.displayName]
+            cell.accessibilityValue = spoken.compactMap { $0 }.joined(separator: ", ")
 
         case .importFiles:
             content.image = RowIcon.image(systemName: "square.and.arrow.down", tint: .systemGreen)

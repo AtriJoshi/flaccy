@@ -8,14 +8,15 @@ hand-written `%1$lld` where the compiler emits `%lld` — silently renders in
 English for every locale. This compares the two and names the gaps.
 
 Runs on the Mac after `scripts/build-mac.sh` has built into `build/dd-*`; the
-watch app keeps its own catalog and is skipped. Only the newest record per
+watch app keeps its own catalog, which `--watch` checks against the watch
+target's build (its own sources plus the shared copy files). Only the newest record per
 source file and target counts, because every architecture and SDK an earlier
 build compiled for keeps its stale copy, and a record whose source is gone is
 ignored. Exits non-zero only with
 `--strict`, so a build can report gaps without failing on them; `--unused`
 also lists catalog entries no compiled code asks for any more.
 
-Usage: python3 scripts/check-strings.py [--strict] [--unused] build/dd-ios build/dd-mac
+Usage: python3 scripts/check-strings.py [--strict] [--unused] [--watch] build/dd-ios build/dd-mac
 """
 import json
 import pathlib
@@ -25,9 +26,16 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "flaccy" / "Localizable.xcstrings"
 SOURCE_DIRS = (str(ROOT / "flaccy") + "/", str(ROOT / "flaccyMac") + "/")
+WATCH_CATALOG = ROOT / "flaccyWatch Watch App" / "Localizable.xcstrings"
+WATCH_SOURCES = (
+    str(ROOT / "flaccyWatch Watch App") + "/",
+    str(ROOT / "flaccy" / "LibraryLoadPhaseCopy.swift"),
+    str(ROOT / "flaccy" / "EnrichmentJobCopy.swift"),
+    str(ROOT / "flaccy" / "LibraryDebutCopy.swift"),
+)
 
 
-def extracted_keys(build_dirs):
+def extracted_keys(build_dirs, source_dirs=SOURCE_DIRS):
     newest = {}
     for build_dir in build_dirs:
         for path in pathlib.Path(build_dir).rglob("*.stringsdata"):
@@ -37,7 +45,7 @@ def extracted_keys(build_dirs):
             except ValueError:
                 data = plistlib.loads(raw)
             source = data.get("source", "")
-            if not source.startswith(SOURCE_DIRS) or not pathlib.Path(source).exists():
+            if not source.startswith(source_dirs) or not pathlib.Path(source).exists():
                 continue
             slot = (source, path.parents[2].name)
             mtime = path.stat().st_mtime
@@ -69,8 +77,9 @@ def main():
     strict = "--strict" in flags
     if not args:
         sys.exit(__doc__)
-    keys = extracted_keys(args)
-    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))["strings"]
+    watch = "--watch" in flags
+    keys = extracted_keys(args, WATCH_SOURCES if watch else SOURCE_DIRS)
+    catalog = json.loads((WATCH_CATALOG if watch else CATALOG).read_text(encoding="utf-8"))["strings"]
     locales = sorted({l for entry in catalog.values() for l in entry.get("localizations", {})} - {"en"})
 
     missing = sorted(k for k in keys if k not in catalog)

@@ -1,62 +1,98 @@
 import FlaccyCore
 import Foundation
+import UIKit
 import WatchConnectivity
 
-/// iOS side of the watch sync bridge: stages and transfers track files to the
-/// paired Apple Watch over WatchConnectivity, measures throughput / ETA, tracks
-/// per-file progress, and reconciles what the watch holds from its acks.
+/// iOS side of the watch sync bridge. The ledger in FlaccyCore is the only
+/// record of what is on the watch and what is on its way; this class feeds it
+/// events (the watch's heartbeat, transfer progress, failures), prepares songs
+/// with `WatchTranscoder`, hands them to WatchConnectivity a few at a time, and
+/// publishes the result to the screens.
 final class WatchSyncService: NSObject {
 
     static let shared = WatchSyncService()
     static let stateDidChange = Notification.Name("WatchSyncStateDidChange")
     static let progressDidChange = Notification.Name("WatchSyncProgressDidChange")
 
-    private(set) var syncedPaths: Set<String> = []
-    private(set) var progressByPath: [String: Double] = [:]
-    private(set) var failedPaths: Set<String> = []
-    private var observations: [String: NSKeyValueObservation] = [:]
-
-    private var transferBytes: [String: Int64] = [:]
-    private var cumulativeBytes: Int64 = 0
-    private var sessionTotalBytes: Int64 = 0
-    private(set) var speedBytesPerSec: Double = 0
-    private(set) var etaSeconds: TimeInterval?
-    private var metricsTimer: Timer?
-    private var lastSampleBytes: Int64 = 0
-    private var lastSampleTime: Date?
-    private var sizeCache: [String: Int64] = [:]
-
-    private let requestedKey = "watchSync.requestedPaths"
-    private(set) var requestedPaths: Set<String> = []
-    private var retryCounts: [String: Int] = [:]
-    private(set) var stuckPaths: Set<String> = []
-    private let maxRetries = 6
-
-    private(set) var watchFreeBytes: Int64 = 0
-    private(set) var watchIsFull: Bool = false
-    private(set) var diskFullPaths: Set<String> = []
-    private var awaitingConfirmation: [String: Date] = [:]
-    private let confirmationSafetyValve: TimeInterval = 86_400
-    private let confirmationHeartbeatSlack: TimeInterval = 10
-
-    private var lastPublishedJob: EnrichmentJobProgress?
-    private var jobObserver: NSObjectProtocol?
-
-    override init() {
-        super.init()
-        requestedPaths = Set(UserDefaults.standard.stringArray(forKey: requestedKey) ?? [])
-        observeEnrichmentJob()
+    enum AlbumState: Equatable {
+        case notSynced
+        case partial(synced: Int, total: Int)
+        case waiting
+        case preparing
+        case sending(Double)
+        case synced
+        case storageFull
+        case failed
     }
 
-    private var wcSession: WCSession? { WCSession.isSupported() ? WCSession.default : nil }
+    enum FitResult {
+        case fits
+        case tooLarge(needed: Int64, free: Int64)
+        case unknown
+    }
+
+    private static let requestedKey = "watchSync.requestedPaths"
+    private static let profileKey = "watchSync.audioProfile"
+    private static let fitMargin: Int64 = 50 * 1_024 * 1_024
+    private static let ackGrace: TimeInterval = 600
+
+    var ledger: WatchSyncLedger
+    let transcoder: WatchTranscoder
+    let metrics = WatchSyncMetrics()
+
+    private(set) var profile: WatchAudioProfile
+    private(set) var watchUsedBytes: Int64 = 0
+    private(set) var watchTotalBytes: Int64 = 0
+
+    var hasHeartbeat = false
+    var lastConfirmed: Set<String> = []
+    var transfers: [String: WCSessionFileTransfer] = [:]
+    var observations: [String: NSKeyValueObservation] = [:]
+    var prepared: [String: WatchTranscoder.Prepared] = [:]
+    var prepareTasks: [String: Task<Void, Never>] = [:]
+    var preparingStems: Set<String> = []
+    var bytesByStem: [String: Int64] = [:]
+    var runStems: Set<String> = []
+    var wakeTimer: Timer?
+    var metricsTimer: Timer?
+    var contextTimer: Timer?
+    var latestJob: EnrichmentJobProgress?
+    var latestBatch: SyncBatch = .idle
+    var lastSentContext: [String: Data] = [:]
+    var jobObserver: NSObjectProtocol?
+    var libraryObserver: NSObjectProtocol?
+
+    private var trackIndex: [String: Track]?
+    private var stemCache: [URL: String] = [:]
+    private var sizeCache: [String: Int64] = [:]
+
+    override init() {
+        let stored = UserDefaults.standard.stringArray(forKey: Self.requestedKey) ?? []
+        ledger = WatchSyncLedger(
+            requested: Set(stored.map(SyncStem.of)),
+            policy: WatchSyncLedger.Policy(ackGrace: Self.ackGrace)
+        )
+        profile = UserDefaults.standard.string(forKey: Self.profileKey)
+            .flatMap(WatchAudioProfile.init(rawValue:)) ?? .standard
+        transcoder = WatchTranscoder(cacheDirectory: Self.transcodeDirectory)
+        super.init()
+        observeEnrichmentJob()
+        observeLibrary()
+        WatchSyncBackgroundTask.shared.onExpiration = { [weak self] in self?.suspendPreparation() }
+    }
+
+    private static var transcodeDirectory: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("WatchTranscode", isDirectory: true)
+    }
+
+    var wcSession: WCSession? { WCSession.isSupported() ? WCSession.default : nil }
 
     var isSupported: Bool { WCSession.isSupported() }
     var isPaired: Bool { wcSession?.isPaired ?? false }
     var isWatchAppInstalled: Bool { wcSession?.isWatchAppInstalled ?? false }
     var isReachable: Bool { wcSession?.isReachable ?? false }
     var isActivated: Bool { wcSession?.activationState == .activated }
-    var isSyncing: Bool { !progressByPath.isEmpty }
-    var activeTransferCount: Int { progressByPath.count }
 
     func activate() {
         guard let wcSession else { return }
@@ -65,341 +101,220 @@ final class WatchSyncService: NSObject {
         AppLogger.info("WCSession activate requested (iOS)", category: .connectivity)
     }
 
-    /// The coordinator already coalesces its notification at 0.25 s, so this
-    /// only has to drop payloads that say nothing new — a context update costs
-    /// the watch's radio, and a job that is counting down republishes often.
-    private func observeEnrichmentJob() {
-        jobObserver = NotificationCenter.default.addObserver(
-            forName: EnrichmentCoordinator.progressDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            let progress = notification.userInfo?[EnrichmentCoordinator.ProgressKey.progress] as? EnrichmentJobProgress
-            self?.publish(jobProgress: progress ?? EnrichmentCoordinator.shared.progress)
+    var watchFreeBytes: Int64 { ledger.watchFreeBytes }
+    var watchIsFull: Bool { ledger.watchIsFull }
+    var syncedCount: Int { ledger.syncedCount }
+    var requestedCount: Int { ledger.requested.count }
+    var unconfirmedCount: Int { ledger.unconfirmedCount }
+    var stuckCount: Int { ledger.stuckCount }
+    var diskFullCount: Int { ledger.diskFullCount }
+    var activeTransferCount: Int { ledger.inFlightCount + ledger.queuedCount }
+    var preparingCount: Int { preparingStems.count }
+    var isSyncing: Bool { ledger.inFlightCount > 0 || ledger.queuedCount > 0 }
+    var speedBytesPerSec: Double { metrics.speedBytesPerSec }
+    var etaSeconds: TimeInterval? { metrics.etaSeconds }
+
+    var sessionTotalBytesPending: Int64 {
+        runStems.reduce(0) { $0 + (bytesByStem[$1] ?? 0) }
+    }
+
+    var sessionTransferredBytes: Int64 {
+        runStems.reduce(0) { total, stem in
+            total + Int64(Double(bytesByStem[stem] ?? 0) * ledger.fraction(of: [stem]))
         }
     }
 
-    /// Mirrors the phone's job onto the wrist. The watch never fetches metadata
-    /// itself, so the application context is the only enrichment state it has;
-    /// it carries the shared model as one JSON blob rather than a hand-copied
-    /// dictionary, which is how a stale field would reach the smallest screen.
-    func publish(jobProgress: EnrichmentJobProgress) {
-        guard let wcSession, wcSession.activationState == .activated, wcSession.isWatchAppInstalled else { return }
-        guard jobProgress != lastPublishedJob else { return }
-        guard let payload = EnrichmentJobTransfer.encode(jobProgress) else { return }
-        do {
-            try wcSession.updateApplicationContext([SyncKeys.enrichmentJob: payload])
-            lastPublishedJob = jobProgress
-        } catch {
-            AppLogger.warning("Enrichment context update failed: \(error.localizedDescription)", category: .connectivity)
-        }
-    }
-
-    // MARK: - Query
-
-    func isSynced(_ track: Track) -> Bool { syncedPaths.contains(relativePath(for: track.fileURL)) }
-    func isSyncing(_ track: Track) -> Bool { progressByPath[relativePath(for: track.fileURL)] != nil }
-    func syncedCount(in album: Album) -> Int { album.tracks.reduce(0) { $0 + (isSynced($1) ? 1 : 0) } }
-    func isSyncing(album: Album) -> Bool { album.tracks.contains { isSyncing($0) } }
-
-    func fileSize(of url: URL) -> Int64 {
-        let key = url.path
-        if let cached = sizeCache[key] { return cached }
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-        sizeCache[key] = size
-        return size
-    }
-
-    func totalBytes(in album: Album) -> Int64 {
-        album.tracks.reduce(0) { $0 + fileSize(of: $1.fileURL) }
-    }
-
-    /// Smooth 0…1 completion across an album (finished tracks + in-flight fractions).
-    func albumSyncFraction(_ album: Album) -> Double {
-        let total = album.tracks.count
-        guard total > 0 else { return 0 }
-        let done = Double(syncedCount(in: album))
-        let active = album.tracks.reduce(0.0) { $0 + (progressByPath[relativePath(for: $1.fileURL)] ?? 0) }
-        return min(1, (done + active) / Double(total))
+    var sessionFraction: Double {
+        let pending = sessionTotalBytesPending
+        return pending > 0 ? min(1, Double(sessionTransferredBytes) / Double(pending)) : 0
     }
 
     var activeBytesRemaining: Int64 {
-        progressByPath.reduce(0) { acc, entry in
-            acc + Int64(Double(transferBytes[entry.key] ?? 0) * (1 - entry.value))
-        }
+        max(0, sessionTotalBytesPending - sessionTransferredBytes)
     }
 
-    var activeBytesTotal: Int64 {
-        progressByPath.keys.reduce(0) { $0 + (transferBytes[$1] ?? 0) }
-    }
-
-    private var transferredBytesThisRun: Int64 {
-        cumulativeBytes + progressByPath.reduce(0) { acc, entry in
-            acc + Int64(Double(transferBytes[entry.key] ?? 0) * entry.value)
-        }
-    }
-
-    var sessionTransferredBytes: Int64 { transferredBytesThisRun }
-    var sessionTotalBytesPending: Int64 { sessionTotalBytes }
-    var sessionFraction: Double {
-        sessionTotalBytes > 0 ? min(1, Double(transferredBytesThisRun) / Double(sessionTotalBytes)) : 0
-    }
-
-    // MARK: - Send
-
-    func sync(tracks: [Track]) {
-        guard let wcSession, wcSession.activationState == .activated else {
-            AppLogger.warning("Sync skipped: WCSession not activated", category: .connectivity)
-            return
-        }
-        guard wcSession.isWatchAppInstalled else {
-            AppLogger.warning("Sync skipped: watch app not installed", category: .connectivity)
-            return
-        }
-        for track in tracks {
-            let path = relativePath(for: track.fileURL)
-            requestedPaths.insert(path)
-            retryCounts[path] = 0
-            stuckPaths.remove(path)
-            transfer(track: track, session: wcSession)
-        }
-        persistRequested()
-        startMetricsIfNeeded()
+    func setProfile(_ newProfile: WatchAudioProfile) {
+        guard newProfile != profile else { return }
+        profile = newProfile
+        UserDefaults.standard.set(newProfile.rawValue, forKey: Self.profileKey)
+        AppLogger.info("Watch audio profile set to \(newProfile.rawValue)", category: .connectivity)
         notify()
     }
 
-    /// Cancels any queued/in-flight transfers for the removed paths before
-    /// sending the remove command — otherwise a still-queued file lands on the
-    /// watch after the delete and the album resurrects.
-    func remove(tracks: [Track]) {
-        guard let wcSession, wcSession.activationState == .activated else { return }
-        let paths = tracks.map { relativePath(for: $0.fileURL) }
-        guard !paths.isEmpty else { return }
-        let pathSet = Set(paths)
-        wcSession.outstandingFileTransfers
-            .filter { transfer in
-                TransferMetadata(dictionary: transfer.file.metadata).map { pathSet.contains($0.relativePath) } ?? false
-            }
-            .forEach { $0.cancel() }
-        for path in pathSet {
-            requestedPaths.remove(path)
-            stuckPaths.remove(path)
-            retryCounts[path] = nil
-            if progressByPath[path] != nil {
-                sessionTotalBytes -= transferBytes[path] ?? 0
-            }
-            observations.removeValue(forKey: path)
-            progressByPath.removeValue(forKey: path)
-            transferBytes.removeValue(forKey: path)
-            awaitingConfirmation.removeValue(forKey: path)
-            failedPaths.remove(path)
-            diskFullPaths.remove(path)
-            syncedPaths.remove(path)
+    func stem(of track: Track) -> String {
+        if let cached = stemCache[track.fileURL] { return cached }
+        let stem = SyncStem.of(relativePath(for: track.fileURL))
+        stemCache[track.fileURL] = stem
+        return stem
+    }
+
+    func track(forStem stem: String) -> Track? {
+        if trackIndex == nil {
+            trackIndex = Dictionary(
+                Library.shared.allTracks.map { (self.stem(of: $0), $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
         }
-        if progressByPath.isEmpty { stopMetrics() }
+        return trackIndex?[stem]
+    }
+
+    func isSynced(_ track: Track) -> Bool { ledger.isOnWatch(stem(of: track)) }
+
+    func isSyncing(_ track: Track) -> Bool {
+        switch ledger.phase(of: stem(of: track)) {
+        case .preparing?, .sending?: true
+        default: false
+        }
+    }
+
+    func isSyncing(album: Album) -> Bool { album.tracks.contains { isSyncing($0) } }
+
+    func syncedCount(in album: Album) -> Int { album.tracks.filter { isSynced($0) }.count }
+
+    func albumSyncFraction(_ album: Album) -> Double {
+        ledger.fraction(of: album.tracks.map { stem(of: $0) })
+    }
+
+    func state(of album: Album) -> AlbumState {
+        let phases = album.tracks.map { ledger.phase(of: stem(of: $0)) }
+        let total = phases.count
+        let synced = phases.filter { $0 == .onWatch }.count
+        if phases.contains(.diskFull) { return .storageFull }
+        if phases.contains(where: { if case .stuck? = $0 { true } else { false } }) { return .failed }
+        if phases.contains(where: { if case .sending? = $0 { true } else { false } }) {
+            return .sending(albumSyncFraction(album))
+        }
+        if phases.contains(.preparing) { return .preparing }
+        if synced == total, total > 0 { return .synced }
+        if phases.contains(where: { $0 != nil && $0 != .onWatch }) { return .waiting }
+        return synced > 0 ? .partial(synced: synced, total: total) : .notSynced
+    }
+
+    func fileSize(of url: URL) -> Int64 {
+        if let cached = sizeCache[url.path] { return cached }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+        sizeCache[url.path] = size
+        return size
+    }
+
+    func estimatedBytes(for track: Track) -> Int64 {
+        WatchSyncSizing.estimatedBytes(for: track, profile: profile)
+    }
+
+    func totalBytes(in album: Album) -> Int64 {
+        WatchSyncSizing.totalBytes(in: album, profile: profile)
+    }
+
+    func sourceBytes(in album: Album) -> Int64 {
+        album.tracks.reduce(0) { $0 + WatchSyncSizing.sourceBytes($1) }
+    }
+
+    func fitResult(for album: Album) -> FitResult {
+        guard watchFreeBytes > 0 else { return .unknown }
+        let needed = album.tracks.reduce(Int64(0)) { sum, track in
+            isSynced(track) ? sum : sum + estimatedBytes(for: track)
+        }
+        return needed + Self.fitMargin <= watchFreeBytes ? .fits : .tooLarge(needed: needed, free: watchFreeBytes)
+    }
+
+    @discardableResult
+    func sync(tracks: [Track]) -> SendResult {
+        let readiness = self.readiness
+        guard readiness.canQueue else {
+            AppLogger.warning("Sync skipped: \(readiness)", category: .connectivity)
+            return .notReady(readiness)
+        }
+        let pending = tracks.filter { !isSynced($0) }.count
+        let items = tracks.map { (stem: stem(of: $0), bytes: estimatedBytes(for: $0)) }
+        ledger.request(items, now: Date())
+        for item in items {
+            bytesByStem[item.stem] = item.bytes
+            if !ledger.isOnWatch(item.stem) { runStems.insert(item.stem) }
+        }
         persistRequested()
-        sendCommand([SyncKeys.command: SyncKeys.commandRemove, SyncKeys.removePaths: paths])
-        AppLogger.info("Requested remove of \(paths.count) tracks", category: .connectivity)
+        startRun()
+        pump()
+        return pending == 0 ? .nothingToSend : .started(pending)
+    }
+
+    /// Cancels anything queued or in flight for the removed tracks before the
+    /// remove command goes out; a file still on its way would otherwise land
+    /// after the delete and bring the album back.
+    @discardableResult
+    func remove(tracks: [Track]) -> Bool {
+        guard isActivated else { return false }
+        let stems = tracks.map { stem(of: $0) }
+        guard !stems.isEmpty else { return false }
+        for stem in stems { discardWork(for: stem) }
+        ledger.withdraw(stems)
+        runStems.subtract(stems)
+        persistRequested()
+        sendCommand([SyncKeys.command: SyncKeys.commandRemove, SyncKeys.removePaths: stems])
+        AppLogger.info("Requested remove of \(stems.count) tracks", category: .connectivity)
+        pump()
+        return true
+    }
+
+    func removeAll() {
+        cancelAllWork()
+        ledger.reset()
+        persistRequested()
+        sendCommand([SyncKeys.command: SyncKeys.commandRemoveAll])
+        AppLogger.info("Requested remove-all", category: .connectivity)
+        endRunIfIdle()
         notify()
     }
 
-    /// Tracks the user asked to sync that the watch has not yet confirmed it holds.
-    var unconfirmedCount: Int { requestedPaths.subtracting(syncedPaths).count }
-    var stuckCount: Int { stuckPaths.subtracting(syncedPaths).count }
-
-    private func persistRequested() {
-        UserDefaults.standard.set(Array(requestedPaths), forKey: requestedKey)
+    func retryStuck() {
+        ledger.retryStuck(now: Date())
+        pump()
     }
 
-    /// Re-queues every requested track the watch has not acknowledged. The watch's
-    /// ack — not the iPhone's `didFinish` — is the source of truth for what landed.
     func reconcile() {
-        guard let wcSession, wcSession.activationState == .activated, wcSession.isWatchAppInstalled else { return }
-        guard !watchIsFull else { notify(); return }
-
-        let now = Date()
-        for (path, sentAt) in awaitingConfirmation where now.timeIntervalSince(sentAt) > confirmationSafetyValve {
-            awaitingConfirmation.removeValue(forKey: path)
-        }
-
-        let missing = requestedPaths
-            .subtracting(syncedPaths)
-            .subtracting(progressByPath.keys)
-            .subtracting(Set(awaitingConfirmation.keys))
-            .subtracting(diskFullPaths)
-            .subtracting(stuckPaths)
-        guard !missing.isEmpty else { return }
-
-        let tracksByPath = Dictionary(
-            Library.shared.allTracks.map { (relativePath(for: $0.fileURL), $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        var requeued = 0
-        var orphaned = 0
-        for path in missing {
-            let count = retryCounts[path, default: 0]
-            if count >= maxRetries {
-                stuckPaths.insert(path)
-                continue
-            }
-            guard let track = tracksByPath[path] else {
-                forgetOrphanedRequest(path)
-                orphaned += 1
-                continue
-            }
-            retryCounts[path] = count + 1
-            transfer(track: track, session: wcSession)
-            requeued += 1
-        }
-        if orphaned > 0 {
-            persistRequested()
-            AppLogger.info("Reconcile: dropped \(orphaned) requested track\(orphaned == 1 ? "" : "s") no longer in the library", category: .connectivity)
-        }
-        if requeued > 0 {
-            AppLogger.info("Reconcile: re-queued \(requeued) unconfirmed track\(requeued == 1 ? "" : "s")", category: .connectivity)
-            startMetricsIfNeeded()
-        }
-        notify()
+        refreshRequestedFromLibrary()
+        pump()
     }
 
-    /// Drops a requested path whose source track can never be sent (gone from
-    /// the library or missing on disk) so it stops counting as unconfirmed.
-    private func forgetOrphanedRequest(_ path: String) {
-        requestedPaths.remove(path)
-        retryCounts[path] = nil
-        stuckPaths.remove(path)
-        awaitingConfirmation.removeValue(forKey: path)
-        diskFullPaths.remove(path)
-        failedPaths.remove(path)
+    /// Picks the pipeline back up when the app comes to the foreground, for
+    /// work a cancelled or expired background task left waiting in the queue.
+    func resumeIfNeeded() {
+        guard isActivated, !ledger.requested.isEmpty else { return }
+        requestWatchState()
+        pump()
     }
 
-    private func transfer(track: Track, session: WCSession) {
-        let path = relativePath(for: track.fileURL)
-        guard !syncedPaths.contains(path), progressByPath[path] == nil else { return }
-        failedPaths.remove(path)
-        diskFullPaths.remove(path)
-        awaitingConfirmation.removeValue(forKey: path)
-        guard FileManager.default.fileExists(atPath: track.fileURL.path) else {
-            AppLogger.error("Sync source missing, dropping request: \(path)", category: .connectivity)
-            forgetOrphanedRequest(path)
-            persistRequested()
-            return
-        }
-        let size = fileSize(of: track.fileURL)
-
-        if let existing = session.outstandingFileTransfers.first(where: {
-            TransferMetadata(dictionary: $0.file.metadata)?.relativePath == path
-        }) {
-            sessionTotalBytes += size
-            observe(existing, path: path, size: size)
-            AppLogger.info("Re-observing outstanding transfer (no duplicate): \(path)", category: .connectivity)
-            return
-        }
-
-        let metadata = TransferMetadata(
-            relativePath: path, title: track.title, artist: track.artist,
-            album: track.albumTitle, trackNumber: track.trackNumber, duration: track.duration
-        )
-        let fileTransfer = session.transferFile(track.fileURL, metadata: metadata.dictionary)
-        sessionTotalBytes += size
-        observe(fileTransfer, path: path, size: size)
-        AppLogger.info("Queued transfer: \(path) (\(size) bytes)", category: .connectivity)
-    }
-
-    private func observe(_ fileTransfer: WCSessionFileTransfer, path: String, size: Int64) {
-        progressByPath[path] = fileTransfer.progress.fractionCompleted
-        transferBytes[path] = size
-        observations[path] = fileTransfer.progress.observe(\.fractionCompleted, options: [.new]) { [weak self] progress, _ in
-            self?.updateProgress(path: path, fraction: progress.fractionCompleted, finished: progress.isFinished)
-        }
-    }
-
-    /// Re-attach to transfers the system is still carrying from a previous launch,
-    /// so the UI reflects them and re-tapping never enqueues duplicates.
-    private func reconcileOutstanding() {
-        guard let wcSession else { return }
-        var found = false
-        for fileTransfer in wcSession.outstandingFileTransfers {
-            guard
-                let path = TransferMetadata(dictionary: fileTransfer.file.metadata)?.relativePath,
-                progressByPath[path] == nil
-            else { continue }
-            let size = (try? fileTransfer.file.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-            sessionTotalBytes += size
-            observe(fileTransfer, path: path, size: size)
-            found = true
-        }
-        if found {
-            startMetricsIfNeeded()
+    func pump() {
+        guard canPump else {
             notify()
-            AppLogger.info("Reconciled \(progressByPath.count) outstanding transfers on launch", category: .connectivity)
+            return
         }
-    }
-
-    private func updateProgress(path: String, fraction: Double, finished: Bool) {
-        DispatchQueue.main.async {
-            if finished {
-                self.cumulativeBytes += self.transferBytes[path] ?? 0
-                self.progressByPath.removeValue(forKey: path)
-                self.observations.removeValue(forKey: path)
-                self.transferBytes.removeValue(forKey: path)
-                // Handed off to the system — NOT confirmed on the watch. Hold it in a
-                // grace window so reconcile doesn't immediately re-send before the
-                // watch has had a chance to receive + acknowledge it.
-                self.awaitingConfirmation[path] = Date()
-            } else {
-                self.progressByPath[path] = fraction
-            }
-            let name = finished ? WatchSyncService.stateDidChange : WatchSyncService.progressDidChange
-            NotificationCenter.default.post(name: name, object: nil)
-        }
-    }
-
-    // MARK: - Metrics
-
-    private func startMetricsIfNeeded() {
-        guard metricsTimer == nil else { return }
-        lastSampleBytes = transferredBytesThisRun
-        lastSampleTime = Date()
-        metricsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.sampleMetrics()
-        }
-    }
-
-    private func sampleMetrics() {
-        guard !progressByPath.isEmpty else { stopMetrics(); return }
         let now = Date()
-        let bytes = transferredBytesThisRun
-        if let last = lastSampleTime {
-            let dt = now.timeIntervalSince(last)
-            if dt > 0 {
-                let instant = Double(bytes - lastSampleBytes) / dt
-                speedBytesPerSec = speedBytesPerSec <= 0 ? instant : speedBytesPerSec * 0.6 + max(0, instant) * 0.4
-            }
-        }
-        lastSampleBytes = bytes
-        lastSampleTime = now
-        etaSeconds = speedBytesPerSec > 1024 ? Double(activeBytesRemaining) / speedBytesPerSec : nil
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: WatchSyncService.progressDidChange, object: nil)
-        }
+        ledger.expireLostAcks(now: now)
+        for stem in ledger.nextToStart(now: now) { begin(stem) }
+        afterLedgerChange()
     }
 
-    private func stopMetrics() {
-        metricsTimer?.invalidate()
-        metricsTimer = nil
-        speedBytesPerSec = 0
-        etaSeconds = nil
-        cumulativeBytes = 0
-        sessionTotalBytes = 0
-        lastSampleBytes = 0
-        lastSampleTime = nil
+    func afterLedgerChange() {
+        armWakeTimer()
+        endRunIfIdle()
+        publishBatch()
+        reportBackgroundProgress()
         notify()
     }
 
-    // MARK: - Helpers
+    func notify() {
+        NotificationCenter.default.post(name: Self.stateDidChange, object: nil)
+    }
 
-    private func relativePath(for url: URL) -> String {
+    func notifyProgress() {
+        NotificationCenter.default.post(name: Self.progressDidChange, object: nil)
+    }
+
+    func persistRequested() {
+        UserDefaults.standard.set(ledger.requested.sorted(), forKey: Self.requestedKey)
+    }
+
+    func relativePath(for url: URL) -> String {
         let documents = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
             .standardizedFileURL.path
@@ -409,247 +324,260 @@ final class WatchSyncService: NSObject {
         return canonicalSyncPath(relative.hasPrefix("/") ? String(relative.dropFirst()) : relative)
     }
 
-    private func ingest(context: [String: Any]) {
-        guard let paths = context[SyncKeys.syncedPaths] as? [String] else { return }
-        let confirmed = Set(paths.map(canonicalSyncPath))
-        let free = (context[SyncKeys.freeBytes] as? Int64) ?? Int64(context[SyncKeys.freeBytes] as? Int ?? 0)
-        let full = context[SyncKeys.isFull] as? Bool ?? false
-        let errorPath = (context[SyncKeys.lastErrorPath] as? String).map(canonicalSyncPath)
-        let errorReason = (context[SyncKeys.lastErrorReason] as? String).flatMap(StoreFailureReason.init(rawValue:))
+    func applyHeartbeat(used: Int64, total: Int64) {
+        watchUsedBytes = used
+        watchTotalBytes = total
+    }
 
-        let heartbeatAt = Date()
-        DispatchQueue.main.async {
-            self.syncedPaths = confirmed
-            self.watchFreeBytes = free
-            self.watchIsFull = full
-            for path in confirmed {
-                self.retryCounts[path] = nil
-                self.stuckPaths.remove(path)
-                self.failedPaths.remove(path)
-                self.diskFullPaths.remove(path)
-                self.awaitingConfirmation.removeValue(forKey: path)
+    /// Whether the pipeline may hand work out: the session is live and the
+    /// watch has either spoken or has never had anything to say, so a fresh
+    /// install is not blocked waiting for a heartbeat that cannot come.
+    private var canPump: Bool {
+        guard let wcSession, wcSession.activationState == .activated, wcSession.isWatchAppInstalled else { return false }
+        guard !ledger.watchIsFull else { return false }
+        return hasHeartbeat || wcSession.receivedApplicationContext.isEmpty
+    }
+
+    private func begin(_ stem: String) {
+        guard let track = track(forStem: stem) else {
+            dropOrphan(stem)
+            return
+        }
+        guard FileManager.default.fileExists(atPath: track.fileURL.path) else {
+            AppLogger.error("Sync source missing, dropping request: \(stem)", category: .connectivity)
+            dropOrphan(stem)
+            return
+        }
+        preparingStems.insert(stem)
+        let source = track.fileURL
+        let profile = profile
+        prepareTasks[stem] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let output = try await self.transcoder.prepare(source: source, profile: profile)
+                self.finishPreparation(stem: stem, track: track, output: output)
+            } catch is CancellationError {
+                self.preparationEnded(stem)
+            } catch {
+                self.preparationFailed(stem: stem, error: error)
             }
-            for (path, sentAt) in self.awaitingConfirmation
-            where heartbeatAt.timeIntervalSince(sentAt) > self.confirmationHeartbeatSlack {
-                self.awaitingConfirmation.removeValue(forKey: path)
-            }
-            if let errorPath, errorReason == .diskFull, !confirmed.contains(errorPath) {
-                self.diskFullPaths.insert(errorPath)
-                self.observations.removeValue(forKey: errorPath)
-                self.progressByPath.removeValue(forKey: errorPath)
-                self.awaitingConfirmation.removeValue(forKey: errorPath)
-            } else if !full, errorPath == nil {
-                self.diskFullPaths.removeAll()
-            }
-            AppLogger.info("Watch heartbeat: \(confirmed.count) tracks, \(free / 1_048_576) MB free, full=\(full)", category: .connectivity)
-            NotificationCenter.default.post(name: WatchSyncService.stateDidChange, object: nil)
-            if self.progressByPath.isEmpty { self.reconcile() }
         }
     }
 
-    private func notify() {
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(name: WatchSyncService.stateDidChange, object: nil)
+    private func finishPreparation(stem: String, track: Track, output: WatchTranscoder.Prepared) {
+        preparationEnded(stem)
+        guard let wcSession, ledger.phase(of: stem) == .preparing else {
+            Task { await transcoder.release(output) }
+            return
         }
-    }
-}
-
-extension WatchSyncService: WCSessionDelegate {
-
-    func session(
-        _ session: WCSession,
-        activationDidCompleteWith activationState: WCSessionActivationState,
-        error: Error?
-    ) {
-        if let error {
-            AppLogger.error("WCSession activation error: \(error.localizedDescription)", category: .connectivity)
-        }
-        AppLogger.info(
-            "WCSession activated (iOS): state=\(activationState.rawValue) paired=\(session.isPaired) installed=\(session.isWatchAppInstalled)",
-            category: .connectivity
+        bytesByStem[stem] = output.bytes
+        ledger.updateBytes(stem: stem, bytes: output.bytes)
+        prepared[stem] = output
+        let destination = SyncStem.destinationPath(forSource: relativePath(for: track.fileURL), encoded: output.wasEncoded)
+        let metadata = TransferMetadata(
+            relativePath: destination,
+            title: track.title,
+            artist: track.artist,
+            album: track.albumTitle,
+            trackNumber: track.trackNumber,
+            duration: track.duration,
+            bytes: output.bytes
         )
-        if session.isWatchAppInstalled {
-            ingest(context: session.receivedApplicationContext)
-            publish(jobProgress: EnrichmentCoordinator.shared.progress)
-            requestWatchState()
-            DispatchQueue.main.async { [weak self] in
-                self?.reconcileOutstanding()
-                self?.reconcile()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in self?.resetForNoWatchApp() }
-        }
-        notify()
+        let transfer = wcSession.transferFile(output.url, metadata: metadata.dictionary)
+        attach(transfer, stem: stem)
+        ledger.markSending(stem: stem, fraction: transfer.progress.fractionCompleted)
+        AppLogger.info("Queued transfer: \(destination) (\(output.bytes) bytes\(output.wasEncoded ? ", encoded" : ""))", category: .connectivity)
+        afterLedgerChange()
     }
 
-    /// Pulls the watch's current state directly when reachable — deterministic
-    /// truth rather than the possibly-stale cached application context.
-    func requestWatchState() {
-        guard let wcSession, wcSession.activationState == .activated, wcSession.isReachable else { return }
-        wcSession.sendMessage([SyncKeys.command: SyncKeys.commandGetState], replyHandler: { [weak self] reply in
-            self?.ingest(context: reply)
-        }, errorHandler: { error in
-            AppLogger.warning("getState failed: \(error.localizedDescription)", category: .connectivity)
-        })
+    private func preparationFailed(stem: String, error: Error) {
+        preparationEnded(stem)
+        AppLogger.error("Preparing \(stem) failed: \(error.localizedDescription)", category: .connectivity)
+        ledger.markFailed(stem: stem, failure: .transient, now: Date())
+        afterLedgerChange()
     }
 
-    func sessionReachabilityDidChange(_ session: WCSession) {
-        AppLogger.info("Watch reachability: \(session.isReachable)", category: .connectivity)
-        if session.isReachable { requestWatchState() }
+    private func preparationEnded(_ stem: String) {
+        preparingStems.remove(stem)
+        prepareTasks[stem] = nil
     }
 
-    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        ingest(context: applicationContext)
+    private func dropOrphan(_ stem: String) {
+        ledger.withdraw([stem])
+        runStems.remove(stem)
+        persistRequested()
+        afterLedgerChange()
     }
 
-    func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
-        let path = TransferMetadata(dictionary: fileTransfer.file.metadata)?.relativePath
-            ?? canonicalSyncPath(fileTransfer.file.fileURL.lastPathComponent)
-        if let error {
-            let nsError = error as NSError
-            if nsError.domain == WCError.errorDomain, nsError.code == WCError.Code.insufficientSpace.rawValue {
-                AppLogger.error("Transfer rejected — Apple Watch is full: \(path)", category: .connectivity)
-                DispatchQueue.main.async {
-                    self.watchIsFull = true
-                    self.diskFullPaths.insert(path)
-                    if self.progressByPath[path] != nil {
-                        self.sessionTotalBytes -= self.transferBytes[path] ?? 0
-                    }
-                    self.observations.removeValue(forKey: path)
-                    self.progressByPath.removeValue(forKey: path)
-                    self.transferBytes.removeValue(forKey: path)
-                    self.awaitingConfirmation.removeValue(forKey: path)
-                    NotificationCenter.default.post(name: WatchSyncService.stateDidChange, object: nil)
-                }
+    /// Withdraws requests whose track is gone from the library, but only once
+    /// the library has something in it: an empty library at launch means
+    /// "not loaded yet", and acting on it would forget everything requested.
+    func refreshRequestedFromLibrary() {
+        guard !Library.shared.allTracks.isEmpty else { return }
+        var orphans: [String] = []
+        for stem in ledger.requested {
+            if let track = track(forStem: stem) {
+                let bytes = estimatedBytes(for: track)
+                bytesByStem[stem] = bytes
+                ledger.updateBytes(stem: stem, bytes: bytes)
             } else {
-                AppLogger.error("Transfer failed \(path): \(error.localizedDescription)", category: .connectivity)
-                handleFailure(path: path)
+                orphans.append(stem)
             }
-        } else {
-            AppLogger.info("Transfer handed off \(path) — awaiting watch confirmation", category: .connectivity)
-            updateProgress(path: path, fraction: 1, finished: true)
         }
-    }
-
-    private func handleFailure(path: String) {
-        DispatchQueue.main.async {
-            if self.progressByPath[path] != nil {
-                self.sessionTotalBytes -= self.transferBytes[path] ?? 0
-            }
-            self.observations.removeValue(forKey: path)
-            self.transferBytes.removeValue(forKey: path)
-            self.progressByPath.removeValue(forKey: path)
-            self.awaitingConfirmation.removeValue(forKey: path)
-            self.failedPaths.insert(path)
-            NotificationCenter.default.post(name: WatchSyncService.stateDidChange, object: nil)
-        }
-    }
-
-    /// Wipes everything off the watch and clears local sync bookkeeping.
-    /// Cancels the outstanding transfer backlog first — otherwise queued files
-    /// keep arriving on the watch faster than the remove can clear them.
-    func removeAll() {
-        let outstanding = wcSession?.outstandingFileTransfers ?? []
-        outstanding.forEach { $0.cancel() }
-
-        observations.removeAll()
-        progressByPath.removeAll()
-        transferBytes.removeAll()
-        awaitingConfirmation.removeAll()
-        requestedPaths.removeAll()
-        diskFullPaths.removeAll()
-        stuckPaths.removeAll()
-        failedPaths.removeAll()
-        retryCounts.removeAll()
-        watchIsFull = false
-        syncedPaths.removeAll()
-        metricsTimer?.invalidate()
-        metricsTimer = nil
-        speedBytesPerSec = 0
-        etaSeconds = nil
-        sessionTotalBytes = 0
-        cumulativeBytes = 0
-
+        guard !orphans.isEmpty else { return }
+        for stem in orphans { discardWork(for: stem) }
+        ledger.withdraw(orphans)
         persistRequested()
-        sendCommand([SyncKeys.command: SyncKeys.commandRemoveAll])
-        AppLogger.info("Requested remove-all (cancelled \(outstanding.count) outstanding transfers)", category: .connectivity)
+        AppLogger.info("Dropped \(orphans.count) requested tracks no longer in the library", category: .connectivity)
+    }
+
+    func discardWork(for stem: String) {
+        prepareTasks[stem]?.cancel()
+        prepareTasks[stem] = nil
+        preparingStems.remove(stem)
+        if let track = track(forStem: stem) {
+            Task { await transcoder.cancel(source: track.fileURL) }
+        }
+        transfers[stem]?.cancel()
+        settle(stem)
+    }
+
+    /// Forgets the live handles for a stem: its observation, its transfer and
+    /// the encoded file that was waiting to be delivered.
+    func settle(_ stem: String) {
+        observations[stem] = nil
+        transfers[stem] = nil
+        if let output = prepared.removeValue(forKey: stem) {
+            Task { await transcoder.release(output) }
+        }
+    }
+
+    func cancelAllWork() {
+        for task in prepareTasks.values { task.cancel() }
+        prepareTasks.removeAll()
+        preparingStems.removeAll()
+        wcSession?.outstandingFileTransfers.forEach { $0.cancel() }
+        for stem in Array(prepared.keys) { settle(stem) }
+        observations.removeAll()
+        transfers.removeAll()
+        runStems.removeAll()
+        bytesByStem.removeAll()
+        hasHeartbeat = false
+        lastConfirmed = []
+        wakeTimer?.invalidate()
+        wakeTimer = nil
+        stopMetrics()
+    }
+
+    /// Stops the work that needs this process to be running when the system or
+    /// the person ends the background task; everything stays requested and is
+    /// picked up again the next time the app is active.
+    func suspendPreparation() {
+        for stem in preparingStems {
+            prepareTasks[stem]?.cancel()
+            ledger.abandonPreparation(stem: stem)
+        }
+        prepareTasks.removeAll()
+        preparingStems.removeAll()
         notify()
     }
 
-    /// Delivers a command immediately when the watch app is reachable (and reflects
-    /// the watch's resulting state back), falling back to a guaranteed queued
-    /// delivery for when the watch app is asleep.
-    private func sendCommand(_ payload: [String: Any]) {
-        guard let wcSession else { return }
-        if wcSession.isReachable {
-            wcSession.sendMessage(payload, replyHandler: { [weak self] reply in
-                self?.ingest(context: reply)
-            }, errorHandler: { error in
-                AppLogger.warning("Command sendMessage failed; queued instead: \(error.localizedDescription)", category: .connectivity)
-                wcSession.transferUserInfo(payload)
-            })
-        } else {
-            wcSession.transferUserInfo(payload)
-        }
+    func resetForNoWatchApp() {
+        cancelAllWork()
+        ledger.reset()
+        persistRequested()
+        applyHeartbeat(used: 0, total: 0)
+        endRunIfIdle()
+        notify()
     }
 
-    /// Whether an album's not-yet-synced tracks fit in the watch's reported free space.
-    enum FitResult { case fits, tooLarge(needed: Int64, free: Int64), unknown }
-
-    func fitResult(for album: Album) -> FitResult {
-        guard watchFreeBytes > 0 else { return .unknown }
-        let needed = album.tracks.reduce(Int64(0)) { sum, track in
-            isSynced(track) ? sum : sum + fileSize(of: track.fileURL)
+    private func startRun() {
+        guard !runStems.isEmpty else { return }
+        if metricsTimer == nil {
+            metrics.start(transferredBytes: sessionTransferredBytes, now: Date())
+            metricsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sampleMetrics() }
+            }
         }
-        let margin: Int64 = 50 * 1_024 * 1_024
-        if needed + margin <= watchFreeBytes { return .fits }
-        return .tooLarge(needed: needed, free: watchFreeBytes)
+        WatchSyncBackgroundTask.shared.begin(total: runStems.count)
     }
 
-    var diskFullCount: Int { diskFullPaths.count }
-
-    func sessionWatchStateDidChange(_ session: WCSession) {
-        AppLogger.info(
-            "Watch state changed: paired=\(session.isPaired) installed=\(session.isWatchAppInstalled)",
-            category: .connectivity
-        )
-        DispatchQueue.main.async {
-            if !session.isWatchAppInstalled { self.resetForNoWatchApp() }
-            NotificationCenter.default.post(name: WatchSyncService.stateDidChange, object: nil)
+    private func sampleMetrics() {
+        guard !runStems.isEmpty else {
+            stopMetrics()
+            return
         }
+        metrics.sample(transferredBytes: sessionTransferredBytes, remainingBytes: activeBytesRemaining, now: Date())
+        notifyProgress()
     }
 
-    /// No watch app means nothing is on the watch — reset the whole sync state so
-    /// the UI reflects reality instead of the last cached heartbeat.
-    private func resetForNoWatchApp() {
-        wcSession?.outstandingFileTransfers.forEach { $0.cancel() }
-        observations.removeAll()
-        progressByPath.removeAll()
-        transferBytes.removeAll()
-        awaitingConfirmation.removeAll()
-        syncedPaths.removeAll()
-        requestedPaths.removeAll()
-        diskFullPaths.removeAll()
-        stuckPaths.removeAll()
-        failedPaths.removeAll()
-        retryCounts.removeAll()
-        watchIsFull = false
-        watchFreeBytes = 0
+    private func stopMetrics() {
         metricsTimer?.invalidate()
         metricsTimer = nil
-        speedBytesPerSec = 0
-        etaSeconds = nil
-        sessionTotalBytes = 0
-        cumulativeBytes = 0
-        persistRequested()
+        metrics.reset()
     }
 
-    func sessionDidBecomeInactive(_ session: WCSession) {
-        AppLogger.info("WCSession inactive", category: .connectivity)
+    func endRunIfIdle() {
+        guard !runStems.isEmpty, !ledger.isBusy else { return }
+        runStems.removeAll()
+        stopMetrics()
+        WatchSyncBackgroundTask.shared.finish()
     }
 
-    func sessionDidDeactivate(_ session: WCSession) {
-        AppLogger.info("WCSession deactivated; reactivating", category: .connectivity)
-        session.activate()
+    private func reportBackgroundProgress() {
+        let handedOff = runStems.filter { stem in
+            switch ledger.phase(of: stem) {
+            case .awaitingAck?, .onWatch?: true
+            default: false
+            }
+        }.count
+        WatchSyncBackgroundTask.shared.update(completed: handedOff, total: runStems.count)
+    }
+
+    private func armWakeTimer() {
+        wakeTimer?.invalidate()
+        wakeTimer = nil
+        guard let wakeAt = ledger.nextWakeUp(now: Date()) else { return }
+        let delay = max(1, wakeAt.timeIntervalSinceNow)
+        wakeTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pump() }
+        }
+    }
+
+    private func observeLibrary() {
+        libraryObserver = NotificationCenter.default.addObserver(
+            forName: Library.didUpdateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.trackIndex = nil
+                self?.stemCache.removeAll()
+                self?.sizeCache.removeAll()
+                WatchSyncSizing.invalidate()
+                self?.refreshRequestedFromLibrary()
+                self?.pump()
+            }
+        }
+    }
+
+    func publish(jobProgress: EnrichmentJobProgress) {
+        guard jobProgress != latestJob else { return }
+        latestJob = jobProgress
+        scheduleContextPublish()
+    }
+
+    private func observeEnrichmentJob() {
+        latestJob = EnrichmentCoordinator.shared.progress
+        jobObserver = NotificationCenter.default.addObserver(
+            forName: EnrichmentCoordinator.progressDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let progress = notification.userInfo?[EnrichmentCoordinator.ProgressKey.progress] as? EnrichmentJobProgress
+            MainActor.assumeIsolated {
+                self?.publish(jobProgress: progress ?? EnrichmentCoordinator.shared.progress)
+            }
+        }
     }
 }

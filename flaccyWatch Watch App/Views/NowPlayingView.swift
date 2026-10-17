@@ -1,111 +1,180 @@
 import FlaccyCore
 import SwiftUI
+import WatchKit
 
 struct NowPlayingView: View {
 
+    var body: some View {
+        NowPlayingScreen().screenshotEnvironment()
+    }
+}
+
+private struct NowPlayingScreen: View {
+
     @Environment(WatchAudioPlayer.self) private var player
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    @State private var tint: ArtworkTint?
+    @State private var scrubFraction: Double?
+    @State private var isShowingQueue = NowPlayingScreen.opensQueueForScreenshots
+    @State private var isVolumeVisible = false
+    @State private var volumeChangeCount = 0
+
+    /// Simulator-only screenshot hook: `--shot-queue` opens the Up Next sheet
+    /// at once, since the simulator cannot be tapped from the command line.
+    private static var opensQueueForScreenshots: Bool {
+        #if targetEnvironment(simulator)
+        ProcessInfo.processInfo.arguments.contains("--shot-queue")
+        #else
+        false
+        #endif
+    }
+
+    private static let volumeHUDDuration: Duration = .milliseconds(1500)
 
     var body: some View {
         @Bindable var player = player
 
         Group {
             if let item = player.currentItem {
-                VStack(spacing: 7) {
-                    trackHeader(item)
-                    ProgressBar(progress: player.progress) { fraction in
-                        player.seek(to: fraction * player.duration)
-                    }
-                    timeRow
-                    transport
-                }
-                .padding(.horizontal, 3)
-                .focusable()
-                .digitalCrownRotation(
-                    $player.volume,
-                    from: 0, through: 1, by: 0.02,
-                    sensitivity: .low,
-                    isContinuous: false,
-                    isHapticFeedbackEnabled: true
-                )
-                .overlay(alignment: .topTrailing) {
-                    volumeBadge(player.volume).padding([.top, .trailing], 2)
-                }
+                nowPlaying(item)
+                    .focusable()
+                    .digitalCrownRotation(
+                        $player.volume,
+                        from: 0, through: 1, by: 0.02,
+                        sensitivity: .low,
+                        isContinuous: false,
+                        isHapticFeedbackEnabled: true
+                    )
+                    .overlay(alignment: .top) { volumeOverlay }
+                    .onChange(of: player.volume) { volumeDidChange() }
+                    .task(id: isVolumeVisible ? volumeChangeCount : -1) { await hideVolumeAfterPause() }
+                    .sheet(isPresented: $isShowingQueue) { QueueView() }
             } else {
                 notPlaying
             }
         }
-        .navigationTitle("Now Playing")
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .containerBackground(for: .navigation) { background }
+        .task(id: player.currentItem?.id) { await refreshTint() }
     }
 
-    private func trackHeader(_ item: MediaItem) -> some View {
-        HStack(spacing: 10) {
-            ArtworkView(data: item.artworkData, seed: item.albumTitle + item.artist, cornerRadius: 9)
-                .frame(width: 50, height: 50)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(item.artist)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+    private func nowPlaying(_ item: MediaItem) -> some View {
+        let width = WKInterfaceDevice.current().screenBounds.width
+        return ViewThatFits(in: .vertical) {
+            layout(item, metrics: .scaled(1.5, screenWidth: width))
+            layout(item, metrics: .scaled(1.25, screenWidth: width))
+            layout(item, metrics: .scaled(1, screenWidth: width))
+            layout(item, metrics: .scaled(0.75, screenWidth: width))
+            layout(item, metrics: .scaled(0.5, screenWidth: width))
+            layout(item, metrics: .scaled(0.25, screenWidth: width))
+            layout(item, metrics: .scaled(0, screenWidth: width))
+            ScrollView { layout(item, metrics: .scaled(0, screenWidth: width)) }
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func layout(_ item: MediaItem, metrics: NowPlayingMetrics) -> some View {
+        VStack(spacing: metrics.spacing) {
+            header(item, metrics: metrics)
+            scrubber(metrics)
+            TransportRow(metrics: metrics)
+            if !isLuminanceReduced {
+                SecondaryControlsRow(metrics: metrics) { isShowingQueue = true }
             }
-            Spacer(minLength: 0)
+        }
+    }
+
+    private func header(_ item: MediaItem, metrics: NowPlayingMetrics) -> some View {
+        HStack(spacing: 9) {
+            ArtworkView(data: item.artworkData, seed: item.albumTitle + item.artist, cornerRadius: 10)
+                .frame(width: metrics.artwork, height: metrics.artwork)
+                .opacity(isLuminanceReduced ? 0.7 : 1)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                MarqueeText(text: item.title, font: .headline, isAnimated: !isLuminanceReduced)
+                MarqueeText(text: item.artist, font: .caption, isAnimated: !isLuminanceReduced)
+                    .foregroundStyle(.white.opacity(isLuminanceReduced ? 0.6 : 0.72))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func scrubber(_ metrics: NowPlayingMetrics) -> some View {
+        VStack(spacing: 0) {
+            NowPlayingProgressBar(
+                progress: player.progress,
+                duration: player.duration,
+                isDimmed: isLuminanceReduced,
+                height: metrics.progressHeight,
+                scrubFraction: $scrubFraction,
+                onSeek: seek
+            )
+            timeRow
         }
     }
 
     private var timeRow: some View {
-        HStack {
-            Text(TimeFormat.string(player.currentTime))
+        let shownTime = scrubFraction.map { $0 * player.duration } ?? player.currentTime
+        return HStack {
+            Text(TimeFormat.string(shownTime))
             Spacer()
-            Text(TimeFormat.string(player.duration))
+            Text("-" + TimeFormat.string(max(0, player.duration - shownTime)))
         }
         .font(.caption2.monospacedDigit())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.white.opacity(0.6))
+        .opacity(isLuminanceReduced ? 0 : 1)
+        .accessibilityHidden(true)
     }
 
-    private var transport: some View {
-        HStack(spacing: 0) {
-            Button { player.toggleShuffle() } label: {
-                Image(systemName: "shuffle")
-                    .foregroundStyle(player.shuffleEnabled ? WatchTheme.accent : .secondary)
-            }
-            Spacer(minLength: 0)
-            Button { player.previous() } label: {
-                Image(systemName: "backward.fill")
-            }
-            Spacer(minLength: 0)
-            Button { player.togglePlayPause() } label: {
-                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 36))
-                    .foregroundStyle(WatchTheme.accent)
-            }
-            Spacer(minLength: 0)
-            Button { player.next() } label: {
-                Image(systemName: "forward.fill")
-            }
-            Spacer(minLength: 0)
-            Button { player.cycleRepeatMode() } label: {
-                Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
-                    .foregroundStyle(player.repeatMode == .off ? .secondary : WatchTheme.accent)
-            }
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 15, weight: .medium))
-        .padding(.horizontal, 2)
+    private func seek(to fraction: Double) {
+        player.seek(to: fraction * player.duration)
+        WKInterfaceDevice.current().play(.click)
     }
 
-    private func volumeBadge(_ volume: Double) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: volume <= 0.001 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: 8, weight: .semibold))
-            Text("\(Int(volume * 100))")
-                .font(.system(size: 9, weight: .semibold).monospacedDigit())
+    private var volumeOverlay: some View {
+        VolumeHUD(volume: player.volume)
+            .opacity(isVolumeVisible && !isLuminanceReduced ? 1 : 0)
+            .animation(.easeOut(duration: 0.2), value: isVolumeVisible)
+            .allowsHitTesting(false)
+    }
+
+    private func volumeDidChange() {
+        isVolumeVisible = true
+        volumeChangeCount &+= 1
+    }
+
+    /// The pill stays only while the crown keeps moving: each turn restarts
+    /// this wait, and the fade begins once the crown has been still.
+    private func hideVolumeAfterPause() async {
+        guard isVolumeVisible else { return }
+        try? await Task.sleep(for: Self.volumeHUDDuration)
+        guard !Task.isCancelled else { return }
+        isVolumeVisible = false
+    }
+
+    private func refreshTint() async {
+        guard let item = player.currentItem else {
+            tint = nil
+            return
         }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
-        .background(.ultraThinMaterial, in: Capsule())
+        let found = await ArtworkTintCache.shared.tint(for: item)
+        withAnimation(.easeInOut(duration: 0.6)) { tint = found }
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if isLuminanceReduced {
+            Color.black
+        } else if let tint {
+            tint.gradient
+        } else if let item = player.currentItem {
+            WatchTheme.placeholderGradient(seed: item.albumTitle + item.artist)
+        } else {
+            Color.black
+        }
     }
 
     private var notPlaying: some View {
@@ -124,29 +193,5 @@ struct NowPlayingView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
         }
-    }
-}
-
-struct ProgressBar: View {
-    let progress: Double
-    let onSeek: (Double) -> Void
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.18))
-                Capsule()
-                    .fill(WatchTheme.accentGradient)
-                    .frame(width: max(3, geometry.size.width * progress))
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0).onEnded { value in
-                    let fraction = min(1, max(0, value.location.x / geometry.size.width))
-                    onSeek(fraction)
-                }
-            )
-        }
-        .frame(height: 5)
     }
 }

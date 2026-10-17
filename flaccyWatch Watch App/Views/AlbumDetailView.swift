@@ -6,6 +6,7 @@ struct AlbumDetailView: View {
     @Environment(WatchAudioPlayer.self) private var player
     let album: MediaAlbum
     let onShowNowPlaying: () -> Void
+    var onRemoved: () -> Void = {}
 
     var body: some View {
         List {
@@ -20,10 +21,32 @@ struct AlbumDetailView: View {
                         TrackRow(item: item, index: index, isCurrent: player.currentItem == item)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu { queueActions(for: [item]) }
+                    .id(rowIdentity(at: index, of: item))
                 }
+            }
+            Section {
+                RemoveAlbumButton(album: album)
+            } footer: {
+                removeFootnote
             }
         }
         .navigationTitle(album.title)
+        .albumRemovalFlow(onRemoved: onRemoved)
+        .screenshotScroll(anchor: .bottom)
+    }
+
+    /// The first song answers to the `tracks` landmark of `--shot-scroll`;
+    /// every other row keeps its own identity.
+    private func rowIdentity(at index: Int, of item: MediaItem) -> String {
+        index == 0 ? "tracks" : item.id
+    }
+
+    private var removeFootnote: some View {
+        Text("Frees \(WatchFormat.bytes(AlbumRemoval.footprint(of: [album]))). It stays on your iPhone.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .textCase(nil)
     }
 
     private var header: some View {
@@ -51,6 +74,21 @@ struct AlbumDetailView: View {
             .padding(.top, 2)
         }
         .padding(.vertical, 4)
+        .contextMenu { queueActions(for: album.items) }
+    }
+
+    @ViewBuilder
+    private func queueActions(for items: [MediaItem]) -> some View {
+        Button {
+            player.playNext(items)
+        } label: {
+            Label("Play Next", systemImage: "text.insert")
+        }
+        Button {
+            player.enqueue(items)
+        } label: {
+            Label("Add to Queue", systemImage: "text.append")
+        }
     }
 
     private func play(at index: Int) {

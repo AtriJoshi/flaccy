@@ -68,7 +68,7 @@ final class WatchLibraryStore {
         await delivery.value
 
         guard gen == generation, !Task.isCancelled else { return }
-        let credited = LibraryScanner.resolvingCredits(items)
+        let credited = LibraryScanner.resolvingCredits(withSampleCovers(items))
         allTracks = credited.sorted { lhs, rhs in
             lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
@@ -77,6 +77,16 @@ final class WatchLibraryStore {
         loadFraction = tracker.displayFraction
         loadProgress = tracker.finish()
         AppLogger.info("Watch library: \(albums.count) albums, \(items.count) tracks", category: .watch)
+    }
+
+    /// The seeded Simulator files carry no tags, so their covers are generated;
+    /// on a device the items pass through untouched.
+    private func withSampleCovers(_ items: [MediaItem]) -> [MediaItem] {
+        #if targetEnvironment(simulator)
+        SampleArtwork.filling(items)
+        #else
+        items
+        #endif
     }
 
     private func apply(_ snapshot: LoadProgressRelay.Snapshot, generation gen: Int) {

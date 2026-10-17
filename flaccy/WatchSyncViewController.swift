@@ -1,221 +1,20 @@
 import FlaccyCore
 import UIKit
 
-enum SyncFormat {
-    private static let bytes: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        return formatter
-    }()
-
-    static func size(_ value: Int64) -> String { bytes.string(fromByteCount: max(0, value)) }
-
-    static func speed(_ bytesPerSecond: Double) -> String {
-        guard bytesPerSecond > 0 else { return String(localized: "measuring…") }
-        return String(localized: "\(bytes.string(fromByteCount: Int64(bytesPerSecond)))/s")
-    }
-
-    static func eta(_ seconds: TimeInterval?) -> String {
-        guard let seconds, seconds.isFinite, seconds > 0 else { return String(localized: "estimating time…") }
-        if seconds < 60 { return String(localized: "less than a minute left") }
-        let minutes = Int((seconds / 60).rounded())
-        if minutes < 60 { return String(localized: "about \(minutes) min left") }
-        return String(localized: "about \(minutes / 60)h \(minutes % 60)m left")
-    }
-
-    static func percent(_ fraction: Double) -> String {
-        "\(Int((min(1, max(0, fraction)) * 100).rounded()))%"
-    }
-}
-
-/// Mirrors WatchSyncService's document-relative path derivation so the UI can
-/// match tracks against the service's published path sets without widening the
-/// service's API.
-private func syncRelativePath(for url: URL) -> String {
-    let documents = FileManager.default
-        .urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .standardizedFileURL.path
-    let path = url.standardizedFileURL.path
-    guard path.hasPrefix(documents) else { return canonicalSyncPath(url.lastPathComponent) }
-    let relative = String(path.dropFirst(documents.count))
-    return canonicalSyncPath(relative.hasPrefix("/") ? String(relative.dropFirst()) : relative)
-}
-
-private enum AlbumSyncStatus {
-    case synced
-    case sending(Double)
-    case waiting
-    case failed
-    case storageFull
-    case partial(synced: Int, total: Int)
-    case notSynced
-
-    var pill: (text: String, color: UIColor)? {
-        switch self {
-        case .synced: return (String(localized: "Synced"), .systemGreen)
-        case .sending: return (String(localized: "Sending"), .systemBlue)
-        case .waiting: return (String(localized: "Waiting"), .systemGray)
-        case .failed: return (String(localized: "Send failed"), .systemRed)
-        case .storageFull: return (String(localized: "Storage Full"), .systemOrange)
-        case .partial, .notSynced: return nil
-        }
-    }
-
-    var voiceOverValue: String {
-        switch self {
-        case .synced: return String(localized: "Synced")
-        case let .sending(fraction): return String(localized: "Sending, \(SyncFormat.percent(fraction))")
-        case .waiting: return String(localized: "Waiting")
-        case .failed: return String(localized: "Couldn't send to Apple Watch. Tap to retry.")
-        case .storageFull: return String(localized: "Storage full")
-        case let .partial(synced, total): return String(localized: "\(synced) of \(total) synced")
-        case .notSynced: return String(localized: "Not synced")
-        }
-    }
-
-    static func status(for album: Album, service: WatchSyncService) -> AlbumSyncStatus {
-        let paths = album.tracks.map { syncRelativePath(for: $0.fileURL) }
-        let total = album.tracks.count
-        let synced = paths.reduce(0) { $0 + (service.syncedPaths.contains($1) ? 1 : 0) }
-        if paths.contains(where: { service.diskFullPaths.contains($0) }) { return .storageFull }
-        if paths.contains(where: { service.failedPaths.contains($0) || service.stuckPaths.contains($0) }) { return .failed }
-        if service.isSyncing(album: album) { return .sending(service.albumSyncFraction(album)) }
-        if synced == total, total > 0 { return .synced }
-        if paths.contains(where: { service.requestedPaths.contains($0) && !service.syncedPaths.contains($0) }) { return .waiting }
-        if synced > 0 { return .partial(synced: synced, total: total) }
-        return .notSynced
-    }
-}
-
-private final class ProgressRingView: UIView {
-
-    private let trackLayer = CAShapeLayer()
-    private let progressLayer = CAShapeLayer()
-    private var fraction: CGFloat = 0
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        for layer in [trackLayer, progressLayer] {
-            layer.fillColor = UIColor.clear.cgColor
-            layer.lineCap = .round
-            layer.lineWidth = 3
-            self.layer.addSublayer(layer)
-        }
-        progressLayer.strokeEnd = 0
-        applyColors()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: ProgressRingView, _) in
-            self.applyColors()
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func applyColors() {
-        trackLayer.strokeColor = UIColor.tertiarySystemFill.cgColor
-        progressLayer.strokeColor = tintColor.cgColor
-    }
-
-    override func tintColorDidChange() {
-        super.tintColorDidChange()
-        applyColors()
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let inset = progressLayer.lineWidth / 2
-        let rect = bounds.insetBy(dx: inset, dy: inset)
-        let path = UIBezierPath(
-            arcCenter: CGPoint(x: bounds.midX, y: bounds.midY),
-            radius: min(rect.width, rect.height) / 2,
-            startAngle: -.pi / 2,
-            endAngle: .pi * 1.5,
-            clockwise: true
-        )
-        trackLayer.path = path.cgPath
-        progressLayer.path = path.cgPath
-        trackLayer.frame = bounds
-        progressLayer.frame = bounds
-    }
-
-    /// Advances the ring smoothly; regressions and Reduce Motion set the value
-    /// directly so the stroke never visibly rewinds or interpolates.
-    func setProgress(_ value: Double, animated: Bool) {
-        let clamped = CGFloat(min(1, max(0, value)))
-        let shouldAnimate = animated
-            && !UIAccessibility.isReduceMotionEnabled
-            && clamped > fraction
-            && window != nil
-        fraction = clamped
-        if shouldAnimate {
-            let from = (progressLayer.presentation() ?? progressLayer).strokeEnd
-            progressLayer.strokeEnd = clamped
-            let animation = CABasicAnimation(keyPath: "strokeEnd")
-            animation.fromValue = from
-            animation.toValue = clamped
-            animation.duration = 0.3
-            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            progressLayer.add(animation, forKey: "strokeEnd")
-        } else {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            progressLayer.removeAnimation(forKey: "strokeEnd")
-            progressLayer.strokeEnd = clamped
-            CATransaction.commit()
-        }
-    }
-}
-
-private final class StatusPillView: UIView {
-
-    private let label = UILabel()
-
-    init() {
-        super.init(frame: .zero)
-        isUserInteractionEnabled = false
-        layer.cornerCurve = .continuous
-        clipsToBounds = true
-        label.font = .preferredFont(forTextStyle: .caption2)
-        label.adjustsFontForContentSizeCategory = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 3),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
-        ])
-        setContentHuggingPriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        layer.cornerRadius = bounds.height / 2
-    }
-
-    func apply(text: String, color: UIColor) {
-        label.text = text
-        label.textColor = color
-        backgroundColor = UIAccessibility.isReduceTransparencyEnabled
-            ? color.withAlphaComponent(0.28)
-            : color.withAlphaComponent(0.16)
-    }
-}
-
 final class WatchSyncViewController: UITableViewController {
 
-    nonisolated private enum Section: Int, CaseIterable { case status, albums }
+    nonisolated private enum Section: Int, CaseIterable { case status, quality, albums }
 
     nonisolated private enum Item: Hashable {
         case status
-        case activeSync
+        case run
+        case quality(WatchAudioProfile)
         case album(String)
+    }
+
+    private struct QualityEstimate {
+        let albumCount: Int
+        let bytes: [WatchAudioProfile: Int64]
     }
 
     private final class DataSource: UITableViewDiffableDataSource<Section, Item> {
@@ -231,65 +30,230 @@ final class WatchSyncViewController: UITableViewController {
         }
     }
 
+    private var allAlbums: [Album] = []
     private var albums: [Album] = []
+    private var albumsByID: [String: Album] = [:]
+    private var searchQuery = ""
+    private var qualityEstimate: QualityEstimate?
+    private var estimateTask: Task<Void, Never>?
     private let service = WatchSyncService.shared
     private let impact = UIImpactFeedbackGenerator(style: .light)
+    private let selection = UISelectionFeedbackGenerator()
     private let notify = UINotificationFeedbackGenerator()
+    private let searchController = UISearchController(searchResultsController: nil)
     private var dataSource: DataSource!
     private var wasSyncing = false
     private var pendingProgressUpdate: DispatchWorkItem?
+    private var isChecking = false
+    private var checkTask: Task<Void, Never>?
+    private var lastReadiness: WatchSyncService.Readiness?
+    private var renderedFooterKey: [Bool]?
+    private var songsInRun = 0
 
     init() { super.init(style: .insetGrouped) }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        estimateTask?.cancel()
+        checkTask?.cancel()
+    }
+
+    private var link: WatchSyncLink { WatchSyncLink.current(for: service) }
+
+    private var readiness: WatchSyncService.Readiness { service.readiness }
+
+    private var canSync: Bool { readiness.canQueue }
+
+    private var toastHost: UIView { navigationController?.view ?? view }
+
+    private var isSearching: Bool { !searchQuery.isEmpty }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        installDemoStateIfRequested()
         title = String(localized: "Apple Watch")
+        navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemGroupedBackground
-        tableView.register(WatchAlbumSyncCell.self, forCellReuseIdentifier: WatchAlbumSyncCell.reuseID)
-        tableView.register(WatchStatusCell.self, forCellReuseIdentifier: WatchStatusCell.reuseID)
-        tableView.register(ActiveSyncCell.self, forCellReuseIdentifier: ActiveSyncCell.reuseID)
-        albums = Library.shared.albums
+        tableView.register(WatchSyncStatusCell.self, forCellReuseIdentifier: WatchSyncStatusCell.reuseID)
+        tableView.register(WatchSyncRunCell.self, forCellReuseIdentifier: WatchSyncRunCell.reuseID)
+        tableView.register(WatchSyncQualityCell.self, forCellReuseIdentifier: WatchSyncQualityCell.reuseID)
+        tableView.register(WatchSyncAlbumCell.self, forCellReuseIdentifier: WatchSyncAlbumCell.reuseID)
+        tableView.estimatedRowHeight = 72
+        tableView.cellLayoutMarginsFollowReadableWidth = true
+
+        configureSearch()
+        configureMenu()
+        loadAlbums()
         configureDataSource()
-        applySnapshot()
+        applySnapshot(animated: false)
+        refreshQualityEstimate()
+        scrollForDemoIfRequested()
+        lastReadiness = readiness
 
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "trash"),
-            primaryAction: UIAction { [weak self] _ in self?.confirmRemoveAll() }
-        )
-
-        NotificationCenter.default.addObserver(self, selector: #selector(stateChanged), name: WatchSyncService.stateDidChange, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(stateChanged), name: Library.didUpdateNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(progressChanged), name: WatchSyncService.progressDidChange, object: nil)
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(stateChanged), name: WatchSyncService.stateDidChange, object: nil)
+        center.addObserver(self, selector: #selector(libraryChanged), name: Library.didUpdateNotification, object: nil)
+        center.addObserver(self, selector: #selector(progressChanged), name: WatchSyncService.progressDidChange, object: nil)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        guard !WatchSyncLink.isSimulated else { return }
         service.requestWatchState()
         service.reconcile()
     }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    private func restoreDemoStateIfRequested() {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+        service.restoreDemoStateIfDisturbed()
+        #endif
+    }
+
+    private func installDemoStateIfRequested() {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+        service.installDemoState()
+        #endif
+    }
+
+    /// Lets a screenshot run start further down the screen, since the album list
+    /// sits below the status card and the quality section.
+    private func scrollForDemoIfRequested() {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+        guard WatchSyncLink.isSimulated, let target = ProcessInfo.processInfo.environment["FLACCY_WATCH_SCROLL"],
+              !target.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.tableView.layoutIfNeeded()
+            let section = target == "albums" ? Section.albums : Section.quality
+            guard let sectionIndex = self.dataSource.snapshot().indexOfSection(section) else { return }
+            let indexPath = IndexPath(row: 0, section: sectionIndex)
+            self.tableView.scrollToRow(at: indexPath, at: .top, animated: false)
+        }
+        #endif
+    }
+
+    private func configureSearch() {
+        searchController.searchResultsUpdater = self
+        searchController.obscuresBackgroundDuringPresentation = false
+        searchController.searchBar.placeholder = String(localized: "Search Albums")
+        navigationItem.searchController = searchController
+        navigationItem.hidesSearchBarWhenScrolling = true
+        definesPresentationContext = true
+    }
+
+    private func configureMenu() {
+        let menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.menuElements() ?? [])
+            },
+        ])
+        let item = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: menu)
+        item.accessibilityLabel = String(localized: "More")
+        navigationItem.rightBarButtonItem = item
+    }
+
+    /// Built each time the menu opens, so Remove All is only live while there
+    /// is something on the watch to remove and Retry only while something failed.
+    private func menuElements() -> [UIMenuElement] {
+        var elements: [UIMenuElement] = []
+        let readiness = self.readiness
+        if let topic = helpTopic(for: readiness) {
+            elements.append(UIAction(title: String(localized: "Show Me How"), image: UIImage(systemName: "list.number")) { [weak self] _ in
+                self?.presentHelp(topic)
+            })
+        }
+        if readiness != .ready && readiness != .notSupported {
+            elements.append(UIAction(title: String(localized: "Check Again"), image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
+                self?.checkAgain()
+            })
+        }
+        if service.stuckCount > 0 {
+            elements.append(UIAction(title: String(localized: "Retry"), image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
+                self?.retryStuck()
+            })
+        }
+        let hasMusic = service.syncedCount > 0 || service.requestedCount > 0
+        let removeAll = UIAction(
+            title: String(localized: "Remove All from Watch"),
+            image: UIImage(systemName: "trash"),
+            attributes: hasMusic && readiness.canQueue ? .destructive : [.destructive, .disabled]
+        ) { [weak self] _ in
+            self?.confirmRemoveAll()
+        }
+        if !readiness.canQueue {
+            removeAll.subtitle = readiness.unavailableReason
+        } else if !hasMusic {
+            removeAll.subtitle = String(localized: "Nothing on your Watch")
+        }
+        elements.append(removeAll)
+        return elements
+    }
+
+    private func helpTopic(for readiness: WatchSyncService.Readiness) -> WatchSyncHelpViewController.Topic? {
+        switch readiness {
+        case .notInstalled: .install
+        case .notPaired: .pair
+        case .notSupported, .waitingForWatch, .ready: nil
+        }
+    }
+
+    private func loadAlbums() {
+        var seen = Set<String>()
+        allAlbums = Library.shared.albums.filter { seen.insert($0.id).inserted }
+        albumsByID = Dictionary(uniqueKeysWithValues: allAlbums.map { ($0.id, $0) })
+        applyFilter()
+    }
+
+    private func applyFilter() {
+        guard isSearching else {
+            albums = allAlbums
+            return
+        }
+        albums = allAlbums.filter {
+            $0.title.localizedStandardContains(searchQuery) || $0.artist.localizedStandardContains(searchQuery)
+        }
+    }
+
+    private func refreshQualityEstimate() {
+        estimateTask?.cancel()
+        let tracks = allAlbums.flatMap(\.tracks)
+        let count = allAlbums.count
+        estimateTask = Task { [weak self] in
+            let totals = await Task.detached(priority: .utility) { WatchSyncSizing.libraryBytes(tracks: tracks) }.value
+            guard !Task.isCancelled, let self else { return }
+            self.qualityEstimate = QualityEstimate(albumCount: count, bytes: totals)
+            self.reconfigureQualityRows()
+        }
+    }
+
+    private func qualityHint(for profile: WatchAudioProfile) -> String? {
+        guard let estimate = qualityEstimate else {
+            return allAlbums.isEmpty ? nil : String(localized: "Calculating…")
+        }
+        guard estimate.albumCount > 0, let bytes = estimate.bytes[profile] else { return nil }
+        return profile.libraryHint(albumCount: estimate.albumCount, bytes: bytes)
+    }
 
     private func configureDataSource() {
         dataSource = DataSource(tableView: tableView) { [weak self] tableView, indexPath, item in
             guard let self else { return UITableViewCell() }
             switch item {
-            case .status:
-                let cell = tableView.dequeueReusableCell(withIdentifier: WatchStatusCell.reuseID, for: indexPath) as! WatchStatusCell
-                let state = self.connectionState()
-                cell.configure(state: state, subtitle: self.stateSubtitle(state))
-                return cell
-            case .activeSync:
-                let cell = tableView.dequeueReusableCell(withIdentifier: ActiveSyncCell.reuseID, for: indexPath) as! ActiveSyncCell
+            case .status: return self.statusCell(in: tableView, at: indexPath)
+            case .run:
+                let cell = tableView.dequeueReusableCell(withIdentifier: WatchSyncRunCell.reuseID, for: indexPath) as! WatchSyncRunCell
                 cell.configure(service: self.service)
                 return cell
+            case let .quality(profile):
+                let cell = tableView.dequeueReusableCell(withIdentifier: WatchSyncQualityCell.reuseID, for: indexPath) as! WatchSyncQualityCell
+                cell.configure(profile: profile, isSelected: profile == self.service.profile, hint: self.qualityHint(for: profile))
+                return cell
             case let .album(id):
-                let cell = tableView.dequeueReusableCell(withIdentifier: WatchAlbumSyncCell.reuseID, for: indexPath) as! WatchAlbumSyncCell
-                if let album = self.album(withID: id) {
-                    cell.configure(album: album, service: self.service)
+                let cell = tableView.dequeueReusableCell(withIdentifier: WatchSyncAlbumCell.reuseID, for: indexPath) as! WatchSyncAlbumCell
+                if let album = self.albumsByID[id] {
+                    cell.configure(album: album, presentation: WatchAlbumPresentation.make(album: album, service: self.service))
                 }
                 return cell
             }
@@ -297,24 +261,98 @@ final class WatchSyncViewController: UITableViewController {
         dataSource.defaultRowAnimation = .fade
         dataSource.headerTitle = { [weak self] section in
             guard let self else { return nil }
-            return section == .albums && !self.albums.isEmpty ? String(localized: "Albums") : nil
+            switch section {
+            case .status: return nil
+            case .quality: return String(localized: "Quality")
+            case .albums: return self.albums.isEmpty ? nil : String(localized: "Albums")
+            }
         }
         dataSource.footerTitle = { [weak self] section in
             guard let self else { return nil }
-            return section == .status ? self.statusFooter() : self.albumsFooter()
+            switch section {
+            case .status: return WatchConnectionState(service: self.service, link: self.link).footer
+            case .quality: return self.canSync ? String(localized: "Your Apple Watch plays over Bluetooth, which already compresses audio, so lossless files take several times the space for no audible gain. A new quality applies only to music sent from now on — songs already on your watch stay as they are.") : String(localized: "Your choice is saved and applies when music is sent. Your Apple Watch plays over Bluetooth, which already compresses audio, so lossless files take several times the space for no audible gain.")
+            case .albums: return nil
+            }
         }
     }
 
-    private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections(Section.allCases)
-        snapshot.appendItems(service.isSyncing ? [.status, .activeSync] : [.status], toSection: .status)
-        snapshot.appendItems(albums.map { .album($0.id) }, toSection: .albums)
-        dataSource.applySnapshotUsingReloadData(snapshot)
+    private func statusCell(in tableView: UITableView, at indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: WatchSyncStatusCell.reuseID, for: indexPath) as! WatchSyncStatusCell
+        let state = WatchConnectionState(service: service, link: link)
+        let storage = readiness.isReady ? WatchStorageBreakdown.current(service: service) : nil
+        cell.configure(.init(
+            state: state,
+            subtitle: state.subtitle(service: service, showsFreeSpace: storage == nil),
+            storage: storage,
+            stuckCount: readiness.isReady ? service.stuckCount : 0,
+            isChecking: isChecking
+        ))
+        cell.onRetry = { [weak self] in self?.retryStuck() }
+        cell.onShowHow = { [weak self] in
+            guard let self, let topic = self.helpTopic(for: self.readiness) else { return }
+            self.presentHelp(topic)
+        }
+        cell.onCheckAgain = { [weak self] in self?.checkAgain() }
+        return cell
     }
 
-    private func album(withID id: String) -> Album? {
-        albums.first { $0.id == id }
+    private func makeSnapshot() -> NSDiffableDataSourceSnapshot<Section, Item> {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        if !isSearching {
+            snapshot.appendSections([.status, .quality])
+            let showsRun = readiness.isReady && (service.isSyncing || service.preparingCount > 0)
+            snapshot.appendItems(showsRun ? [.status, .run] : [.status], toSection: .status)
+            snapshot.appendItems(WatchAudioProfile.allCases.map { .quality($0) }, toSection: .quality)
+        }
+        snapshot.appendSections([.albums])
+        snapshot.appendItems(albums.map { .album($0.id) }, toSection: .albums)
+        return snapshot
+    }
+
+    /// Footers are asked for only when their section loads, so a change in what
+    /// they say reloads the two sections that carry one.
+    private func reloadFootersIfNeeded(in snapshot: inout NSDiffableDataSourceSnapshot<Section, Item>) {
+        let key = [readiness.canQueue, readiness.needsSetup]
+        guard key != renderedFooterKey else { return }
+        renderedFooterKey = key
+        snapshot.reloadSections([Section.status, .quality].filter { snapshot.sectionIdentifiers.contains($0) })
+    }
+
+    private func applySnapshot(animated: Bool) {
+        var snapshot = makeSnapshot()
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        reloadFootersIfNeeded(in: &snapshot)
+        let shouldAnimate = animated && view.window != nil && !UIAccessibility.isReduceMotionEnabled
+        dataSource.apply(snapshot, animatingDifferences: shouldAnimate)
+        updateEmptyState()
+    }
+
+    private func reconfigureQualityRows() {
+        guard isViewLoaded, dataSource != nil else { return }
+        var snapshot = dataSource.snapshot()
+        let rows = snapshot.itemIdentifiers.filter { if case .quality = $0 { true } else { false } }
+        guard !rows.isEmpty else { return }
+        snapshot.reconfigureItems(rows)
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func updateEmptyState() {
+        guard isSearching, albums.isEmpty else {
+            contentUnavailableConfiguration = nil
+            return
+        }
+        contentUnavailableConfiguration = UIContentUnavailableConfiguration.search()
+    }
+
+    @objc private func libraryChanged() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isViewLoaded else { return }
+            WatchSyncSizing.invalidate()
+            self.loadAlbums()
+            self.refreshQualityEstimate()
+            self.applySnapshot(animated: false)
+        }
     }
 
     @objc private func stateChanged() {
@@ -322,13 +360,15 @@ final class WatchSyncViewController: UITableViewController {
             guard let self, self.isViewLoaded, self.view.window != nil else { return }
             self.pendingProgressUpdate?.cancel()
             self.pendingProgressUpdate = nil
-            self.albums = Library.shared.albums
             let isSyncing = self.service.isSyncing
             if self.wasSyncing, !isSyncing, self.service.unconfirmedCount == 0, self.service.diskFullCount == 0 {
                 self.notify.notificationOccurred(.success)
+                self.reportRunFinished()
             }
             self.wasSyncing = isSyncing
-            self.applySnapshot()
+            self.restoreDemoStateIfRequested()
+            self.applySnapshot(animated: true)
+            self.noteReadinessChange()
         }
     }
 
@@ -351,54 +391,251 @@ final class WatchSyncViewController: UITableViewController {
 
     private func applyProgressToVisibleCells() {
         guard isViewLoaded, view.window != nil else { return }
+        restoreDemoStateIfRequested()
         if service.isSyncing != wasSyncing {
             stateChanged()
             return
         }
         for indexPath in tableView.indexPathsForVisibleRows ?? [] {
             switch dataSource.itemIdentifier(for: indexPath) {
-            case .activeSync:
-                (tableView.cellForRow(at: indexPath) as? ActiveSyncCell)?.configure(service: service)
+            case .run:
+                (tableView.cellForRow(at: indexPath) as? WatchSyncRunCell)?.configure(service: service)
             case let .album(id):
                 guard
-                    let cell = tableView.cellForRow(at: indexPath) as? WatchAlbumSyncCell,
-                    let album = album(withID: id)
+                    let cell = tableView.cellForRow(at: indexPath) as? WatchSyncAlbumCell,
+                    let album = albumsByID[id]
                 else { continue }
-                cell.configure(album: album, service: service)
+                cell.configure(album: album, presentation: WatchAlbumPresentation.make(album: album, service: service))
             default:
                 continue
             }
         }
     }
 
-    private var canSync: Bool {
-        service.isSupported && service.isPaired && service.isWatchAppInstalled
-    }
-
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        guard case let .album(id) = dataSource.itemIdentifier(for: indexPath), let album = album(withID: id) else { return }
-        toggle(album: album)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case let .quality(profile): choose(profile)
+        case let .album(id): albumsByID[id].map(toggle)
+        default: break
+        }
     }
 
     override func tableView(_ tableView: UITableView, shouldHighlightRowAt indexPath: IndexPath) -> Bool {
-        guard case .album = dataSource.itemIdentifier(for: indexPath) else { return false }
-        return canSync
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .quality, .album: true
+        default: false
+        }
     }
 
-    private func toggle(album: Album) {
+    private func choose(_ profile: WatchAudioProfile) {
+        guard profile != service.profile else { return }
+        selection.selectionChanged()
+        service.setProfile(profile)
+    }
+
+    private func toggle(_ album: Album) {
         guard canSync else {
-            notify.notificationOccurred(.warning)
+            explainUnavailable()
             return
         }
-        if service.syncedCount(in: album) == album.tracks.count {
+        switch service.state(of: album) {
+        case .synced:
             confirmRemove(album: album)
-        } else if case let .tooLarge(needed, free) = service.fitResult(for: album) {
+        case .failed:
+            retryStuck()
+        case .waiting, .preparing, .sending:
+            explainAlreadyOnItsWay()
+        default:
+            send(album)
+        }
+    }
+
+    private func send(_ album: Album) {
+        guard canSync else {
+            explainUnavailable()
+            return
+        }
+        if case let .tooLarge(needed, free) = service.fitResult(for: album) {
             showWontFit(album: album, needed: needed, free: free)
         } else {
-            impact.impactOccurred()
-            service.sync(tracks: album.tracks)
+            start(album)
         }
+    }
+
+    /// Hands the album to the service and answers in the same turn: a haptic, the
+    /// row and card repainted at once, a toast and a VoiceOver announcement.
+    private func start(_ album: Album) {
+        switch service.sync(tracks: album.tracks) {
+        case let .started(count):
+            impact.impactOccurred()
+            songsInRun += count
+            applySnapshot(animated: true)
+            report(startedMessage(count: count))
+        case .nothingToSend:
+            selection.selectionChanged()
+            applySnapshot(animated: true)
+            report(String(localized: "Already on your Watch"), style: .success)
+        case .notReady:
+            explainUnavailable()
+        }
+    }
+
+    private func startedMessage(count: Int) -> String {
+        if case .waitingForWatch = readiness {
+            return count == 1
+                ? String(localized: "1 song queued. It sends when your Watch is nearby")
+                : String(localized: "\(count) songs queued. They send when your Watch is nearby")
+        }
+        return count == 1
+            ? String(localized: "Sending 1 song to your Watch")
+            : String(localized: "Sending \(count) songs to your Watch")
+    }
+
+    private func reportRunFinished() {
+        let count = songsInRun
+        songsInRun = 0
+        let message: String
+        switch count {
+        case 0: message = String(localized: "Your music is on your Watch")
+        case 1: message = String(localized: "1 song is on your Watch")
+        default: message = String(localized: "\(count) songs are on your Watch")
+        }
+        showToast(message, style: .success)
+        announce(message)
+    }
+
+    /// A tap on something that cannot happen yet is never silent: a warning
+    /// haptic and the explanation, as the setup sheet where there is one.
+    private func explainUnavailable() {
+        notify.notificationOccurred(.warning)
+        let current = readiness
+        if let topic = helpTopic(for: current) {
+            presentHelp(topic)
+            return
+        }
+        switch current {
+        case .waitingForWatch(.activating):
+            report(String(localized: "Still connecting to your Watch. Try again in a moment"))
+        case .notSupported:
+            report(current.unavailableReason)
+        case .waitingForWatch, .ready, .notInstalled, .notPaired:
+            report(current.stillNotReadyMessage)
+        }
+    }
+
+    private func explainAlreadyOnItsWay() {
+        selection.selectionChanged()
+        if case .waitingForWatch = readiness {
+            report(String(localized: "Queued. It sends when your Watch is nearby"))
+        } else {
+            report(String(localized: "Already on its way to your Watch"))
+        }
+    }
+
+    private func presentHelp(_ topic: WatchSyncHelpViewController.Topic) {
+        guard presentedViewController == nil else { return }
+        let sheet = WatchSyncHelpViewController(topic: topic)
+        sheet.performCheck = { [weak self] completion in
+            guard let self else { return }
+            self.checkAgain(reportsWithToast: false, completion: completion)
+        }
+        sheet.modalPresentationStyle = .pageSheet
+        if let presentation = sheet.sheetPresentationController {
+            presentation.detents = [.medium(), .large()]
+            presentation.prefersGrabberVisible = true
+            presentation.prefersScrollingExpandsWhenScrolledToEdge = false
+            if traitCollection.preferredContentSizeCategory.isAccessibilityCategory {
+                presentation.selectedDetentIdentifier = .large
+            }
+        }
+        present(sheet, animated: true)
+    }
+
+    private func checkAgain(
+        reportsWithToast: Bool = true,
+        completion: ((WatchSyncService.Readiness) -> Void)? = nil
+    ) {
+        guard !isChecking else { return }
+        selection.selectionChanged()
+        isChecking = true
+        reconfigureStatusRow()
+        announce(String(localized: "Checking your Apple Watch"))
+        if !WatchSyncLink.isSimulated {
+            service.requestWatchState()
+            service.reconcile()
+        }
+        checkTask?.cancel()
+        checkTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            self?.finishCheck(reportsWithToast: reportsWithToast, completion: completion)
+        }
+    }
+
+    private func finishCheck(reportsWithToast: Bool, completion: ((WatchSyncService.Readiness) -> Void)?) {
+        isChecking = false
+        let current = readiness
+        let changed = lastReadiness != current
+        noteReadinessChange()
+        applySnapshot(animated: true)
+        if reportsWithToast, !changed, !current.isReady {
+            showToast(current.stillNotReadyMessage, style: .info)
+            announce(current.stillNotReadyMessage)
+        }
+        completion?(current)
+    }
+
+    private func reconfigureStatusRow() {
+        guard isViewLoaded, dataSource != nil else { return }
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.status) else { return }
+        snapshot.reconfigureItems([.status])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    /// Celebrates the moment a watch that needed setting up becomes usable,
+    /// whichever way it was noticed: Check Again, or the system telling us.
+    private func noteReadinessChange() {
+        let current = readiness
+        defer { lastReadiness = current }
+        guard let previous = lastReadiness, previous != current else { return }
+        guard current.isReady, previous.needsSetup else { return }
+        notify.notificationOccurred(.success)
+        let message = String(localized: "Your Apple Watch is ready. Choose an album to send")
+        showToast(message, style: .success)
+        announce(message)
+    }
+
+    private func showToast(_ message: String, style: ToastView.Style = .info) {
+        guard view.window != nil else { return }
+        ToastView.show(message, in: toastHost, style: style)
+    }
+
+    private func announce(_ message: String) {
+        UIAccessibility.post(notification: .announcement, argument: message)
+    }
+
+    private func report(_ message: String, style: ToastView.Style = .info) {
+        showToast(message, style: style)
+        announce(message)
+    }
+
+    private func retryStuck() {
+        guard canSync else {
+            explainUnavailable()
+            return
+        }
+        let count = service.stuckCount
+        guard count > 0 else {
+            selection.selectionChanged()
+            report(String(localized: "Nothing to retry"))
+            return
+        }
+        impact.impactOccurred()
+        service.retryStuck()
+        applySnapshot(animated: true)
+        report(count == 1 ? String(localized: "Retrying 1 song") : String(localized: "Retrying \(count) songs"))
     }
 
     private func showWontFit(album: Album, needed: Int64, free: Int64) {
@@ -410,15 +647,15 @@ final class WatchSyncViewController: UITableViewController {
         )
         alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel))
         alert.addAction(UIAlertAction(title: String(localized: "Sync Anyway"), style: .default) { [weak self] _ in
-            self?.impact.impactOccurred()
-            self?.service.sync(tracks: album.tracks)
+            self?.start(album)
         })
         present(alert, animated: true)
     }
 
     private func confirmRemoveAll() {
-        guard !service.syncedPaths.isEmpty || !service.requestedPaths.isEmpty else {
+        guard service.syncedCount > 0 || service.requestedCount > 0 else {
             notify.notificationOccurred(.warning)
+            report(String(localized: "There’s no music on your Watch to remove"))
             return
         }
         let alert = UIAlertController(
@@ -428,14 +665,17 @@ final class WatchSyncViewController: UITableViewController {
         )
         alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: String(localized: "Remove All"), style: .destructive) { [weak self] _ in
-            self?.impact.impactOccurred()
-            self?.service.removeAll()
+            guard let self else { return }
+            self.impact.impactOccurred()
+            self.service.removeAll()
+            self.applySnapshot(animated: true)
+            self.report(String(localized: "Removing all music from your Watch"))
         })
         present(alert, animated: true)
     }
 
     private func confirmRemove(album: Album) {
-        let size = SyncFormat.size(service.totalBytes(in: album))
+        let size = SyncFormat.size(WatchSyncSizing.totalBytes(in: album, profile: service.profile))
         let alert = UIAlertController(
             title: String(localized: "Remove from Watch"),
             message: String(localized: "Delete “\(album.title)” (\(size)) from your Apple Watch?"),
@@ -443,419 +683,125 @@ final class WatchSyncViewController: UITableViewController {
         )
         alert.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
         alert.addAction(UIAlertAction(title: String(localized: "Remove"), style: .destructive) { [weak self] _ in
-            self?.impact.impactOccurred()
-            self?.service.remove(tracks: album.tracks)
+            self?.removeFromWatch(album)
         })
         present(alert, animated: true)
     }
 
-    fileprivate enum ConnectionState {
-        case notSupported, notPaired, notInstalled, full, syncing, pending, synced, ready
+    private func removeFromWatch(_ album: Album) {
+        guard service.remove(tracks: album.tracks) else {
+            notify.notificationOccurred(.warning)
+            report(String(localized: "Couldn’t reach your Watch. Try again in a moment"), style: .error)
+            return
+        }
+        impact.impactOccurred()
+        applySnapshot(animated: true)
+        report(String(localized: "Removing “\(album.title)” from your Watch"))
+    }
 
-        var color: UIColor {
-            switch self {
-            case .syncing, .synced, .ready: return .systemGreen
-            case .pending, .notInstalled: return .systemOrange
-            case .full: return .systemRed
-            case .notSupported, .notPaired: return .systemGray
+    private func hasMusicOnWatch(_ album: Album) -> Bool {
+        service.state(of: album) != .notSynced
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard case let .album(id) = dataSource.itemIdentifier(for: indexPath), let album = albumsByID[id] else { return nil }
+        return UIContextMenuConfiguration(identifier: id as NSString, previewProvider: nil) { [weak self] _ in
+            guard let self else { return nil }
+            return UIMenu(children: self.canSync ? self.albumActions(for: album) : self.unavailableActions())
+        }
+    }
+
+    /// What the menu offers while nothing can be sent: the disabled action says
+    /// why, and the setup help is one tap away.
+    private func unavailableActions() -> [UIMenuElement] {
+        let current = readiness
+        let send = UIAction(
+            title: String(localized: "Send to Watch"),
+            image: UIImage(systemName: "applewatch.radiowaves.left.and.right"),
+            attributes: .disabled
+        ) { _ in }
+        send.subtitle = current.unavailableReason
+        var actions: [UIMenuElement] = [send]
+        if let topic = helpTopic(for: current) {
+            actions.append(UIAction(title: String(localized: "Show Me How"), image: UIImage(systemName: "list.number")) { [weak self] _ in
+                self?.presentHelp(topic)
+            })
+        }
+        return actions
+    }
+
+    private func albumActions(for album: Album) -> [UIMenuElement] {
+        let state = service.state(of: album)
+        var actions: [UIMenuElement] = []
+        if state == .failed {
+            actions.append(UIAction(title: String(localized: "Retry"), image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
+                self?.retryStuck()
+            })
+        }
+        if state != .synced {
+            actions.append(UIAction(title: String(localized: "Send to Watch"), image: UIImage(systemName: "applewatch.radiowaves.left.and.right")) { [weak self] _ in
+                self?.send(album)
+            })
+        }
+        if hasMusicOnWatch(album) {
+            actions.append(UIAction(title: String(localized: "Remove from Watch"), image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+                self?.confirmRemove(album: album)
+            })
+        }
+        return actions
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath
+    ) -> UISwipeActionsConfiguration? {
+        guard case let .album(id) = dataSource.itemIdentifier(for: indexPath), let album = albumsByID[id],
+              service.state(of: album) != .synced else { return nil }
+        guard canSync else {
+            guard let topic = helpTopic(for: readiness) else { return nil }
+            let help = UIContextualAction(style: .normal, title: String(localized: "Show Me How")) { [weak self] _, _, completion in
+                self?.presentHelp(topic)
+                completion(true)
             }
+            help.image = UIImage(systemName: "list.number")
+            help.backgroundColor = .systemOrange
+            return UISwipeActionsConfiguration(actions: [help])
         }
-
-        var symbol: String {
-            switch self {
-            case .syncing: return "arrow.triangle.2.circlepath.circle.fill"
-            case .synced: return "checkmark.circle.fill"
-            case .pending: return "clock.fill"
-            case .full: return "exclamationmark.triangle.fill"
-            case .notInstalled: return "exclamationmark.circle.fill"
-            case .ready, .notSupported, .notPaired: return "circle.fill"
-            }
+        let action = UIContextualAction(style: .normal, title: String(localized: "Send to Watch")) { [weak self] _, _, completion in
+            self?.send(album)
+            completion(true)
         }
-
-        var title: String {
-            switch self {
-            case .notSupported: return String(localized: "Not Available")
-            case .notPaired: return String(localized: "No Apple Watch")
-            case .notInstalled: return String(localized: "Install Flaccy on Apple Watch")
-            case .full: return String(localized: "Apple Watch is Full")
-            case .syncing: return String(localized: "Syncing…")
-            case .pending: return String(localized: "Finishing Up")
-            case .synced: return String(localized: "Up to Date")
-            case .ready: return String(localized: "Connected")
-            }
-        }
+        action.image = UIImage(systemName: "applewatch.radiowaves.left.and.right")
+        action.backgroundColor = .systemBlue
+        return UISwipeActionsConfiguration(actions: [action])
     }
 
-    private func connectionState() -> ConnectionState {
-        if !service.isSupported { return .notSupported }
-        if !service.isPaired { return .notPaired }
-        if !service.isWatchAppInstalled { return .notInstalled }
-        if service.isSyncing { return .syncing }
-        if service.watchIsFull || service.diskFullCount > 0 { return .full }
-        if service.unconfirmedCount > 0 { return .pending }
-        if service.syncedPaths.count > 0 { return .synced }
-        return .ready
-    }
-
-    private var freeSpaceText: String {
-        service.watchFreeBytes > 0 ? String(localized: " · \(SyncFormat.size(service.watchFreeBytes)) free") : ""
-    }
-
-    private func stateSubtitle(_ state: ConnectionState) -> String {
-        switch state {
-        case .notSupported: return String(localized: "Watch sync isn’t available on this device.")
-        case .notPaired: return String(localized: "Pair an Apple Watch to sync music.")
-        case .notInstalled: return String(localized: "Open the Watch app on your iPhone and install Flaccy.")
-        case .full:
-            let n = service.diskFullCount
-            return String(localized: "\(n) tracks didn’t fit\(freeSpaceText). Remove music to make room.")
-        case .syncing:
-            let n = service.activeTransferCount
-            return String(localized: "\(n) tracks transferring in the background\(freeSpaceText).")
-        case .pending:
-            let n = service.unconfirmedCount
-            return String(localized: "\(n) tracks left — retrying automatically\(freeSpaceText).")
-        case .synced:
-            let n = service.syncedPaths.count
-            return String(localized: "\(n) tracks on your Apple Watch\(freeSpaceText).")
-        case .ready:
-            return String(localized: "Ready to sync — choose an album below.\(freeSpaceText.isEmpty ? "" : " Watch has\(freeSpaceText).")")
+    override func tableView(
+        _ tableView: UITableView,
+        trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath
+    ) -> UISwipeActionsConfiguration? {
+        guard case let .album(id) = dataSource.itemIdentifier(for: indexPath), let album = albumsByID[id],
+              hasMusicOnWatch(album) else { return nil }
+        let action = UIContextualAction(style: .destructive, title: String(localized: "Remove")) { [weak self] _, _, completion in
+            self?.confirmRemove(album: album)
+            completion(false)
         }
-    }
-
-    private func statusFooter() -> String {
-        let state = connectionState()
-        switch state {
-        case .notSupported, .notPaired, .notInstalled:
-            return stateSubtitle(state)
-        default:
-            return String(localized: "Music transfers in the background — you can leave this screen or lock your phone. Each track is re-sent until your Apple Watch confirms it arrived.")
-        }
-    }
-
-    private func albumsFooter() -> String {
-        String(localized: "Tip: keep both devices nearby and charging, and on the same Wi‑Fi, to transfer faster. Hi‑res albums are large and take several minutes; compressed (AAC) files sync in seconds — same quality through AirPods.")
+        action.image = UIImage(systemName: "trash")
+        return UISwipeActionsConfiguration(actions: [action])
     }
 }
 
-private final class WatchStatusCell: UITableViewCell {
+extension WatchSyncViewController: UISearchResultsUpdating {
 
-    static let reuseID = "WatchStatusCell"
-
-    private let dot = UIImageView()
-    private let titleLabel = UILabel()
-    private let subtitleLabel = UILabel()
-
-    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
-        super.init(style: style, reuseIdentifier: reuseIdentifier)
-        selectionStyle = .none
-
-        dot.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 13)
-        dot.setContentHuggingPriority(.required, for: .horizontal)
-
-        titleLabel.font = .preferredFont(forTextStyle: .body)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        subtitleLabel.font = .preferredFont(forTextStyle: .caption1)
-        subtitleLabel.adjustsFontForContentSizeCategory = true
-        subtitleLabel.textColor = .secondaryLabel
-        subtitleLabel.numberOfLines = 0
-
-        let textStack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
-        textStack.axis = .vertical
-        textStack.spacing = 2
-
-        let stack = UIStackView(arrangedSubviews: [dot, textStack])
-        stack.axis = .horizontal
-        stack.spacing = 12
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    func configure(state: WatchSyncViewController.ConnectionState, subtitle: String) {
-        dot.image = UIImage(systemName: state.symbol)
-        dot.tintColor = state.color
-        titleLabel.text = state.title
-        subtitleLabel.text = subtitle
-        isAccessibilityElement = true
-        accessibilityLabel = state.title
-        accessibilityValue = subtitle
-    }
-}
-
-final class ActiveSyncCell: UITableViewCell {
-
-    static let reuseID = "ActiveSyncCell"
-
-    private let ring = ProgressRingView()
-    private let percentLabel = UILabel()
-    private let header = UILabel()
-    private let progress = UIProgressView(progressViewStyle: .default)
-    private let detail = UILabel()
-
-    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
-        super.init(style: style, reuseIdentifier: reuseIdentifier)
-        selectionStyle = .none
-
-        header.font = .preferredFont(forTextStyle: .subheadline).bold()
-        header.adjustsFontForContentSizeCategory = true
-
-        progress.progressTintColor = .tintColor
-        progress.trackTintColor = .tertiarySystemFill
-
-        detail.font = .preferredFont(forTextStyle: .caption1).monospacedDigit()
-        detail.textColor = .secondaryLabel
-        detail.numberOfLines = 0
-
-        percentLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-        percentLabel.textColor = .secondaryLabel
-        percentLabel.textAlignment = .center
-        percentLabel.adjustsFontSizeToFitWidth = true
-        percentLabel.minimumScaleFactor = 0.6
-        percentLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        ring.translatesAutoresizingMaskIntoConstraints = false
-        ring.addSubview(percentLabel)
-
-        let textStack = UIStackView(arrangedSubviews: [header, progress, detail])
-        textStack.axis = .vertical
-        textStack.spacing = 7
-
-        let stack = UIStackView(arrangedSubviews: [ring, textStack])
-        stack.axis = .horizontal
-        stack.spacing = 14
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            ring.widthAnchor.constraint(equalToConstant: 48),
-            ring.heightAnchor.constraint(equalToConstant: 48),
-            percentLabel.centerXAnchor.constraint(equalTo: ring.centerXAnchor),
-            percentLabel.centerYAnchor.constraint(equalTo: ring.centerYAnchor),
-            percentLabel.widthAnchor.constraint(lessThanOrEqualTo: ring.widthAnchor, constant: -12),
-            stack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        ring.setProgress(0, animated: false)
-        progress.setProgress(0, animated: false)
-    }
-
-    func configure(service: WatchSyncService) {
-        let count = service.activeTransferCount
-        let fraction = service.sessionFraction
-        header.text = String(localized: "Syncing \(count) tracks…")
-        ring.setProgress(fraction, animated: true)
-        percentLabel.text = SyncFormat.percent(fraction)
-        if UIAccessibility.isReduceMotionEnabled {
-            progress.setProgress(Float(fraction), animated: false)
-        } else {
-            progress.setProgress(Float(fraction), animated: Float(fraction) > progress.progress)
-        }
-        let transferred = SyncFormat.size(service.sessionTransferredBytes)
-        let total = SyncFormat.size(service.sessionTotalBytesPending)
-        let speed = SyncFormat.speed(service.speedBytesPerSec)
-        let eta = SyncFormat.eta(service.etaSeconds)
-        detail.text = String(localized: "\(transferred) of \(total)  ·  \(speed)  ·  \(eta)")
-        isAccessibilityElement = true
-        accessibilityLabel = header.text
-        accessibilityValue = String(localized: "\(SyncFormat.percent(fraction)), \(transferred) of \(total), \(speed), \(eta)")
-    }
-}
-
-final class WatchAlbumSyncCell: UITableViewCell {
-
-    static let reuseID = "WatchAlbumSyncCell"
-
-    private let artworkView = UIImageView()
-    private let titleLabel = UILabel()
-    private let subtitleLabel = UILabel()
-    private let pill = StatusPillView()
-    private let ring = ProgressRingView()
-    private let statusIcon = UIImageView()
-    private var currentArtworkKey: String?
-
-    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
-        super.init(style: style, reuseIdentifier: reuseIdentifier)
-        setup()
-    }
-
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        currentArtworkKey = nil
-        artworkView.image = nil
-        ring.setProgress(0, animated: false)
-        ring.isHidden = true
-        pill.isHidden = true
-        statusIcon.image = nil
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func setup() {
-        artworkView.contentMode = .scaleAspectFill
-        artworkView.clipsToBounds = true
-        artworkView.layer.cornerRadius = 8
-        artworkView.layer.cornerCurve = .continuous
-        artworkView.backgroundColor = .tertiarySystemFill
-        artworkView.tintColor = .tertiaryLabel
-
-        titleLabel.font = .preferredFont(forTextStyle: .body)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.numberOfLines = 1
-        subtitleLabel.font = .preferredFont(forTextStyle: .caption1)
-        subtitleLabel.adjustsFontForContentSizeCategory = true
-        subtitleLabel.textColor = .secondaryLabel
-        subtitleLabel.numberOfLines = 1
-
-        pill.isHidden = true
-        let pillRow = UIStackView(arrangedSubviews: [pill, UIView()])
-        pillRow.axis = .horizontal
-
-        statusIcon.contentMode = .center
-        ring.isHidden = true
-
-        let trailing = UIView()
-        trailing.translatesAutoresizingMaskIntoConstraints = false
-        statusIcon.translatesAutoresizingMaskIntoConstraints = false
-        ring.translatesAutoresizingMaskIntoConstraints = false
-        trailing.addSubview(statusIcon)
-        trailing.addSubview(ring)
-
-        let textStack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel, pillRow])
-        textStack.axis = .vertical
-        textStack.spacing = 4
-        textStack.setCustomSpacing(6, after: subtitleLabel)
-
-        let stack = UIStackView(arrangedSubviews: [artworkView, textStack, trailing])
-        stack.axis = .horizontal
-        stack.spacing = 12
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            artworkView.widthAnchor.constraint(equalToConstant: 48),
-            artworkView.heightAnchor.constraint(equalToConstant: 48),
-            trailing.widthAnchor.constraint(equalToConstant: 28),
-            trailing.heightAnchor.constraint(equalToConstant: 28),
-            statusIcon.centerXAnchor.constraint(equalTo: trailing.centerXAnchor),
-            statusIcon.centerYAnchor.constraint(equalTo: trailing.centerYAnchor),
-            ring.widthAnchor.constraint(equalToConstant: 26),
-            ring.heightAnchor.constraint(equalToConstant: 26),
-            ring.centerXAnchor.constraint(equalTo: trailing.centerXAnchor),
-            ring.centerYAnchor.constraint(equalTo: trailing.centerYAnchor),
-            stack.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-        ])
-    }
-
-    func configure(album: Album, service: WatchSyncService) {
-        titleLabel.text = album.title
-        loadArtwork(for: album)
-
-        let total = album.tracks.count
-        let synced = service.syncedCount(in: album)
-        let size = SyncFormat.size(service.totalBytes(in: album))
-        let status = AlbumSyncStatus.status(for: album, service: service)
-
-        if let pillContent = status.pill {
-            pill.apply(text: pillContent.text, color: pillContent.color)
-            pill.isHidden = false
-        } else {
-            pill.isHidden = true
-        }
-
-        switch status {
-        case let .sending(fraction):
-            statusIcon.image = nil
-            ring.isHidden = false
-            ring.setProgress(fraction, animated: true)
-            subtitleLabel.text = String(localized: "Syncing \(synced) of \(total)  ·  \(size)")
-        case .synced:
-            showIcon("checkmark.circle.fill", tint: .systemGreen)
-            subtitleLabel.text = String(localized: "On Apple Watch  ·  \(size)")
-        case .failed:
-            showIcon("exclamationmark.circle.fill", tint: .systemRed)
-            subtitleLabel.text = String(localized: "Tap to retry  ·  \(size)")
-        case .storageFull:
-            showIcon("externaldrive.fill.trianglebadge.exclamationmark", tint: .systemOrange)
-            subtitleLabel.text = String(localized: "Not enough space on Watch  ·  \(size)")
-        case .waiting:
-            showIcon("clock", tint: .systemGray)
-            subtitleLabel.text = String(localized: "Waiting to send  ·  \(size)")
-        case .partial:
-            showIcon("circle.lefthalf.filled", tint: .tintColor)
-            subtitleLabel.text = String(localized: "\(synced) of \(total) on Watch  ·  \(size)")
-        case .notSynced:
-            showIcon("arrow.down.circle", tint: .tintColor)
-            subtitleLabel.text = String(localized: "\(total) tracks  ·  \(size)")
-        }
-
-        isAccessibilityElement = true
-        accessibilityLabel = "\(album.title), \(subtitleLabel.text ?? "")"
-        accessibilityValue = status.voiceOverValue
-        accessibilityTraits = .button
-    }
-
-    private func showIcon(_ symbol: String, tint: UIColor) {
-        ring.isHidden = true
-        ring.setProgress(0, animated: false)
-        statusIcon.image = UIImage(systemName: symbol)
-        statusIcon.tintColor = tint
-    }
-
-    private func loadArtwork(for album: Album) {
-        let artworkKey = album.id
-        currentArtworkKey = artworkKey
-        if let art = album.artwork ?? AlbumArtworkCache.shared.thumbnail(forAlbum: album.title, artist: album.artist) {
-            setArtwork(art)
-        } else {
-            setPlaceholder()
-            AlbumArtworkCache.shared.loadThumbnail(forAlbum: album.title, artist: album.artist) { [weak self] image in
-                guard let self, let image, self.currentArtworkKey == artworkKey else { return }
-                self.setArtwork(image)
-            }
-        }
-    }
-
-    private func setArtwork(_ image: UIImage) {
-        artworkView.contentMode = .scaleAspectFill
-        artworkView.image = image
-    }
-
-    private func setPlaceholder() {
-        artworkView.contentMode = .center
-        artworkView.image = UIImage(systemName: "music.note")
-    }
-}
-
-private extension UIFont {
-    func bold() -> UIFont {
-        guard let descriptor = fontDescriptor.withSymbolicTraits(.traitBold) else { return self }
-        return UIFont(descriptor: descriptor, size: 0)
-    }
-    func monospacedDigit() -> UIFont {
-        UIFont.monospacedDigitSystemFont(ofSize: pointSize, weight: .regular)
+    func updateSearchResults(for searchController: UISearchController) {
+        let query = (searchController.searchBar.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query != searchQuery else { return }
+        searchQuery = query
+        applyFilter()
+        applySnapshot(animated: false)
     }
 }

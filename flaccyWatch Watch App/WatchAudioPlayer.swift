@@ -9,12 +9,11 @@ import WatchKit
 @Observable
 final class WatchAudioPlayer: AudioPlaybackEngine {
 
-    private(set) var queue: [MediaItem] = []
-    private(set) var currentIndex: Int = 0
+    private(set) var playbackQueue = PlaybackQueue()
     private(set) var isPlaying: Bool = false
     private(set) var repeatMode: RepeatMode = .off
-    private(set) var shuffleEnabled: Bool = false
     private(set) var currentTime: TimeInterval = 0
+    private(set) var pendingResumePosition: TimeInterval?
 
     var volume: Double = 0.7 {
         didSet { player?.volume = Float(volume) }
@@ -33,19 +32,29 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
     @ObservationIgnored private var playIntentGeneration = 0
     @ObservationIgnored private var isActivationPending = false
     @ObservationIgnored private var wasPlayingBeforeInterruption = false
-    @ObservationIgnored private var originalQueue: [MediaItem] = []
+    @ObservationIgnored private var advanceToken = 0
+    @ObservationIgnored private var lastSessionSave = Date.distantPast
+    @ObservationIgnored private let sessionStore: PlaybackSessionStore
 
-    init(documentsDirectory: URL) {
+    private static let sessionSaveInterval: TimeInterval = 15
+    private static let advanceGraceAttempts = 10
+    private static let advanceGraceInterval: Duration = .milliseconds(50)
+
+    init(documentsDirectory: URL, sessionStore: PlaybackSessionStore = .shared) {
         self.documentsDirectory = documentsDirectory
+        self.sessionStore = sessionStore
         configureSession()
         configureRemoteCommands()
         observeAudioSession()
     }
 
-    var currentItem: MediaItem? {
-        guard queue.indices.contains(currentIndex) else { return nil }
-        return queue[currentIndex]
-    }
+    var queue: [MediaItem] { playbackQueue.items }
+    var currentIndex: Int { playbackQueue.currentIndex }
+    var shuffleEnabled: Bool { playbackQueue.isShuffled }
+    var currentItem: MediaItem? { playbackQueue.current }
+
+    /// Everything that will play after the current track, in play order.
+    var upNext: [MediaItem] { playbackQueue.upNext }
 
     var duration: TimeInterval {
         guard let item = player?.currentItem else { return currentItem?.duration ?? 0 }
@@ -56,26 +65,17 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
 
     func play(_ items: [MediaItem], startingAt index: Int) {
         guard !items.isEmpty, items.indices.contains(index) else { return }
-        originalQueue = items
-        if shuffleEnabled {
-            var remaining = items
-            let chosen = remaining.remove(at: index)
-            remaining.shuffle()
-            queue = [chosen] + remaining
-            currentIndex = 0
-        } else {
-            queue = items
-            currentIndex = index
-        }
+        playbackQueue = PlaybackQueue(items: items, startingAt: index, shuffled: shuffleEnabled)
+        pendingResumePosition = nil
         WKInterfaceDevice.current().play(.click)
         loadTrack(at: currentIndex)
     }
 
     func togglePlayPause() {
         if !isPlaying, player?.items().isEmpty != false {
-            guard !queue.isEmpty else { return }
+            guard !playbackQueue.isEmpty else { return }
             WKInterfaceDevice.current().play(.click)
-            loadTrack(at: currentIndex)
+            loadTrack(at: currentIndex, startingAt: pendingResumePosition ?? 0)
             return
         }
         guard let player else { return }
@@ -93,12 +93,12 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
     /// An explicit skip always advances — repeat-one governs only automatic
     /// end-of-track behavior in `handleTrackFinished`.
     func next() {
-        guard !queue.isEmpty else { return }
-        if currentIndex + 1 < queue.count {
-            currentIndex += 1
+        guard !playbackQueue.isEmpty else { return }
+        if playbackQueue.hasNext {
+            playbackQueue.jump(to: currentIndex + 1)
             loadTrack(at: currentIndex)
         } else if repeatMode == .all {
-            currentIndex = 0
+            playbackQueue.jump(to: 0)
             loadTrack(at: currentIndex)
         } else {
             stopPlayback()
@@ -114,7 +114,7 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
             seek(to: 0)
             return
         }
-        currentIndex -= 1
+        playbackQueue.jump(to: currentIndex - 1)
         loadTrack(at: currentIndex)
     }
 
@@ -124,33 +124,27 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
             Task { @MainActor in
                 self?.currentTime = time
                 self?.updateNowPlayingInfo()
+                if self?.isPlaying == false { self?.persistSession() }
             }
         }
     }
 
     func toggleShuffle() {
-        shuffleEnabled.toggle()
         WKInterfaceDevice.current().play(.click)
-        guard queue.count > 1 else { return }
-        let current = currentItem
-        if shuffleEnabled {
-            originalQueue = queue
-            var remaining = queue
-            if queue.indices.contains(currentIndex) { remaining.remove(at: currentIndex) }
-            remaining.shuffle()
-            queue = (current.map { [$0] } ?? []) + remaining
-            currentIndex = 0
+        if playbackQueue.isShuffled {
+            playbackQueue.unshuffle()
         } else {
-            queue = originalQueue
-            currentIndex = current.flatMap { originalQueue.firstIndex(of: $0) } ?? 0
+            playbackQueue.shuffle(keepingCurrent: true)
         }
         resyncPreloadedItems()
+        persistSession()
     }
 
     func cycleRepeatMode() {
         repeatMode = repeatMode.next
         WKInterfaceDevice.current().play(.click)
         resyncPreloadedItems()
+        persistSession()
     }
 
     /// Drops every preloaded item after the current one and preloads again, so
@@ -166,16 +160,62 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
     }
 
     func jumpTo(index: Int) {
-        guard queue.indices.contains(index) else { return }
-        currentIndex = index
+        guard playbackQueue.jump(to: index) else { return }
         loadTrack(at: index)
     }
 
-    private func loadTrack(at index: Int) {
-        guard queue.indices.contains(index) else { return }
-        removeObservers()
+    /// Puts `items` directly after the current track. With nothing loaded yet
+    /// they simply start playing.
+    func playNext(_ items: [MediaItem]) {
+        guard !items.isEmpty else { return }
+        guard currentItem != nil else {
+            play(items, startingAt: 0)
+            return
+        }
+        playbackQueue.playNext(items)
+        queueDidChange(feedback: .success)
+    }
 
-        let track = queue[index]
+    /// Appends `items` to the end of the queue. With nothing loaded yet they
+    /// simply start playing.
+    func enqueue(_ items: [MediaItem]) {
+        guard !items.isEmpty else { return }
+        guard currentItem != nil else {
+            play(items, startingAt: 0)
+            return
+        }
+        playbackQueue.enqueue(items)
+        queueDidChange(feedback: .success)
+    }
+
+    /// Removes the row at absolute queue index `index`; the playing track is
+    /// never removable.
+    func removeFromQueue(at index: Int) {
+        guard playbackQueue.remove(at: index) else { return }
+        queueDidChange(feedback: .click)
+    }
+
+    func clearUpNext() {
+        guard playbackQueue.hasNext else { return }
+        playbackQueue.clearUpNext()
+        queueDidChange(feedback: .click)
+    }
+
+    /// Every queue edit must also correct what AVQueuePlayer has already
+    /// preloaded behind the current item, or the next track heard would not
+    /// be the next track listed.
+    private func queueDidChange(feedback: WKHapticType) {
+        WKInterfaceDevice.current().play(feedback)
+        resyncPreloadedItems()
+        persistSession()
+    }
+
+    private func loadTrack(at index: Int, startingAt position: TimeInterval = 0) {
+        guard let track = playbackQueue.item(at: index) else { return }
+        advanceToken += 1
+        removeObservers()
+        pendingResumePosition = nil
+
         let item = AVPlayerItem(url: track.fileURL(in: documentsDirectory))
         observeStatus(of: item)
 
@@ -188,12 +228,15 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
         player?.volume = Float(volume)
 
         preloadNextItem(after: index)
-        currentTime = 0
+        currentTime = position
 
         addTimeObserver()
         observeEnd(of: item)
+        if position > 0 { seek(to: position) }
         updateNowPlayingInfo()
         activateSessionAndPlay()
+        persistSession()
+        WatchPlayReporter.shared.trackDidStart(track)
         AppLogger.info("Watch now playing: \(track.title) — \(track.artist)", category: .playback)
     }
 
@@ -205,24 +248,53 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
             return
         }
 
-        if currentIndex + 1 < queue.count {
-            currentIndex += 1
-            guard let nextItem = verifiedCurrentPlayerItem() else {
-                loadTrack(at: currentIndex)
-                return
-            }
-            currentTime = 0
-            observeEnd(of: nextItem)
-            preloadNextItem(after: currentIndex)
-            activateSessionAndPlay()
-            updateNowPlayingInfo()
-            AppLogger.info("Watch gapless advance: \(queue[currentIndex].title)", category: .playback)
-        } else if repeatMode == .all, !queue.isEmpty {
-            currentIndex = 0
+        if playbackQueue.hasNext {
+            playbackQueue.jump(to: currentIndex + 1)
+            adoptAdvancedItemOrReload()
+        } else if repeatMode == .all, !playbackQueue.isEmpty {
+            playbackQueue.jump(to: 0)
             loadTrack(at: currentIndex)
         } else {
             stopPlayback()
         }
+    }
+
+    /// AVQueuePlayer advances to the preloaded item by itself, and the
+    /// end-of-track notification can arrive a beat before it has. Rebuilding at
+    /// once would restart a track the player is already starting, so the
+    /// advance gets a short grace period to show up before falling back to a
+    /// deterministic `loadTrack`. Any newer load, stop or interruption bumps
+    /// `advanceToken` and retires this wait.
+    private func adoptAdvancedItemOrReload() {
+        advanceToken += 1
+        if let item = verifiedCurrentPlayerItem() {
+            completeGaplessAdvance(to: item)
+            return
+        }
+        let token = advanceToken
+        Task { @MainActor [weak self] in
+            for _ in 0..<Self.advanceGraceAttempts {
+                try? await Task.sleep(for: Self.advanceGraceInterval)
+                guard let self, token == self.advanceToken else { return }
+                if let item = self.verifiedCurrentPlayerItem() {
+                    self.completeGaplessAdvance(to: item)
+                    return
+                }
+            }
+            guard let self, token == self.advanceToken else { return }
+            self.loadTrack(at: self.currentIndex)
+        }
+    }
+
+    private func completeGaplessAdvance(to item: AVPlayerItem) {
+        currentTime = 0
+        observeEnd(of: item)
+        preloadNextItem(after: currentIndex)
+        activateSessionAndPlay()
+        updateNowPlayingInfo()
+        persistSession()
+        if let current = currentItem { WatchPlayReporter.shared.trackDidStart(current) }
+        AppLogger.info("Watch gapless advance: \(currentItem?.title ?? "")", category: .playback)
     }
 
     /// The end-of-track notification races AVQueuePlayer's `.advance`
@@ -232,21 +304,23 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
     private func verifiedCurrentPlayerItem() -> AVPlayerItem? {
         guard let item = player?.currentItem,
               let url = (item.asset as? AVURLAsset)?.url,
-              url == queue[currentIndex].fileURL(in: documentsDirectory)
+              let expected = currentItem?.fileURL(in: documentsDirectory),
+              url == expected
         else { return nil }
         return item
     }
 
     private func preloadNextItem(after index: Int) {
         let nextIndex: Int
-        if index + 1 < queue.count {
+        if index + 1 < playbackQueue.count {
             nextIndex = index + 1
-        } else if repeatMode == .all, !queue.isEmpty {
+        } else if repeatMode == .all, !playbackQueue.isEmpty {
             nextIndex = 0
         } else {
             return
         }
-        let nextItem = AVPlayerItem(url: queue[nextIndex].fileURL(in: documentsDirectory))
+        guard let nextTrack = playbackQueue.item(at: nextIndex) else { return }
+        let nextItem = AVPlayerItem(url: nextTrack.fileURL(in: documentsDirectory))
         if player?.canInsert(nextItem, after: player?.items().last) == true {
             observeStatus(of: nextItem)
             player?.insert(nextItem, after: player?.items().last)
@@ -280,7 +354,7 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
         player.remove(item)
         guard wasCurrent else { return }
         consecutiveFailures += 1
-        if consecutiveFailures >= max(queue.count, 1) {
+        if consecutiveFailures >= max(playbackQueue.count, 1) {
             consecutiveFailures = 0
             stopPlayback()
             return
@@ -291,13 +365,16 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
     private func stopPlayback() {
         cancelPendingPlayIntent()
         player?.pause()
+        WatchPlayReporter.shared.trackDidStop()
         updateNowPlayingInfo()
+        persistSession()
     }
 
     /// Invalidates any activation completion still in flight so a stale play
     /// intent can never restart audio after the user or the system stopped it.
     private func cancelPendingPlayIntent() {
         playIntentGeneration += 1
+        advanceToken += 1
         isActivationPending = false
     }
 
@@ -319,8 +396,69 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
                 guard let self, self.isPlaying != playing else { return }
                 self.isPlaying = playing
                 self.updateNowPlayingInfo()
+                if !playing { self.persistSession() }
             }
         }
+    }
+
+    var hasRestorableSession: Bool {
+        pendingResumePosition != nil && currentItem != nil
+    }
+
+    /// What the Library's "Continue" card shows; nil once playback has started
+    /// from anywhere or when there is no restored session.
+    var resumeSummary: (title: String, artist: String, albumTitle: String, artworkData: Data?)? {
+        guard hasRestorableSession, let item = currentItem else { return nil }
+        return (item.title, item.artist, item.albumTitle, item.artworkData)
+    }
+
+    /// Rebuilds the saved queue paused at the saved position. The audio
+    /// session stays untouched and no AVPlayer exists until the first play,
+    /// which loads the track, seeks to the position and starts. Ignored when
+    /// something is already loaded, so a track started before the library
+    /// finished scanning is never replaced.
+    func restore(from snapshot: WatchPlaybackSnapshot, in library: [MediaItem]) {
+        guard currentItem == nil, let resolved = snapshot.resolve(in: library) else { return }
+        playbackQueue = resolved.queue
+        repeatMode = snapshot.repeatMode
+        volume = min(1, max(0, snapshot.volume))
+        currentTime = resolved.position
+        pendingResumePosition = resolved.position
+        updateNowPlayingInfo()
+        AppLogger.info(
+            "Watch session restored: \(resolved.queue.current?.title ?? "") at \(Int(resolved.position))s",
+            category: .playback
+        )
+    }
+
+    /// Continues a restored session from where it stopped.
+    func resumePlayback() {
+        guard hasRestorableSession else { return }
+        togglePlayPause()
+    }
+
+    /// Writes the session to disk. Called for track changes, pauses, queue
+    /// edits and the background transition (`immediately`); the store throttles
+    /// and writes off the main thread.
+    func persistSession(immediately: Bool = false) {
+        guard currentItem != nil else { return }
+        lastSessionSave = Date()
+        sessionStore.save(
+            WatchPlaybackSnapshot(
+                queue: playbackQueue,
+                position: currentTime,
+                repeatMode: repeatMode,
+                volume: volume
+            ),
+            immediately: immediately
+        )
+    }
+
+    /// The periodic playback tick calls this, so a long track still leaves a
+    /// position no more than a quarter minute stale if the app is killed.
+    private func persistSessionIfDue() {
+        guard Date().timeIntervalSince(lastSessionSave) >= Self.sessionSaveInterval else { return }
+        persistSession()
     }
 
     private func configureSession() {
@@ -435,6 +573,8 @@ final class WatchAudioPlayer: AudioPlaybackEngine {
                 guard let self else { return }
                 let seconds = CMTimeGetSeconds(time)
                 self.currentTime = seconds.isNaN ? 0 : seconds
+                WatchPlayReporter.shared.playbackDidAdvance(elapsed: self.currentTime, isPlaying: self.isPlaying)
+                self.persistSessionIfDue()
             }
         }
     }
