@@ -1,13 +1,14 @@
 use crate::events::AppEvent;
 use crate::library::Track;
 use crate::lyrics::{Lyrics, LyricsResult};
+use crate::ui::screen::is_watched;
 use crate::ui::Ui;
 use adw::prelude::*;
 use gtk::glib;
 use gtk::pango;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// How long the view stays out of the way after the user scrolls by hand.
 const USER_SCROLL_GRACE: f64 = 6.0;
@@ -28,6 +29,12 @@ const SCROLL_RESPONSE: f64 = 15.0;
 /// Frame deltas are clamped before integrating so a stalled frame can't blow
 /// the spring up.
 const MAX_FRAME_DELTA: f64 = 1.0 / 30.0;
+/// The longest a settled column sleeps between looks at the clock, the least
+/// it ever does, and the margin past a line's stamp it wakes at so the stamp
+/// has really passed.
+const LONGEST_NAP: f64 = 1.0;
+const SHORTEST_NAP: f64 = 0.008;
+const NAP_SLACK: f64 = 0.002;
 
 /// Placement options so the sidebar and the in-view (Now Playing lens) share
 /// one implementation instead of forking. The in-view instance hides its own
@@ -190,85 +197,23 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
     let visible = Rc::new(Cell::new(false));
     let last_user_scroll: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
     let scroller = Rc::new(SmoothScroller::new(&synced_scroll));
-    let driver = Rc::new(FrameDriver::default());
-    // A seek or a fresh set of lyrics has to re-find the line even when nothing
-    // is playing, so the driver runs one more pass instead of staying asleep.
     let refresh = Rc::new(Cell::new(false));
-
+    let follower = Rc::new(Follower {
+        ui: Rc::clone(ui),
+        list: list.clone(),
+        panel: panel.downgrade(),
+        state: Rc::clone(&state),
+        visible: Rc::clone(&visible),
+        last_user_scroll: Rc::clone(&last_user_scroll),
+        resume_reveal: resume_reveal.clone(),
+        scroller: Rc::clone(&scroller),
+        refresh: Rc::clone(&refresh),
+        driver: FrameDriver::default(),
+        nap: RefCell::new(None),
+    });
     let sync_driver: Rc<dyn Fn()> = {
-        let driver = Rc::clone(&driver);
-        let scroller = Rc::clone(&scroller);
-        let state = Rc::clone(&state);
-        let visible = Rc::clone(&visible);
-        let last_user_scroll = Rc::clone(&last_user_scroll);
-        let resume_reveal = resume_reveal.clone();
-        let refresh = Rc::clone(&refresh);
-        let list = list.clone();
-        let panel = panel.downgrade();
-        let ui = Rc::clone(ui);
-        Rc::new(move || {
-            let idle = !ui.core.player.is_playing() && !scroller.is_busy() && !refresh.get();
-            let wanted = visible.get()
-                && panel.upgrade().is_some_and(|panel| panel.is_mapped())
-                && !state.borrow().lyrics.synced.is_empty()
-                && !idle;
-            if !wanted {
-                driver.stop();
-                return;
-            }
-            let step = {
-                let driver = Rc::clone(&driver);
-                let scroller = Rc::clone(&scroller);
-                let state = Rc::clone(&state);
-                let visible = Rc::clone(&visible);
-                let last_user_scroll = Rc::clone(&last_user_scroll);
-                let resume_reveal = resume_reveal.clone();
-                let refresh = Rc::clone(&refresh);
-                let list = list.clone();
-                let ui = Rc::clone(&ui);
-                move |delta: f64| {
-                    if !visible.get() {
-                        driver.stop();
-                        return;
-                    }
-                    let playing = ui.core.player.is_playing();
-                    let stale = refresh.replace(false);
-                    if playing || stale {
-                        let position = ui.core.player.position().unwrap_or(0.0) + LYRIC_LEAD;
-                        let changed = {
-                            let state = state.borrow();
-                            let line = active_line(&state.lyrics.synced, position);
-                            (state.current_line != line).then_some(line)
-                        };
-                        if let Some(line) = changed {
-                            let previous = state.borrow().current_line;
-                            let total = {
-                                let mut state = state.borrow_mut();
-                                state.current_line = line;
-                                state.lyrics.synced.len()
-                            };
-                            repaint_depth(&list, previous, line, total);
-                            if let Some(current) = line {
-                                let user_recent = last_user_scroll
-                                    .get()
-                                    .map(|t| t.elapsed().as_secs_f64() < USER_SCROLL_GRACE)
-                                    .unwrap_or(false);
-                                if user_recent {
-                                    resume_reveal.set_reveal_child(true);
-                                } else if let Some(row) = line_row(&list, current) {
-                                    scroller.aim_at(&list, &row);
-                                }
-                            }
-                        }
-                    }
-                    scroller.advance(delta);
-                    if !playing && !scroller.is_busy() {
-                        driver.stop();
-                    }
-                }
-            };
-            driver.start(&list, step);
-        })
+        let follower = Rc::clone(&follower);
+        Rc::new(move || follower.sync())
     };
 
     {
@@ -474,8 +419,8 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
         panel.connect_map(move |_| sync_driver());
     }
     {
-        let driver = Rc::clone(&driver);
-        panel.connect_unmap(move |_| driver.stop());
+        let follower = Rc::clone(&follower);
+        panel.connect_unmap(move |_| follower.stop());
     }
 
     {
@@ -503,7 +448,7 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
                         toggle_set_active(*shown);
                     }
                 }
-                AppEvent::PlayingChanged(_) => sync_driver(),
+                AppEvent::PlayingChanged(_) | AppEvent::WindowSuspended(_) => sync_driver(),
                 AppEvent::Seeked(_) => {
                     refresh.set(true);
                     sync_driver();
@@ -551,8 +496,9 @@ fn font_size_controls(ui: &Rc<Ui>) -> gtk::Box {
     row
 }
 
-/// Blank LRC lines mark an instrumental break; render them as a breathing glyph
-/// rather than an empty row so the pause reads as part of the song.
+/// Blank LRC lines mark an instrumental break; render them as a glyph that
+/// breathes while the break is the current line, rather than an empty row, so
+/// the pause reads as part of the song.
 fn lyric_row(text: &str) -> gtk::ListBoxRow {
     let interlude = text.trim().is_empty();
     let label = gtk::Label::builder()
@@ -637,6 +583,142 @@ fn repaint_depth(
             _ => {}
         }
     }
+}
+
+/// Keeps the lyrics column on the line being sung. The line is looked up when
+/// it can change, not on every frame: a settled column sleeps until the next
+/// line is due, and a frame callback only runs while there is a line to find
+/// or a scroll to finish. Leaving a frame callback on for the whole song held
+/// the window's frame clock running at the display's full rate for as long as
+/// the lyrics were on screen.
+struct Follower {
+    ui: Rc<Ui>,
+    list: gtk::ListBox,
+    panel: glib::WeakRef<gtk::Box>,
+    state: Rc<RefCell<PanelState>>,
+    visible: Rc<Cell<bool>>,
+    last_user_scroll: Rc<Cell<Option<Instant>>>,
+    resume_reveal: gtk::Revealer,
+    scroller: Rc<SmoothScroller>,
+    /// A seek or a fresh set of lyrics has to re-find the line even when
+    /// nothing is playing, so the next frame runs one more pass.
+    refresh: Rc<Cell<bool>>,
+    driver: FrameDriver,
+    nap: RefCell<Option<glib::SourceId>>,
+}
+
+impl Follower {
+    fn wanted(&self) -> bool {
+        let idle =
+            !self.ui.core.player.is_playing() && !self.scroller.is_busy() && !self.refresh.get();
+        self.visible.get()
+            && self.panel.upgrade().is_some_and(|panel| is_watched(&panel))
+            && !self.state.borrow().lyrics.synced.is_empty()
+            && !idle
+    }
+
+    /// Re-evaluates what the column should be doing after anything that could
+    /// change it: the panel shown or hidden, a play state change, a seek, new
+    /// lyrics. A frame is enough to find the line; the callback stops itself
+    /// as soon as nothing is moving.
+    fn sync(self: &Rc<Self>) {
+        self.cancel_nap();
+        if !self.wanted() {
+            self.driver.stop();
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        self.driver.start(&self.list, move |delta| {
+            if let Some(follower) = weak.upgrade() {
+                follower.step(delta);
+            }
+        });
+    }
+
+    fn stop(&self) {
+        self.driver.stop();
+        self.cancel_nap();
+    }
+
+    fn cancel_nap(&self) {
+        if let Some(id) = self.nap.borrow_mut().take() {
+            id.remove();
+        }
+    }
+
+    fn step(self: &Rc<Self>, delta: f64) {
+        if !self.visible.get() {
+            self.driver.stop();
+            return;
+        }
+        let playing = self.ui.core.player.is_playing();
+        let stale = self.refresh.replace(false);
+        if playing || stale {
+            self.follow_clock();
+        }
+        self.scroller.advance(delta);
+        if !self.scroller.is_busy() {
+            self.driver.stop();
+            if playing {
+                self.nap_until_next_line();
+            }
+        }
+    }
+
+    /// Lights the line the clock is on and aims the scroll at it, unless the
+    /// person has scrolled by hand a moment ago.
+    fn follow_clock(&self) {
+        let position = self.ui.core.player.position().unwrap_or(0.0) + LYRIC_LEAD;
+        let changed = {
+            let state = self.state.borrow();
+            let line = active_line(&state.lyrics.synced, position);
+            (state.current_line != line).then_some(line)
+        };
+        let Some(line) = changed else { return };
+        let (previous, total) = {
+            let mut state = self.state.borrow_mut();
+            let previous = state.current_line;
+            state.current_line = line;
+            (previous, state.lyrics.synced.len())
+        };
+        repaint_depth(&self.list, previous, line, total);
+        let Some(current) = line else { return };
+        let user_recent = self
+            .last_user_scroll
+            .get()
+            .is_some_and(|at| at.elapsed().as_secs_f64() < USER_SCROLL_GRACE);
+        if user_recent {
+            self.resume_reveal.set_reveal_child(true);
+        } else if let Some(row) = line_row(&self.list, current) {
+            self.scroller.aim_at(&self.list, &row);
+        }
+    }
+
+    fn nap_until_next_line(self: &Rc<Self>) {
+        let position = self.ui.core.player.position().unwrap_or(0.0) + LYRIC_LEAD;
+        let delay = next_line_delay(&self.state.borrow().lyrics.synced, position);
+        let weak = Rc::downgrade(self);
+        let id = glib::timeout_add_local_once(delay, move || {
+            let Some(follower) = weak.upgrade() else {
+                return;
+            };
+            follower.nap.borrow_mut().take();
+            follower.sync();
+        });
+        *self.nap.borrow_mut() = Some(id);
+    }
+}
+
+/// How long a settled column can sleep: until the next line is due, never
+/// longer than a second, so a position that jumped for a reason nobody told
+/// the panel about is still caught.
+fn next_line_delay(synced: &[(f64, String)], position: f64) -> Duration {
+    let until = synced
+        .iter()
+        .map(|(time, _)| *time)
+        .find(|time| *time > position)
+        .map_or(LONGEST_NAP, |time| time - position);
+    Duration::from_secs_f64((until + NAP_SLACK).clamp(SHORTEST_NAP, LONGEST_NAP))
 }
 
 #[derive(Default)]
@@ -753,7 +835,7 @@ impl SmoothScroller {
 
 #[cfg(test)]
 mod tests {
-    use super::active_line;
+    use super::{active_line, next_line_delay, LONGEST_NAP, NAP_SLACK, SHORTEST_NAP};
 
     fn lines() -> Vec<(f64, String)> {
         vec![
@@ -769,6 +851,24 @@ mod tests {
         assert_eq!(active_line(&lines(), 9.9), Some(0));
         assert_eq!(active_line(&lines(), 10.0), Some(1));
         assert_eq!(active_line(&lines(), 999.0), Some(2));
+    }
+
+    #[test]
+    fn a_settled_column_sleeps_until_the_next_line_is_due() {
+        let delay = next_line_delay(&lines(), 4.0).as_secs_f64();
+        assert!((delay - (6.0 + NAP_SLACK).min(LONGEST_NAP)).abs() < 1e-9);
+        let delay = next_line_delay(&lines(), 9.5).as_secs_f64();
+        assert!((delay - (0.5 + NAP_SLACK)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_nap_never_outlasts_the_ceiling_or_dips_under_the_floor() {
+        assert_eq!(next_line_delay(&lines(), 999.0).as_secs_f64(), LONGEST_NAP);
+        assert_eq!(
+            next_line_delay(&lines(), 10.0 - 0.001).as_secs_f64(),
+            SHORTEST_NAP
+        );
+        assert_eq!(next_line_delay(&[], 5.0).as_secs_f64(), LONGEST_NAP);
     }
 
     #[test]

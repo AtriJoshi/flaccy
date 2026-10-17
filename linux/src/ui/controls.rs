@@ -1,33 +1,27 @@
 use crate::events::AppEvent;
 use crate::player::RepeatMode;
+use crate::ui::screen::is_watched;
 use crate::ui::slider::{Slider, SliderMetrics, Step};
 use crate::ui::Ui;
 use gtk::glib;
 use gtk::prelude::*;
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 /// Grow/shrink a GridView's column count with its allocated width so natural
 /// size stays modest (high max_columns × tile width is what locked the window
 /// open before). Starts from whatever max_columns the grid was built with.
 pub fn bind_adaptive_grid_columns(grid: &gtk::GridView, tile_width: i32) {
     let tile_width = tile_width.max(96);
-    let last_width = Rc::new(Cell::new(0i32));
-    grid.connect_realize(move |grid| {
-        let last_width = Rc::clone(&last_width);
-        grid.add_tick_callback(move |grid, _| {
-            let width = grid.width();
-            if width <= 1 || width == last_width.get() {
-                return glib::ControlFlow::Continue;
-            }
-            last_width.set(width);
-            let cols = ((width.max(1) as f64) / (tile_width as f64)).floor() as u32;
-            let cols = cols.clamp(1, 14);
-            if grid.max_columns() != cols {
-                grid.set_max_columns(cols);
-            }
-            glib::ControlFlow::Continue
-        });
+    let weak = grid.downgrade();
+    crate::ui::resize::watch_width(grid, move |width, _| {
+        let Some(grid) = weak.upgrade() else { return };
+        let cols = ((width.max(1) as f64) / (tile_width as f64)).floor() as u32;
+        let cols = cols.clamp(1, 14);
+        if grid.max_columns() != cols {
+            grid.set_max_columns(cols);
+        }
     });
 }
 
@@ -270,9 +264,8 @@ const EQ_RESTING: [f64; EQ_BARS] = [0.34, 0.58, 0.42];
 
 /// Three accent bars that bounce while audio runs. Drawn rather than animated
 /// through CSS: GTK only re-measures animated `min-height` sporadically, so the
-/// stylesheet version barely moved. The frame clock drives the phase, and the
-/// callback tears itself down the moment playback stops so idle rows cost
-/// nothing.
+/// stylesheet version barely moved. One shared metronome redraws every
+/// visible, playing indicator, and stops the moment there is none.
 pub fn build_equalizer_indicator() -> gtk::DrawingArea {
     let area = gtk::DrawingArea::builder()
         .content_width(15)
@@ -280,7 +273,86 @@ pub fn build_equalizer_indicator() -> gtk::DrawingArea {
         .build();
     area.add_css_class("eq-indicator");
     area.set_draw_func(draw_equalizer);
+    area.connect_map(|area| {
+        if area.has_css_class(EQ_PLAYING) {
+            BARS.with(|bars| bars.join(area));
+        }
+    });
     area
+}
+
+/// Wakes the metronome after the window came back from a suspension, which is
+/// the one time registered indicators have no timer behind them.
+pub fn resume_bars() {
+    BARS.with(Metronome::resume);
+}
+
+const EQ_PLAYING: &str = "eq-playing";
+/// How often the bars are redrawn. Three small bars bouncing over about half
+/// a second read as smooth at this rate, and redrawing them on every vertical
+/// blank instead would put a 165 Hz display through a full frame each time.
+const EQ_REDRAW: Duration = Duration::from_millis(40);
+
+thread_local! {
+    static BARS: Metronome = Metronome::default();
+}
+
+/// The one timer behind every bouncing indicator. Indicators that are paused
+/// or off screen leave it, and it ends itself when the last one has, so a
+/// window with nothing visibly bouncing is not redrawn at all.
+#[derive(Default)]
+struct Metronome {
+    areas: RefCell<Vec<glib::WeakRef<gtk::DrawingArea>>>,
+    timer: RefCell<Option<glib::SourceId>>,
+}
+
+impl Metronome {
+    fn join(&self, area: &gtk::DrawingArea) {
+        let mut areas = self.areas.borrow_mut();
+        if !areas
+            .iter()
+            .any(|known| known.upgrade().as_ref() == Some(area))
+        {
+            areas.push(area.downgrade());
+        }
+        drop(areas);
+        if self.timer.borrow().is_none() {
+            let id = glib::timeout_add_local(EQ_REDRAW, || BARS.with(Metronome::beat));
+            *self.timer.borrow_mut() = Some(id);
+        }
+    }
+
+    fn beat(&self) -> glib::ControlFlow {
+        let mut areas = self.areas.borrow_mut();
+        areas.retain(|weak| {
+            weak.upgrade()
+                .is_some_and(|area| area.is_mapped() && area.has_css_class(EQ_PLAYING))
+        });
+        let watched: Vec<gtk::DrawingArea> = areas
+            .iter()
+            .filter_map(|weak| weak.upgrade())
+            .filter(is_watched)
+            .collect();
+        for area in &watched {
+            area.queue_draw();
+        }
+        if watched.is_empty() {
+            drop(areas);
+            self.timer.borrow_mut().take();
+            return glib::ControlFlow::Break;
+        }
+        glib::ControlFlow::Continue
+    }
+
+    /// Starts the timer again for indicators that stayed registered through a
+    /// suspension.
+    fn resume(&self) {
+        if self.areas.borrow().is_empty() || self.timer.borrow().is_some() {
+            return;
+        }
+        let id = glib::timeout_add_local(EQ_REDRAW, || BARS.with(Metronome::beat));
+        *self.timer.borrow_mut() = Some(id);
+    }
 }
 
 fn draw_equalizer(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32) {
@@ -295,7 +367,7 @@ fn draw_equalizer(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32,
         .frame_clock()
         .map(|clock| clock.frame_time() as f64 / 1_000_000.0)
         .unwrap_or(0.0);
-    let animated = area.has_css_class("eq-playing") && animations_enabled();
+    let animated = area.has_css_class(EQ_PLAYING) && animations_enabled();
     let gap = 2.0;
     let bar_width = ((width as f64 - gap * (EQ_BARS as f64 - 1.0)) / EQ_BARS as f64).max(1.0);
     let floor = 3.0_f64.min(height as f64);
@@ -345,27 +417,22 @@ fn animations_enabled() -> bool {
 
 /// Starts or stops the bars. Keyed off the `eq-playing` class so it is
 /// idempotent: re-arming a running indicator is a no-op, and clearing the class
-/// ends the frame callback on its next tick.
+/// drops it from the metronome on its next beat.
 pub fn drive_equalizer(area: &gtk::DrawingArea, playing: bool) {
     if !playing {
-        area.remove_css_class("eq-playing");
+        area.remove_css_class(EQ_PLAYING);
         area.set_tooltip_text(Some("Paused"));
         area.queue_draw();
         return;
     }
     area.set_tooltip_text(Some("Now playing"));
-    if area.has_css_class("eq-playing") {
+    if area.has_css_class(EQ_PLAYING) {
         return;
     }
-    area.add_css_class("eq-playing");
-    area.add_tick_callback(|area, _| {
-        area.queue_draw();
-        if area.has_css_class("eq-playing") {
-            glib::ControlFlow::Continue
-        } else {
-            glib::ControlFlow::Break
-        }
-    });
+    area.add_css_class(EQ_PLAYING);
+    if area.is_mapped() {
+        BARS.with(|bars| bars.join(area));
+    }
 }
 
 /// Lights a track row up while the player is on it: an accent wash across the

@@ -239,7 +239,10 @@
   opacity: 0.6;
 }
 
-/* Glowing accent play pill; pulses only while playing to avoid idle repaint. */
+/* Glowing accent play pill. It used to pulse while playing, but an infinite
+   CSS animation asks for a frame on every vertical blank for as long as the
+   widget exists, even hidden behind another page, so a playing library never
+   let the window go idle. */
 .play-pill {
   border-radius: 9999px;
   min-width: 46px;
@@ -255,15 +258,6 @@
 
 .play-pill:active {
   transform: scale(0.95);
-}
-
-.transport.playing .play-pill {
-  animation: play-pulse 2.6s ease-in-out infinite;
-}
-
-@keyframes play-pulse {
-  0%, 100% { box-shadow: 0 4px 14px alpha(@accent_bg_color, 0.38); }
-  50%      { box-shadow: 0 5px 24px alpha(@accent_bg_color, 0.78); }
 }
 
 /* Seek and volume sliders are drawn in code (ui/slider.rs); the stylesheet
@@ -307,7 +301,8 @@
   opacity: 1;
 }
 
-/* Now-playing equalizer overlaid on the mini artwork. */
+/* Now-playing equalizer overlaid on the mini artwork; the bars themselves are
+   drawn by controls::build_equalizer_indicator in the text colour. */
 .equalizer {
   background-color: alpha(#000, 0.42);
   border-radius: 8px 0 8px 0;
@@ -315,26 +310,8 @@
   min-height: 18px;
 }
 
-.eq-bar {
-  min-width: 3px;
-  min-height: 12px;
-  border-radius: 2px;
-  background-color: #ffffff;
-  transform: scaleY(0.35);
-  transform-origin: bottom center;
-}
-
-.transport.playing .equalizer .eq-bar {
-  animation: eq-bounce 820ms ease-in-out infinite alternate;
-}
-
-.transport.playing .equalizer .eq-bar:nth-child(1) { animation-delay: 0ms; }
-.transport.playing .equalizer .eq-bar:nth-child(2) { animation-delay: 260ms; }
-.transport.playing .equalizer .eq-bar:nth-child(3) { animation-delay: 130ms; }
-
-@keyframes eq-bounce {
-  from { transform: scaleY(0.28); }
-  to   { transform: scaleY(1.0); }
+.equalizer .eq-indicator {
+  color: #ffffff;
 }
 
 /* ---- sidebar ------------------------------------------------------------ */
@@ -391,13 +368,16 @@ overlay-split-view > .sidebar-pane:backdrop {
 /* ---- lyrics ------------------------------------------------------------- */
 /* Font sizes come from the runtime provider in ui/lyrics_style.rs so the user
    can scale them; everything below is the depth ramp around the active line.
-   Only opacity and transform animate — transitioning font-size would relayout
-   the whole list every frame. */
+   Only opacity and color animate. Transitioning font-size would relayout the
+   whole list every frame, scaling text re-rasterises its glyphs on every
+   frame of the transition, and a blurred text-shadow is a GPU blur per frame
+   for as long as the line scrolls: together they were over a third of the
+   main-thread time of a playing lyrics column. */
 .lyric-line {
   font-weight: 600;
   opacity: 0.55;
   padding: 6px 4px;
-  transition: opacity 150ms ease, color 150ms ease, transform 150ms ease;
+  transition: opacity 150ms ease, color 150ms ease;
 }
 
 .lyric-line:hover {
@@ -412,13 +392,13 @@ overlay-split-view > .sidebar-pane:backdrop {
   font-weight: 700;
   opacity: 1.0;
   color: @accent_color;
-  text-shadow: 0 0 16px alpha(@accent_bg_color, 0.4);
-  transform: scale(1.04);
-  transform-origin: 0% 50%;
 }
 
 .lyric-line-interlude {
   letter-spacing: 0.35em;
+}
+
+.lyric-line-interlude.lyric-line-current {
   animation: lyric-interlude 2200ms ease-in-out infinite;
 }
 
@@ -642,12 +622,13 @@ button.pill.suggested-action:active {
 }
 
 /* ---- now playing (focus player) ----------------------------------------- */
-/* Blurred, scaled cover fills the page; the scrim keeps text legible and adds
-   an accent wash. filter: blur renders once per track (static), so it's cheap. */
+/* A soft cover wash fills the page; the scrim keeps text legible and adds an
+   accent wash. The blur is baked into the picture's pixels (ArtworkCache::
+   request_backdrop), never a CSS filter: a filter is re-run by the GPU for
+   every frame the page repaints, which with a scrolling lyrics column is all
+   of them. */
 .np-backdrop {
-  filter: blur(64px);
   opacity: 0.55;
-  transform: scale(1.25);
 }
 
 .np-scrim {

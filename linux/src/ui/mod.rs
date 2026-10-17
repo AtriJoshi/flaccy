@@ -21,6 +21,8 @@ pub mod playlist_cover_demo;
 pub mod playlists;
 pub mod prefs;
 pub mod queue_panel;
+pub mod resize;
+pub mod screen;
 pub mod seek_bar;
 pub mod slider;
 pub mod songlink_dialog;

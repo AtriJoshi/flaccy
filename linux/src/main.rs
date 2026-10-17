@@ -10,6 +10,7 @@ mod enrichment;
 mod eq;
 mod events;
 mod filters;
+mod frame_stats;
 mod hygiene;
 mod importer;
 mod lastfm;

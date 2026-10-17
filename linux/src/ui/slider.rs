@@ -64,8 +64,10 @@ const REVEAL: Duration = Duration::from_millis(900);
 const BUBBLE_GAP: f64 = 2.0;
 /// Space the bubble keeps from its host's edges.
 const BUBBLE_MARGIN: f64 = 4.0;
-/// Movement below this many pixels is not worth a repaint.
-const REPAINT_THRESHOLD: f64 = 0.25;
+/// Movement below this many device pixels is not worth a repaint: half a pixel
+/// is the finest step an anti-aliased edge can show, and a playhead creeping
+/// along a bar at a few pixels a second reads as continuous at that step.
+const REPAINT_DEVICE_PIXELS: f64 = 0.5;
 /// The wash between the playhead and a pointer hovering ahead of it.
 const GHOST_ALPHA: f64 = 0.16;
 /// Stacked halos under the filled part, widest and faintest first — Cairo has
@@ -237,12 +239,23 @@ impl Slider {
             0.0
         };
         inner.value.set(fraction);
-        if repaint_due(inner.painted.get(), fraction, inner.geometry().span) {
+        if repaint_due(
+            inner.painted.get(),
+            fraction,
+            inner.geometry().span,
+            inner.repaint_step(),
+        ) {
             inner.area.queue_draw();
             if inner.revealed.get() {
                 inner.place_bubble();
             }
         }
+    }
+
+    /// How many seconds of a track of `duration` the head takes to travel far
+    /// enough across this bar to need a repaint.
+    pub fn repaint_seconds(&self, duration: f64) -> f64 {
+        duration * self.inner.repaint_step() / self.inner.geometry().span
     }
 
     pub fn set_enabled(&self, enabled: bool) {
@@ -319,6 +332,11 @@ impl Slider {
 impl Inner {
     fn geometry(&self) -> Geometry {
         Geometry::new(self.area.width() as f64, self.metrics.inset())
+    }
+
+    /// Logical pixels the head must travel before the bar is worth repainting.
+    fn repaint_step(&self) -> f64 {
+        REPAINT_DEVICE_PIXELS / self.area.scale_factor().max(1) as f64
     }
 
     fn rtl(&self) -> bool {
@@ -820,8 +838,8 @@ fn capsule(cr: &cairo::Context, from: f64, to: f64, middle: f64, thickness: f64)
     cr.close_path();
 }
 
-fn repaint_due(painted: f64, value: f64, span: f64) -> bool {
-    (value - painted).abs() * span >= REPAINT_THRESHOLD
+fn repaint_due(painted: f64, value: f64, span: f64, step: f64) -> bool {
+    (value - painted).abs() * span >= step
 }
 
 fn ease(t: f64) -> f64 {
@@ -874,19 +892,32 @@ mod tests {
     #[test]
     fn a_slow_playhead_still_repaints() {
         let span = 1700.0;
+        let step = REPAINT_DEVICE_PIXELS;
         let per_frame = 1.0 / (240.0 * 165.0);
         let mut painted = 0.0;
         let mut value = 0.0;
         let mut repaints = 0;
         for _ in 0..165 {
             value += per_frame;
-            if repaint_due(painted, value, span) {
+            if repaint_due(painted, value, span, step) {
                 painted = value;
                 repaints += 1;
             }
         }
-        assert!(repaints >= 20, "a four-minute track moved only {repaints} times in a second");
-        assert!((value - painted) * span < REPAINT_THRESHOLD);
+        assert!(
+            repaints >= 12,
+            "a four-minute track moved only {repaints} times in a second"
+        );
+        assert!((value - painted) * span < step);
+    }
+
+    #[test]
+    fn a_sharper_display_asks_for_finer_steps() {
+        let step_at = |scale: f64| REPAINT_DEVICE_PIXELS / scale;
+        assert_eq!(step_at(1.0), 0.5);
+        assert_eq!(step_at(2.0), 0.25);
+        assert!(!repaint_due(0.0, 0.1 / 1700.0, 1700.0, step_at(1.0)));
+        assert!(repaint_due(0.0, 0.3 / 1700.0, 1700.0, step_at(2.0)));
     }
 
     #[test]

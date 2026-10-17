@@ -9,7 +9,6 @@ use crate::ui::slider::SliderMetrics;
 use crate::ui::video_view;
 use crate::ui::Ui;
 use adw::prelude::*;
-use gtk::glib;
 use gtk::pango;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -489,43 +488,32 @@ fn install_now_playing_width_adaptation(
     dock: DockFit,
     syncing: &Rc<Cell<bool>>,
 ) {
-    let last_width = Rc::new(Cell::new(0i32));
     let ui = Rc::clone(ui);
     let lyrics_toggle = lyrics_toggle.clone();
     let queue_toggle = queue_toggle.clone();
     let dock = Rc::new(dock);
     let syncing = Rc::clone(syncing);
-    content.connect_realize(move |widget| {
-        let ui = Rc::clone(&ui);
-        let lyrics_toggle = lyrics_toggle.clone();
-        let queue_toggle = queue_toggle.clone();
-        let dock = Rc::clone(&dock);
-        let last_width = Rc::clone(&last_width);
-        let syncing = Rc::clone(&syncing);
-        widget.add_tick_callback(move |widget, _| {
-            let width = widget.width();
-            if width == last_width.get() || width <= 1 {
-                return glib::ControlFlow::Continue;
-            }
-            let previous = last_width.replace(width);
-            if width < 640 && lyrics_toggle.is_active() && queue_toggle.is_active() {
-                syncing.set(true);
-                queue_toggle.set_active(false);
-                syncing.set(false);
-            } else if width >= 640 && previous > 0 && previous < 640 {
-                // Widening again restores whatever the user actually chose,
-                // otherwise a panel folded away at phone width never returns.
-                let wanted = ui.core.config.borrow().np_show_queue;
-                if wanted && !queue_toggle.is_active() {
-                    syncing.set(true);
-                    queue_toggle.set_active(true);
-                    syncing.set(false);
-                }
-            }
-            dock.apply(width);
-            glib::ControlFlow::Continue
-        });
+    crate::ui::resize::watch_width(content, move |width, previous| {
+        if width < 640 && lyrics_toggle.is_active() && queue_toggle.is_active() {
+            syncing.set(true);
+            queue_toggle.set_active(false);
+            syncing.set(false);
+        } else if width >= 640 && previous > 0 && previous < 640 {
+            restore_chosen_queue(&ui, &queue_toggle, &syncing);
+        }
+        dock.apply(width);
     });
+}
+
+/// Widening again restores whatever the person actually chose, otherwise a
+/// panel folded away at phone width never returns.
+fn restore_chosen_queue(ui: &Rc<Ui>, queue_toggle: &gtk::ToggleButton, syncing: &Cell<bool>) {
+    let wanted = ui.core.config.borrow().np_show_queue;
+    if wanted && !queue_toggle.is_active() {
+        syncing.set(true);
+        queue_toggle.set_active(true);
+        syncing.set(false);
+    }
 }
 
 /// Parks the video pipeline whenever Now Playing isn't on screen, so browsing
@@ -694,8 +682,9 @@ fn update_up_next_label(ui: &Rc<Ui>, label: &gtk::Label) {
 
 type Updater = Rc<dyn Fn()>;
 
-/// Repaints the artwork (sharp + blurred backdrop), text, and quality chip for
-/// the current track; reused on open and on every TrackChanged.
+/// Repaints the artwork (sharp, plus the pre-blurred backdrop), text, and
+/// quality chip for the current track; reused on open and on every
+/// TrackChanged.
 #[allow(clippy::too_many_arguments)]
 fn build_updater(
     ui: &Rc<Ui>,
@@ -746,17 +735,19 @@ fn build_updater(
         art.set_paintable(Some(&placeholder));
         backdrop.set_paintable(Some(&placeholder));
         let art_weak = art.downgrade();
-        let backdrop_weak = backdrop.downgrade();
         ui.core
             .artwork
             .request(&track.album, &track.artist, 340, move |texture, _| {
-                if let Some(texture) = texture {
-                    if let Some(art) = art_weak.upgrade() {
-                        art.set_paintable(Some(texture));
-                    }
-                    if let Some(backdrop) = backdrop_weak.upgrade() {
-                        backdrop.set_paintable(Some(texture));
-                    }
+                if let (Some(texture), Some(art)) = (texture, art_weak.upgrade()) {
+                    art.set_paintable(Some(texture));
+                }
+            });
+        let backdrop_weak = backdrop.downgrade();
+        ui.core
+            .artwork
+            .request_backdrop(&track.album, &track.artist, move |texture| {
+                if let (Some(texture), Some(backdrop)) = (texture, backdrop_weak.upgrade()) {
+                    backdrop.set_paintable(Some(texture));
                 }
             });
     })

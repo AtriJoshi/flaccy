@@ -445,6 +445,8 @@ pub fn build(app: &adw::Application, core: &Rc<AppCore>) -> adw::ApplicationWind
     shell.set_pop_on_escape(true);
 
     window.set_content(Some(&shell));
+    crate::frame_stats::install(&window);
+    announce_suspension(&window, &core.hub);
 
     register_actions(app, &ui, &search);
     {
@@ -615,7 +617,38 @@ fn build_job_status(ui: &Rc<Ui>) -> gtk::Revealer {
     revealer
 }
 
+/// Tells everything that animates on a timer when the window is suspended or
+/// brought back, and wakes the shared equalizer metronome on resume.
+fn announce_suspension(window: &adw::ApplicationWindow, hub: &Rc<crate::events::EventHub>) {
+    let announcer = Rc::clone(hub);
+    window.connect_suspended_notify(move |window| {
+        let suspended = window.is_suspended();
+        announcer.emit(&AppEvent::WindowSuspended(suspended));
+        if !suspended {
+            crate::ui::controls::resume_bars();
+        }
+    });
+}
+
 const SHELL_COLLAPSE_WIDTH: f64 = 820.0;
+
+/// If layout thrashing uncollapses the library while the window is still
+/// phone-narrow, forces drawer mode again so the sidebar never gets stuck
+/// permanent without a close affordance. A library that is already collapsed
+/// (drawer open or closed) is left to the person.
+fn force_compact_when_narrow(
+    window: &adw::ApplicationWindow,
+    library_split: &adw::OverlaySplitView,
+    enter_compact: &Rc<impl Fn() + 'static>,
+) {
+    let library_split = library_split.clone();
+    let enter_compact = Rc::clone(enter_compact);
+    crate::ui::resize::watch_width(window, move |width, _| {
+        if (width as f64) <= SHELL_COLLAPSE_WIDTH && !library_split.is_collapsed() {
+            enter_compact();
+        }
+    });
+}
 
 /// Collapse the library nav and shrink secondary chrome once the window leaves
 /// the comfortable desktop width. All toggle ↔ split writes go through
@@ -677,32 +710,7 @@ fn install_shell_breakpoints(
     }
     window.add_breakpoint(collapse);
 
-    // Recovery: if layout thrashing uncollapses us while the window is still
-    // phone-narrow, force drawer mode again so the sidebar never gets stuck
-    // permanent without a close affordance.
-    {
-        let library_split = library_split.clone();
-        let enter_compact = Rc::clone(&enter_compact);
-        let last = Rc::new(Cell::new(0i32));
-        window.connect_realize(move |window| {
-            let library_split = library_split.clone();
-            let enter_compact = Rc::clone(&enter_compact);
-            let last = Rc::clone(&last);
-            window.add_tick_callback(move |window, _| {
-                let width = window.width();
-                if width <= 1 || width == last.get() {
-                    return glib::ControlFlow::Continue;
-                }
-                last.set(width);
-                // Only force when desktop mode leaked into a narrow width.
-                // If already collapsed (drawer open or closed), leave user alone.
-                if (width as f64) <= SHELL_COLLAPSE_WIDTH && !library_split.is_collapsed() {
-                    enter_compact();
-                }
-                glib::ControlFlow::Continue
-            });
-        });
-    }
+    force_compact_when_narrow(window, library_split, &enter_compact);
 
     let narrow = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
         adw::BreakpointConditionLengthType::MaxWidth,

@@ -11,11 +11,32 @@ use std::rc::Rc;
 
 const LRU_CAPACITY: usize = 300;
 
+/// The longest side of a backdrop texture. The picture showing it is scaled
+/// up to a whole window, and the blur is already in the pixels, so a few
+/// dozen texels per axis is all the detail there is to keep.
+const BACKDROP_SIDE: u32 = 96;
+/// How much of the cover's centre a backdrop keeps, as a fraction of each
+/// side: the page used to scale its blurred cover up by a quarter so the soft
+/// edges fell outside the window, and this is that framing.
+const BACKDROP_CROP: f64 = 0.8;
+/// The Gaussian spread, in texels of the backdrop, matching the 64 px blur the
+/// stylesheet used to ask the GPU for on a window-sized copy of the cover.
+const BACKDROP_SIGMA: f32 = 3.2;
+
+/// What a decode produces: the cover itself, or the soft wash that sits
+/// behind the Now Playing page.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Look {
+    Cover,
+    Backdrop,
+}
+
 struct DecodeRequest {
     key: String,
     title: String,
     artist: String,
     size: u32,
+    look: Look,
     generation: u64,
 }
 
@@ -24,6 +45,7 @@ struct DecodeResult {
     title: String,
     artist: String,
     size: u32,
+    look: Look,
     generation: u64,
     width: u32,
     height: u32,
@@ -137,6 +159,41 @@ impl ArtworkCache {
     ) {
         let size = size * display_scale();
         let key = format!("{title}|{artist}|{size}");
+        self.fetch(key, title, artist, size, Look::Cover, Box::new(callback));
+    }
+
+    /// Requests the blurred wash behind an album's Now Playing page. It is
+    /// blurred once, off the main thread, into a small texture, so the page
+    /// paints it as one plain textured rectangle per frame instead of asking
+    /// the GPU to blur a window-sized picture every time anything on the page
+    /// moves. The key still starts with `title|artist|`, so invalidating the
+    /// album drops it with the covers.
+    pub fn request_backdrop(
+        &self,
+        title: &str,
+        artist: &str,
+        callback: impl Fn(Option<&gdk::MemoryTexture>) + 'static,
+    ) {
+        let key = format!("{title}|{artist}|backdrop");
+        self.fetch(
+            key,
+            title,
+            artist,
+            BACKDROP_SIDE,
+            Look::Backdrop,
+            Box::new(move |texture, _| callback(texture)),
+        );
+    }
+
+    fn fetch(
+        &self,
+        key: String,
+        title: &str,
+        artist: &str,
+        size: u32,
+        look: Look,
+        callback: Callback,
+    ) {
         if let Some((texture, dominant)) = self.textures.borrow().get(&key) {
             self.touch(&key);
             callback(Some(texture), *dominant);
@@ -149,7 +206,7 @@ impl ArtworkCache {
         let mut pending = self.pending.borrow_mut();
         let entry = pending.entry(key.clone()).or_default();
         let first = entry.is_empty();
-        entry.push(Box::new(callback));
+        entry.push(callback);
         drop(pending);
         if first {
             if let Some(tx) = self.tx.borrow().as_ref() {
@@ -158,6 +215,7 @@ impl ArtworkCache {
                     title: title.to_string(),
                     artist: artist.to_string(),
                     size,
+                    look,
                     generation: self.generation(title, artist),
                 });
             }
@@ -178,6 +236,7 @@ impl ArtworkCache {
                 title: result.title.clone(),
                 artist: result.artist.clone(),
                 size: result.size,
+                look: result.look,
                 generation: current,
             });
         }
@@ -330,6 +389,7 @@ fn decode_one(db: &Db, request: &DecodeRequest) -> DecodeResult {
         title: request.title.clone(),
         artist: request.artist.clone(),
         size: request.size,
+        look: request.look,
         generation: request.generation,
         width: 0,
         height: 0,
@@ -342,21 +402,46 @@ fn decode_one(db: &Db, request: &DecodeRequest) -> DecodeResult {
     let Ok(decoded) = image::load_from_memory(&data) else {
         return empty;
     };
-    let thumbnail = decoded.thumbnail(request.size, request.size).to_rgba8();
-    let (width, height) = thumbnail.dimensions();
-    let rgba = thumbnail.into_raw();
-    let dominant = Some(crate::palette::dominant_color(&rgba, width, height));
+    let (picture, dominant) = match request.look {
+        Look::Cover => {
+            let thumbnail = decoded.thumbnail(request.size, request.size).to_rgba8();
+            let (width, height) = thumbnail.dimensions();
+            let dominant = crate::palette::dominant_color(thumbnail.as_raw(), width, height);
+            (thumbnail, Some(dominant))
+        }
+        Look::Backdrop => (backdrop_pixels(&decoded), None),
+    };
+    let (width, height) = picture.dimensions();
     DecodeResult {
         key: request.key.clone(),
         title: request.title.clone(),
         artist: request.artist.clone(),
         size: request.size,
+        look: request.look,
         generation: request.generation,
         width,
         height,
-        rgba: Some(rgba),
+        rgba: Some(picture.into_raw()),
         dominant,
     }
+}
+
+/// The centre of a cover, shrunk and Gaussian-blurred: everything the Now
+/// Playing page's wash needs, in a texture small enough to cost nothing to
+/// upload or to draw.
+fn backdrop_pixels(cover: &image::DynamicImage) -> image::RgbaImage {
+    use image::GenericImageView;
+    let (width, height) = cover.dimensions();
+    let keep = |side: u32| ((side as f64 * BACKDROP_CROP).round() as u32).clamp(1, side);
+    let (crop_width, crop_height) = (keep(width), keep(height));
+    let centre = cover.crop_imm(
+        (width - crop_width) / 2,
+        (height - crop_height) / 2,
+        crop_width,
+        crop_height,
+    );
+    let small = centre.thumbnail(BACKDROP_SIDE, BACKDROP_SIDE).to_rgba8();
+    image::imageops::blur(&small, BACKDROP_SIGMA)
 }
 
 #[cfg(test)]
@@ -376,6 +461,7 @@ mod tests {
             title: "Record".into(),
             artist: "Band".into(),
             size: 168,
+            look: Look::Cover,
             generation,
             width: 0,
             height: 0,

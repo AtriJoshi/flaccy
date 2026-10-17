@@ -1,11 +1,13 @@
 use crate::events::AppEvent;
 use crate::library::format_time;
 use crate::ui::slider::{Slider, SliderMetrics, Step};
-use crate::ui::{FrameDriver, Ui};
+use crate::ui::screen::is_watched;
+use crate::ui::Ui;
 use gtk::glib;
 use gtk::prelude::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
+use std::time::Duration;
 
 /// How far the playhead may run ahead of the last position the player
 /// reported. Ticks land four times a second, so a live pipeline never gets
@@ -15,6 +17,13 @@ const EXTRAPOLATION_LIMIT: f64 = 0.3;
 /// Seconds an arrow key or wheel notch moves playback, and Page Up/Down.
 const FINE_STEP: f64 = 5.0;
 const COARSE_STEP: f64 = 15.0;
+/// The playhead never sleeps longer than this, so a re-anchored position is
+/// shown within a player tick, and never wakes more often than this, whatever
+/// the track length and bar width work out to.
+const LONGEST_WAKEUP: f64 = 0.25;
+const SHORTEST_WAKEUP: f64 = 0.008;
+/// Landing this far past a boundary makes sure the value really crossed it.
+const BOUNDARY_SLACK: f64 = 0.001;
 
 /// Elapsed time, the scrubber, and the time remaining, as one row. `bubble`
 /// is the scrubber's time readout; the host adds it to an overlay covering
@@ -37,7 +46,9 @@ struct State {
     /// The whole seconds the labels last showed, so they are only rewritten
     /// when a digit actually changes.
     shown: Cell<Option<(i64, i64, i64)>>,
-    driver: FrameDriver,
+    /// The pending wake-up that moves the playhead, present only while a song
+    /// is playing in a bar someone can see.
+    wakeup: RefCell<Option<glib::SourceId>>,
 }
 
 pub fn build(ui: &Rc<Ui>, metrics: SliderMetrics) -> SeekBar {
@@ -62,7 +73,7 @@ pub fn build(ui: &Rc<Ui>, metrics: SliderMetrics) -> SeekBar {
         anchor: Cell::new((0.0, glib::monotonic_time())),
         playing: Cell::new(false),
         shown: Cell::new(None),
-        driver: FrameDriver::default(),
+        wakeup: RefCell::new(None),
     });
     state.sync_with_player();
     wire_slider(&state);
@@ -102,6 +113,36 @@ fn extrapolate(anchor: (f64, i64), now: i64, playing: bool, duration: f64) -> f6
     } else {
         position.max(0.0)
     }
+}
+
+/// How long until the playhead next needs attention: when it will have moved
+/// far enough to repaint (`repaint_seconds`), or when the elapsed or the
+/// remaining label's whole second will turn over, whichever comes first.
+fn next_wakeup(position: f64, duration: f64, repaint_seconds: f64) -> Duration {
+    let remaining = (duration - position).max(0.0);
+    let soonest = repaint_seconds
+        .min(until_round_rises(position))
+        .min(until_round_falls(remaining))
+        + BOUNDARY_SLACK;
+    Duration::from_secs_f64(soonest.clamp(SHORTEST_WAKEUP, LONGEST_WAKEUP))
+}
+
+/// Seconds until a value that is rising one second per second next changes
+/// when rounded to a whole second.
+fn until_round_rises(value: f64) -> f64 {
+    let boundary = value.floor() + 0.5;
+    if value < boundary {
+        boundary - value
+    } else {
+        boundary + 1.0 - value
+    }
+}
+
+/// Seconds until a value that is falling one second per second next changes
+/// when rounded to a whole second.
+fn until_round_falls(value: f64) -> f64 {
+    let boundary = (value - 0.5 - 1e-9).floor() + 0.5;
+    value - boundary
 }
 
 /// The bubble's text for a spot on the bar: its time, under the lyric line
@@ -189,28 +230,61 @@ impl State {
         );
     }
 
-    /// Runs the per-frame playhead only while there is something to move and
-    /// someone to see it.
-    fn sync_driver(self: &Rc<Self>) {
-        let area = self.slider.area();
-        let wanted = self.playing.get() && area.is_mapped() && self.duration.get() > 0.0;
-        if !wanted {
-            self.driver.stop();
+    /// Re-times the pending wake-up after something changed what it was
+    /// computed from: the song, the play state, or the reported position.
+    fn restart_playhead(self: &Rc<Self>) {
+        self.disarm();
+        self.sync_playhead();
+    }
+
+    fn wants_playhead(&self) -> bool {
+        self.playing.get() && is_watched(self.slider.area()) && self.duration.get() > 0.0
+    }
+
+    /// Keeps a wake-up pending only while there is a playhead to move and
+    /// someone to see it. The bar is repainted when the head has travelled far
+    /// enough to show and when a label's second turns over, not on every
+    /// vertical blank: a frame callback would hold the whole window's frame
+    /// clock running for as long as a song plays.
+    fn sync_playhead(self: &Rc<Self>) {
+        if !self.wants_playhead() {
+            self.disarm();
             return;
         }
+        if self.wakeup.borrow().is_none() {
+            self.advance();
+        }
+    }
+
+    fn disarm(&self) {
+        if let Some(id) = self.wakeup.borrow_mut().take() {
+            id.remove();
+        }
+    }
+
+    /// Draws the head where playback is now and sleeps until it next moves.
+    fn advance(self: &Rc<Self>) {
+        self.disarm();
+        let now = glib::monotonic_time();
+        self.render(now);
+        if !self.wants_playhead() {
+            return;
+        }
+        let duration = self.duration.get();
+        let delay = next_wakeup(
+            self.position_at(now),
+            duration,
+            self.slider.repaint_seconds(duration),
+        );
         let weak = Rc::downgrade(self);
-        self.driver.start(area, move |_| {
+        let id = glib::timeout_add_local_once(delay, move || {
             let Some(state) = weak.upgrade() else {
                 return;
             };
-            let now = state
-                .slider
-                .area()
-                .frame_clock()
-                .map(|clock| clock.frame_time())
-                .unwrap_or_else(glib::monotonic_time);
-            state.render(now);
+            state.wakeup.borrow_mut().take();
+            state.advance();
         });
+        *self.wakeup.borrow_mut() = Some(id);
     }
 
     fn seconds(&self, fraction: f64) -> f64 {
@@ -302,13 +376,13 @@ fn wire_slider(state: &Rc<State>) {
         let weak = Rc::downgrade(state);
         slider
             .area()
-            .connect_map(move |_| with_state(&weak, |state| state.sync_driver()));
+            .connect_map(move |_| with_state(&weak, |state| state.sync_playhead()));
     }
     {
         let weak = Rc::downgrade(state);
         slider
             .area()
-            .connect_unmap(move |_| with_state(&weak, |state| state.sync_driver()));
+            .connect_unmap(move |_| with_state(&weak, |state| state.sync_playhead()));
     }
 }
 
@@ -326,28 +400,30 @@ fn wire_events(state: &Rc<State>, container: &gtk::Box) {
                     .playing
                     .set(track.is_some() && state.ui.core.player.is_playing());
                 state.render(now);
-                state.sync_driver();
+                state.restart_playhead();
             }
             AppEvent::PlayingChanged(playing) => {
                 state.anchor_at(state.position_at(now));
                 state.playing.set(*playing);
                 state.render(now);
-                state.sync_driver();
+                state.restart_playhead();
             }
             AppEvent::Tick { position, duration } => {
                 if *duration > 0.0 {
                     state.set_duration(*duration);
                 }
                 state.anchor_at(*position);
-                if !state.playing.get() {
+                if state.playing.get() {
+                    state.restart_playhead();
+                } else {
                     state.render(now);
                 }
-                state.sync_driver();
             }
             AppEvent::Seeked(position) => {
                 state.anchor_at(*position);
                 state.render(now);
             }
+            AppEvent::WindowSuspended(_) => state.restart_playhead(),
             _ => {}
         }
     });
@@ -382,6 +458,36 @@ mod tests {
     fn a_paused_clock_holds_still() {
         let anchor = (42.0, 1_000_000);
         assert_eq!(extrapolate(anchor, 9_000_000, false, 200.0), 42.0);
+    }
+
+    #[test]
+    fn a_label_turning_over_wakes_the_bar_before_the_head_needs_it() {
+        let wake = next_wakeup(10.2, 240.0, 5.0);
+        assert_eq!(wake.as_secs_f64(), LONGEST_WAKEUP);
+        let wake = next_wakeup(10.45, 240.0, 5.0);
+        assert!((wake.as_secs_f64() - 0.051).abs() < 1e-6, "{wake:?}");
+    }
+
+    #[test]
+    fn a_head_that_moves_quickly_wakes_the_bar_at_its_own_pace() {
+        let wake = next_wakeup(10.0, 30.0, 0.02);
+        assert!((wake.as_secs_f64() - 0.021).abs() < 1e-6, "{wake:?}");
+    }
+
+    #[test]
+    fn wakeups_stay_between_the_floor_and_the_ceiling() {
+        assert_eq!(next_wakeup(10.0, 240.0, 0.0).as_secs_f64(), SHORTEST_WAKEUP);
+        assert_eq!(next_wakeup(10.0, 240.0, 30.0).as_secs_f64(), LONGEST_WAKEUP);
+    }
+
+    #[test]
+    fn rounding_boundaries_are_found_in_both_directions() {
+        assert!((until_round_rises(3.2) - 0.3).abs() < 1e-9);
+        assert!((until_round_rises(3.5) - 1.0).abs() < 1e-9);
+        assert!((until_round_rises(3.9) - 0.6).abs() < 1e-9);
+        assert!((until_round_falls(3.7) - 0.2).abs() < 1e-6);
+        assert!((until_round_falls(3.2) - 0.7).abs() < 1e-6);
+        assert!((until_round_falls(3.5) - 1.0).abs() < 1e-6);
     }
 
     #[test]

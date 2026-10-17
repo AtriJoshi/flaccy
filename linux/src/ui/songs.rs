@@ -30,7 +30,6 @@ fn install_songs_column_adaptation(
     added: &gtk::ColumnViewColumn,
     last_played: &gtk::ColumnViewColumn,
 ) {
-    let last_width = Rc::new(Cell::new(0i32));
     let album = album.clone();
     let plays = plays.clone();
     let quality = quality.clone();
@@ -38,33 +37,17 @@ fn install_songs_column_adaptation(
     let duration = duration.clone();
     let added = added.clone();
     let last_played = last_played.clone();
-    column_view.connect_realize(move |view| {
-        let last_width = Rc::clone(&last_width);
-        let album = album.clone();
-        let plays = plays.clone();
-        let quality = quality.clone();
-        let artist = artist.clone();
-        let duration = duration.clone();
-        let added = added.clone();
-        let last_played = last_played.clone();
-        view.add_tick_callback(move |view, _| {
-            let width = view.width();
-            if width == last_width.get() || width <= 1 {
-                return gtk::glib::ControlFlow::Continue;
-            }
-            last_width.set(width);
-            let wide = width >= 900;
-            let medium = width >= 640;
-            let compact = width >= 420;
-            quality.set_visible(wide);
-            plays.set_visible(wide);
-            added.set_visible(wide);
-            last_played.set_visible(wide);
-            album.set_visible(medium);
-            duration.set_visible(compact);
-            artist.set_visible(compact);
-            gtk::glib::ControlFlow::Continue
-        });
+    crate::ui::resize::watch_width(column_view, move |width, _| {
+        let wide = width >= 900;
+        let medium = width >= 640;
+        let compact = width >= 420;
+        quality.set_visible(wide);
+        plays.set_visible(wide);
+        added.set_visible(wide);
+        last_played.set_visible(wide);
+        album.set_visible(medium);
+        duration.set_visible(compact);
+        artist.set_visible(compact);
     });
 }
 

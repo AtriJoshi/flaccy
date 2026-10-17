@@ -1,14 +1,14 @@
 use crate::events::AppEvent;
 use crate::library::format_time;
 use crate::ui::controls::{
-    apply_repeat, attach_label_nav, build_volume_control, set_adaptive_accent, set_love_appearance,
+    apply_repeat, attach_label_nav, build_equalizer_indicator, build_volume_control,
+    drive_equalizer, set_adaptive_accent, set_love_appearance,
 };
 use crate::ui::seek_bar;
 use crate::ui::slider::SliderMetrics;
 use crate::ui::Ui;
 use adw::prelude::*;
 use gtk::gio;
-use gtk::glib;
 use gtk::pango;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -348,7 +348,7 @@ pub fn build(ui: &Rc<Ui>, bubble_host: &gtk::Overlay) -> gtk::Widget {
                         .0;
                         if ui_ref.core.player.is_playing() {
                             bar_ref.add_css_class("playing");
-                            equalizer.set_visible(true);
+                            drive_mini_equalizer(&equalizer, true);
                         }
                         let weak = artwork.downgrade();
                         ui_ref.core.artwork.request(
@@ -369,7 +369,7 @@ pub fn build(ui: &Rc<Ui>, bubble_host: &gtk::Overlay) -> gtk::Widget {
                         quality.set_visible(false);
                         love.set_sensitive(false);
                         art_overlay.set_visible(false);
-                        equalizer.set_visible(false);
+                        drive_mini_equalizer(&equalizer, false);
                         bar_ref.remove_css_class("playing");
                         set_adaptive_accent(None);
                         *current_rel.borrow_mut() = None;
@@ -419,10 +419,10 @@ pub fn build(ui: &Rc<Ui>, bubble_host: &gtk::Overlay) -> gtk::Widget {
                     });
                     if *playing {
                         bar_ref.add_css_class("playing");
-                        equalizer.set_visible(current_rel.borrow().is_some());
+                        drive_mini_equalizer(&equalizer, current_rel.borrow().is_some());
                     } else {
                         bar_ref.remove_css_class("playing");
-                        equalizer.set_visible(false);
+                        drive_mini_equalizer(&equalizer, false);
                     }
                 }
                 AppEvent::ShuffleChanged(enabled) => {
@@ -604,43 +604,31 @@ fn install_width_adaptation(
         })
     };
 
-    let last_width = Rc::new(Cell::new(0i32));
     {
         let adapt = Rc::clone(&adapt);
-        let last_width = Rc::clone(&last_width);
-        root.connect_realize(move |widget| {
-            adapt();
-            let adapt = Rc::clone(&adapt);
-            let last_width = Rc::clone(&last_width);
-            widget.add_tick_callback(move |widget, _| {
-                let width = widget.width();
-                if width != last_width.get() {
-                    last_width.set(width);
-                    adapt();
-                }
-                glib::ControlFlow::Continue
-            });
-        });
+        root.connect_realize(move |_| adapt());
     }
+    crate::ui::resize::watch_width(root, move |_, _| adapt());
 }
 
 /// Three-bar now-playing indicator overlaid bottom-trailing on the mini
-/// artwork; the bars only animate while the transport carries the `.playing`
-/// class, so paused playback triggers no idle repaint.
+/// artwork. The bars are the same drawn indicator the track rows use, redrawn
+/// by the shared metronome only while the transport shows them and plays.
 fn build_equalizer() -> gtk::Box {
-    let bars = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(2)
+    let frame = gtk::Box::builder()
         .halign(gtk::Align::End)
         .valign(gtk::Align::End)
         .build();
-    bars.add_css_class("equalizer");
-    for _ in 0..3 {
-        let bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        bar.add_css_class("eq-bar");
-        bar.set_valign(gtk::Align::End);
-        bars.append(&bar);
+    frame.add_css_class("equalizer");
+    frame.append(&build_equalizer_indicator());
+    frame.set_visible(false);
+    frame
+}
+
+/// Starts or rests the mini artwork's bars along with the player.
+fn drive_mini_equalizer(equalizer: &gtk::Box, playing: bool) {
+    equalizer.set_visible(playing);
+    if let Some(indicator) = equalizer.first_child().and_downcast::<gtk::DrawingArea>() {
+        drive_equalizer(&indicator, playing);
     }
-    bars.set_visible(false);
-    bars
 }

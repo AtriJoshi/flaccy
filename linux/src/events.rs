@@ -36,6 +36,10 @@ pub enum AppEvent {
     /// The Songs table changed what its columns count (the Plays column moved
     /// to or from a time range); every visible cell re-reads its text.
     SongCellsChanged,
+    /// The compositor suspended the window (minimized, on another workspace) or
+    /// brought it back. Anything that wakes on a timer to keep a picture moving
+    /// stops while it is suspended and picks up again on resume.
+    WindowSuspended(bool),
     LyricsToggled(bool),
     QueueChanged,
     Toast(String),
