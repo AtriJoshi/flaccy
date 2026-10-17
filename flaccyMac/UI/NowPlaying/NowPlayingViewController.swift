@@ -365,12 +365,12 @@ final class NowPlayingViewController: NSViewController {
         }
     }
 
-    /// Shows or hides one side column, fading it in. The layout pass runs after
-    /// the animation group, not inside it: laid out under implicit animation,
-    /// the glass surface and everything inside it keep the frame they had
-    /// while the column was hidden, so a freshly shown panel stays at its
-    /// fitting width instead of filling the column and clips its trailing
-    /// controls.
+    /// Shows or hides one side column, fading it in while the columns beside it
+    /// slide to their new widths. A glass surface that is resized under implicit
+    /// animation keeps the frame it had, and so does everything inside it, so a
+    /// panel would stay at its old width and clip its trailing controls;
+    /// `settleVisibleColumns` re-lays the visible columns out without animation
+    /// right after the group to put them at the width the constraints ask for.
     private func setColumn(_ column: NSView, visible: Bool) {
         guard column.isHidden == visible else { return }
         let widthConstraint = column === lyricsColumn ? lyricsWidthConstraint : queueWidthConstraint
@@ -389,8 +389,24 @@ final class NowPlayingViewController: NSViewController {
             context.allowsImplicitAnimation = true
             column.animator().alphaValue = visible ? 1 : 0
             column.isHidden = !visible
+            self.view.layoutSubtreeIfNeeded()
         }
-        view.layoutSubtreeIfNeeded()
+        settleVisibleColumns()
+    }
+
+    private func settleVisibleColumns() {
+        NSAnimationContext.runAnimationGroup { context in
+            context.allowsImplicitAnimation = false
+            for column in [lyricsColumn, queueColumn] where !column.isHidden {
+                invalidateLayout(of: column)
+                column.layoutSubtreeIfNeeded()
+            }
+        }
+    }
+
+    private func invalidateLayout(of target: NSView) {
+        target.needsLayout = true
+        target.subviews.forEach(invalidateLayout(of:))
     }
 
     private func refreshCapsuleToggles() {
