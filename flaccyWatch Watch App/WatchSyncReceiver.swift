@@ -205,16 +205,21 @@ final class WatchSyncReceiver: NSObject, @unchecked Sendable {
         setLastError(path: nil, reason: nil)
     }
 
-    private func volumeValue(_ key: URLResourceKey) -> URLResourceValues? {
-        try? documentsDirectory.resourceValues(forKeys: [key])
+    /// Volume figures read as 64-bit numbers. The URL resource values for
+    /// capacity are plain `Int`, which is 32 bits on the arm64_32 watches
+    /// (Series 4 to 8 and the first two SEs) and wraps to a negative number
+    /// past 2 GB, so every file would look like it does not fit.
+    private func fileSystemBytes(_ key: FileAttributeKey) -> Int64 {
+        let attributes = try? FileManager.default.attributesOfFileSystem(forPath: documentsDirectory.path)
+        return (attributes?[key] as? NSNumber)?.int64Value ?? 0
     }
 
     private func freeBytes() -> Int64 {
-        Int64(volumeValue(.volumeAvailableCapacityKey)?.volumeAvailableCapacity ?? 0)
+        fileSystemBytes(.systemFreeSize)
     }
 
     private func totalBytes() -> Int64 {
-        Int64(volumeValue(.volumeTotalCapacityKey)?.volumeTotalCapacity ?? 0)
+        fileSystemBytes(.systemSize)
     }
 
     private func currentStorage() -> WatchStorage {
