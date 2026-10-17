@@ -81,6 +81,10 @@ final class MacArtworkCropView: ArtworkFramedView {
         onFramingChanged?(false)
     }
 
+    func setPlaceholderSymbol(_ name: String) {
+        placeholder.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+    }
+
     func setLoading(_ loading: Bool) {
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.2)

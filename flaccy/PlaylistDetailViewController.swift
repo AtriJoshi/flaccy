@@ -1,3 +1,4 @@
+import FlaccyCore
 import UIKit
 
 final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
@@ -9,11 +10,13 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
     private let impactLight = UIImpactFeedbackGenerator(style: .light)
     private let impactMedium = UIImpactFeedbackGenerator(style: .medium)
     private let reorderFeedback = UISelectionFeedbackGenerator()
+    private let selectionFeedback = UISelectionFeedbackGenerator()
 
     private var tableView: UITableView!
     private var tracks: [Track] = []
     private var playlistTrackRecords: [PlaylistTrackRecord] = []
     private let mosaicView = StackedArtworkMosaicView()
+    private let editCoverButton = UIButton(type: .custom)
     private let buttonStack = UIStackView()
     private let headerColumn = UIScrollView()
     private var headerLayoutConstraints: [NSLayoutConstraint] = []
@@ -48,6 +51,20 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
         NotificationCenter.default.addObserver(
             self, selector: #selector(playbackChanged), name: AudioPlayer.playbackStateDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(artworkChanged), name: AlbumArtworkCache.didChangeNotification, object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Repaints the cover and the menu after a picture was chosen or cleared,
+    /// here or in the playlists list.
+    @objc private func artworkChanged() {
+        updateMosaic()
+        updateOverflowMenu()
     }
 
     /// Repaints the visible rows so the playing one lights up here the way it
@@ -115,8 +132,8 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
 
     private func buildHeaderComponents() {
         mosaicView.translatesAutoresizingMaskIntoConstraints = false
-        mosaicView.isAccessibilityElement = true
-        mosaicView.accessibilityLabel = String(localized: "Playlist artwork")
+        mosaicView.artworkLabel = String(localized: "Playlist artwork")
+        installEditCoverButton()
 
         let playButton = makeHeaderButton(
             title: String(localized: "Play"),
@@ -135,6 +152,70 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
         }
         buttonStack.spacing = 12
         buttonStack.distribution = .fillEqually
+    }
+
+    /// A small material disc at the cover's bottom-trailing corner. The button
+    /// itself is 44 pt so it is easy to hit; the disc inside it is 32 pt.
+    private func installEditCoverButton() {
+        let disc = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+        disc.isUserInteractionEnabled = false
+        disc.layer.cornerRadius = 16
+        disc.layer.cornerCurve = .continuous
+        disc.clipsToBounds = true
+        disc.translatesAutoresizingMaskIntoConstraints = false
+
+        let glyph = UIImageView(image: UIImage(
+            systemName: "pencil",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        ))
+        glyph.tintColor = .label
+        glyph.contentMode = .center
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        disc.contentView.addSubview(glyph)
+
+        editCoverButton.translatesAutoresizingMaskIntoConstraints = false
+        editCoverButton.accessibilityLabel = String(localized: "Edit cover")
+        editCoverButton.addSubview(disc)
+        editCoverButton.addAction(UIAction { [weak self] _ in
+            self?.selectionFeedback.selectionChanged()
+            self?.presentCoverEditor()
+        }, for: .touchUpInside)
+        mosaicView.addSubview(editCoverButton)
+
+        NSLayoutConstraint.activate([
+            disc.widthAnchor.constraint(equalToConstant: 32),
+            disc.heightAnchor.constraint(equalToConstant: 32),
+            disc.centerXAnchor.constraint(equalTo: editCoverButton.centerXAnchor),
+            disc.centerYAnchor.constraint(equalTo: editCoverButton.centerYAnchor),
+            glyph.centerXAnchor.constraint(equalTo: disc.contentView.centerXAnchor),
+            glyph.centerYAnchor.constraint(equalTo: disc.contentView.centerYAnchor),
+            editCoverButton.widthAnchor.constraint(equalToConstant: 44),
+            editCoverButton.heightAnchor.constraint(equalToConstant: 44),
+            editCoverButton.trailingAnchor.constraint(equalTo: mosaicView.trailingAnchor, constant: -2),
+            editCoverButton.bottomAnchor.constraint(equalTo: mosaicView.bottomAnchor, constant: -2),
+        ])
+        mosaicView.accessibilityElements = [mosaicView.artworkElement, editCoverButton]
+    }
+
+    private var coverSubject: ArtworkSubject {
+        ArtworkSubject(playlistId: playlistId, name: playlistName, tracks: tracks)
+    }
+
+    private func presentCoverEditor() {
+        ArtworkEditorViewController.present(for: coverSubject, from: self) { [weak self] in
+            guard let self else { return }
+            ToastView.show(String(localized: "Artwork updated"), in: self.view, style: .success)
+        }
+    }
+
+    private func confirmAutomaticCover() {
+        ArtworkEditorViewController.confirmReset(for: coverSubject, from: self, anchor: nil) { [weak self] in
+            guard let self else { return }
+            ArtworkEditorViewController.reset(self.coverSubject) { [weak self] succeeded in
+                guard succeeded, let self else { return }
+                ToastView.show(String(localized: "Automatic cover restored"), in: self.view, style: .success)
+            }
+        }
     }
 
     /// Stacked is the phone column. The banner sets a modest cover beside the
@@ -313,7 +394,24 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
         ) { [weak self] _ in
             self?.confirmRemoval(of: duplicates)
         }
-        let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [remove]))
+        var coverActions = [UIAction(
+            title: String(localized: "Edit Cover…"),
+            image: UIImage(systemName: "photo")
+        ) { [weak self] _ in
+            self?.presentCoverEditor()
+        }]
+        if AlbumArtworkEditor.hasCustomCover(coverSubject) {
+            coverActions.append(UIAction(
+                title: String(localized: "Use Automatic Cover"),
+                image: UIImage(systemName: "arrow.uturn.backward")
+            ) { [weak self] _ in
+                self?.confirmAutomaticCover()
+            })
+        }
+        let coverMenu = UIMenu(options: .displayInline, children: coverActions)
+        let menuButton = UIBarButtonItem(
+            image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [coverMenu, remove])
+        )
         menuButton.accessibilityLabel = String(localized: "More")
         navigationItem.rightBarButtonItems = [editButtonItem, menuButton]
     }
@@ -360,53 +458,59 @@ final class PlaylistDetailViewController: UIViewController, SonglinkShareable {
         }
     }
 
-    /// Resolves up to four distinct album thumbnails through AlbumArtworkCache
+    /// Shows the picture the person chose when there is one, and otherwise
+    /// resolves up to four distinct album thumbnails through AlbumArtworkCache
     /// and applies them once every load lands, discarding results superseded
-    /// by a newer mosaic refresh.
+    /// by a newer refresh.
     private func updateMosaic() {
         mosaicGeneration += 1
         let generation = mosaicGeneration
-        let albumKeys = distinctAlbumKeys(limit: 4)
+        AlbumArtworkCache.shared.loadArtwork(
+            forAlbum: PlaylistCover.title(forPlaylist: playlistId), artist: PlaylistCover.artist
+        ) { [weak self] custom in
+            guard let self, self.mosaicGeneration == generation else { return }
+            if let custom {
+                self.applyMosaicCovers([custom], isCustom: true)
+            } else {
+                self.updateAutomaticMosaic(generation: generation)
+            }
+        }
+    }
+
+    private func updateAutomaticMosaic(generation: Int) {
+        let albumKeys = PlaylistCover.mosaicAlbums(tracks.map { (title: $0.albumTitle, artist: $0.artist) })
         guard !albumKeys.isEmpty else {
-            applyMosaicCovers([])
+            applyMosaicCovers([], isCustom: false)
             return
         }
         var coversByIndex = [Int: UIImage]()
         var remaining = albumKeys.count
         for (index, key) in albumKeys.enumerated() {
-            AlbumArtworkCache.shared.loadThumbnail(forAlbum: key.albumTitle, artist: key.artist) { [weak self] image in
+            AlbumArtworkCache.shared.loadThumbnail(forAlbum: key.title, artist: key.artist) { [weak self] image in
                 guard let self, self.mosaicGeneration == generation else { return }
                 if let image { coversByIndex[index] = image }
                 remaining -= 1
                 if remaining == 0 {
-                    self.applyMosaicCovers(albumKeys.indices.compactMap { coversByIndex[$0] })
+                    self.applyMosaicCovers(albumKeys.indices.compactMap { coversByIndex[$0] }, isCustom: false)
                 }
             }
         }
     }
 
-    private func applyMosaicCovers(_ covers: [UIImage]) {
+    private func applyMosaicCovers(_ covers: [UIImage], isCustom: Bool) {
         let apply = { self.mosaicView.setCovers(covers) }
         if hasLoadedOnce, !UIAccessibility.isReduceMotionEnabled {
             UIView.transition(with: mosaicView, duration: 0.3, options: [.transitionCrossDissolve, .beginFromCurrentState], animations: apply)
         } else {
             apply()
         }
-        mosaicView.accessibilityLabel = covers.isEmpty
-            ? String(localized: "Playlist artwork placeholder")
-            : String(localized: "Playlist artwork, \(covers.count) album covers")
-    }
-
-    private func distinctAlbumKeys(limit: Int) -> [(albumTitle: String, artist: String)] {
-        var seenAlbumKeys = Set<String>()
-        var albumKeys: [(albumTitle: String, artist: String)] = []
-        for track in tracks {
-            guard albumKeys.count < limit else { break }
-            let key = "\(track.albumTitle)\0\(track.artist)"
-            guard seenAlbumKeys.insert(key).inserted else { continue }
-            albumKeys.append((track.albumTitle, track.artist))
+        if isCustom {
+            mosaicView.artworkLabel = String(localized: "Playlist artwork")
+        } else {
+            mosaicView.artworkLabel = covers.isEmpty
+                ? String(localized: "Playlist artwork placeholder")
+                : String(localized: "Playlist artwork, \(covers.count) album covers")
         }
-        return albumKeys
     }
 
     private func playTapped() {
@@ -616,22 +720,41 @@ extension PlaylistDetailViewController: UITableViewDelegate {
 /// A stacked-artwork mosaic that lays out up to four distinct covers:
 /// a 2x2 grid for four, a large-plus-column split for three, side-by-side
 /// halves for two, a single full-bleed cover for one, and a music.note
-/// placeholder tile when the playlist has no artwork at all.
-private final class StackedArtworkMosaicView: UIView {
+/// placeholder tile when the playlist has no artwork at all. It serves the
+/// detail page's cover and, smaller and without a shadow, the playlists
+/// list's thumbnails.
+final class StackedArtworkMosaicView: UIView {
 
     private let contentContainer = UIView()
+    private let cornerRadius: CGFloat
+    private let showsShadow: Bool
+    private let placeholderPointSize: CGFloat
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.25
-        layer.shadowOffset = CGSize(width: 0, height: 10)
-        layer.shadowRadius = 24
+    var artworkLabel: String? {
+        get { contentContainer.accessibilityLabel }
+        set { contentContainer.accessibilityLabel = newValue }
+    }
 
-        contentContainer.layer.cornerRadius = 20
+    var artworkElement: UIView { contentContainer }
+
+    init(cornerRadius: CGFloat = 20, showsShadow: Bool = true, placeholderPointSize: CGFloat = 56) {
+        self.cornerRadius = cornerRadius
+        self.showsShadow = showsShadow
+        self.placeholderPointSize = placeholderPointSize
+        super.init(frame: .zero)
+        if showsShadow {
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOpacity = 0.25
+            layer.shadowOffset = CGSize(width: 0, height: 10)
+            layer.shadowRadius = 24
+        }
+
+        contentContainer.layer.cornerRadius = cornerRadius
         contentContainer.layer.cornerCurve = .continuous
         contentContainer.clipsToBounds = true
         contentContainer.backgroundColor = .secondarySystemBackground
+        contentContainer.isAccessibilityElement = true
+        contentContainer.accessibilityTraits = .image
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentContainer)
 
@@ -649,7 +772,9 @@ private final class StackedArtworkMosaicView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 20).cgPath
+        if showsShadow {
+            layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: cornerRadius).cgPath
+        }
     }
 
     func setCovers(_ covers: [UIImage]) {
@@ -711,7 +836,7 @@ private final class StackedArtworkMosaicView: UIView {
         tile.backgroundColor = .tertiarySystemFill
         let symbol = UIImageView(image: UIImage(systemName: "music.note"))
         symbol.tintColor = .secondaryLabel
-        symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 56, weight: .thin)
+        symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: placeholderPointSize, weight: .thin)
         symbol.contentMode = .scaleAspectFit
         symbol.translatesAutoresizingMaskIntoConstraints = false
         tile.addSubview(symbol)

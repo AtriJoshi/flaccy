@@ -16,13 +16,29 @@ enum MacArtworkEditor {
     static func present(
         for album: Album, initial: ArtworkInput? = nil, from window: NSWindow?
     ) -> ArtworkEditorViewController? {
+        present(for: ArtworkSubject(album: album), initial: initial, from: window)
+    }
+
+    @discardableResult
+    static func present(
+        forPlaylist playlist: PlaylistRecord, tracks: [Track], initial: ArtworkInput? = nil, from window: NSWindow?
+    ) -> ArtworkEditorViewController? {
+        guard let id = playlist.id else { return nil }
+        let subject = ArtworkSubject(playlistId: id, name: playlist.name, tracks: tracks)
+        return present(for: subject, initial: initial, from: window)
+    }
+
+    @discardableResult
+    static func present(
+        for subject: ArtworkSubject, initial: ArtworkInput? = nil, from window: NSWindow?
+    ) -> ArtworkEditorViewController? {
         guard let parent = window ?? NSApp.keyWindow ?? NSApp.mainWindow,
               parent.attachedSheet == nil, activeWindow == nil
         else {
             NSSound.beep()
             return nil
         }
-        let controller = ArtworkEditorViewController(album: album, initial: initial)
+        let controller = ArtworkEditorViewController(subject: subject, initial: initial)
         let sheet = NSWindow(contentViewController: controller)
         sheet.styleMask = [.titled, .resizable]
         sheet.appearance = NSAppearance(named: .darkAqua)
@@ -42,17 +58,67 @@ enum MacArtworkEditor {
             MainActor.assumeIsolated {
                 activeWindow = nil
                 guard let parent else { return }
-                announce(outcome, in: parent)
+                announce(outcome, for: subject, in: parent)
             }
         }
         return controller
     }
 
-    private static func announce(_ outcome: ArtworkEditorViewController.Outcome, in window: NSWindow) {
+    private static func announce(
+        _ outcome: ArtworkEditorViewController.Outcome, for subject: ArtworkSubject, in window: NSWindow
+    ) {
         switch outcome {
-        case .saved: MacToast.show(String(localized: "Artwork updated"), style: .success, in: window)
-        case .restored: MacToast.show(String(localized: "Original artwork restored"), style: .success, in: window)
-        case .cancelled: break
+        case .saved:
+            MacToast.show(String(localized: "Artwork updated"), style: .success, in: window)
+        case .restored:
+            let message = subject.isPlaylist
+                ? String(localized: "Automatic cover restored")
+                : String(localized: "Original artwork restored")
+            MacToast.show(message, style: .success, in: window)
+        case .cancelled:
+            break
+        }
+    }
+
+    /// The two cover items every playlist menu carries: Edit Cover…, and Use
+    /// Automatic Cover while the person's own picture is in place.
+    static func coverMenuItems(for playlist: PlaylistRecord, tracks: [Track], window: NSWindow?) -> [NSMenuItem] {
+        guard let id = playlist.id else { return [] }
+        var items: [NSMenuItem] = [
+            ClosureMenuItem(title: String(localized: "Edit Cover…"), systemImage: "photo") { [weak window] in
+                present(forPlaylist: playlist, tracks: tracks, from: window)
+            },
+        ]
+        if DatabaseManager.shared.hasPlaylistCover(id: id) {
+            items.append(ClosureMenuItem(title: String(localized: "Use Automatic Cover"), systemImage: "arrow.uturn.backward") { [weak window] in
+                confirmUseAutomaticCover(for: playlist, in: window)
+            })
+        }
+        return items
+    }
+
+    /// Asks before a playlist gives up its chosen picture for the automatic
+    /// album mosaic, then does it and says so, so the list, the page and the
+    /// editor all end the same way.
+    static func confirmUseAutomaticCover(for playlist: PlaylistRecord, in window: NSWindow?) {
+        guard let id = playlist.id, let window else { return }
+        let subject = ArtworkSubject(playlistId: id, name: playlist.name, tracks: [])
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Use the automatic cover?")
+        alert.informativeText = String(localized: "Your chosen picture will be removed and the playlist goes back to a mosaic of its albums.")
+        alert.addButton(withTitle: String(localized: "Use Automatic Cover")).hasDestructiveAction = true
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.beginSheetModal(for: window) { [weak window] response in
+            guard response == .alertFirstButtonReturn else { return }
+            Task { @MainActor in
+                do {
+                    try await Task.detached { try AlbumArtworkEditor.reset(subject) }.value
+                    MacToast.show(String(localized: "Automatic cover restored"), style: .success, in: window)
+                } catch {
+                    AppLogger.error("Resetting playlist cover failed: \(error.localizedDescription)", category: .database)
+                    MacToast.show(String(localized: "Couldn't restore the automatic cover. Try again."), style: .error, in: window)
+                }
+            }
         }
     }
 

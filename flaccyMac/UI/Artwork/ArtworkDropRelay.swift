@@ -87,6 +87,18 @@ final class ArtworkEditOverlayView: NSView {
     var onDrop: ((ArtworkInput) -> Void)?
     var onMenu: (() -> NSMenu?)?
 
+    var ringCornerRadius: CGFloat = 14 {
+        didSet { dropRing.layer?.cornerRadius = ringCornerRadius }
+    }
+
+    var editLabel = String(localized: "Edit Artwork") {
+        didSet {
+            pencil.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: editLabel)
+            pencil.toolTip = editLabel
+            pencil.setAccessibilityLabel(editLabel)
+        }
+    }
+
     private let pencil = FocusReportingButton()
     private let dropRing = NSView()
     private lazy var relay = ArtworkDropRelay(view: self)
@@ -107,7 +119,7 @@ final class ArtworkEditOverlayView: NSView {
         dropRing.translatesAutoresizingMaskIntoConstraints = false
         addSubview(dropRing)
 
-        let label = String(localized: "Edit Artwork")
+        let label = editLabel
         pencil.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: label)
         pencil.symbolConfiguration = .init(pointSize: 13, weight: .semibold)
         pencil.imagePosition = .imageOnly

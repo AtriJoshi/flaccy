@@ -13,6 +13,7 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
         identifiers: ["library.tab.albums", "library.tab.songs", "library.tab.artists", "library.tab.playlists"]
     )
     private var cancellables = Set<AnyCancellable>()
+    private let playlistAlbumIndex = PlaylistAlbumIndex()
     private let impactLight = UIImpactFeedbackGenerator(style: .light)
     private let sectionIndexView = SectionIndexView()
     private let filterChipsView = FilterChipsView()
@@ -163,6 +164,13 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
 
         return container
     }()
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard viewModel.currentSegment == .playlists else { return }
+        playlistAlbumIndex.invalidate()
+        reconfigureVisibleArtwork()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1248,17 +1256,22 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
             cell.accessories = [.disclosureIndicator()]
         }
 
-        let playlistRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, PlaylistItem> { cell, _, playlist in
+        let playlistRegistration = UICollectionView.CellRegistration<PlaylistListCell, PlaylistItem> { [weak self] cell, _, playlist in
             var content = UIListContentConfiguration.subtitleCell()
             content.text = playlist.name
             content.secondaryText = String(localized: "\(playlist.trackCount) tracks")
             content.secondaryTextProperties.color = .secondaryLabel
-            content.image = UIImage(systemName: "music.note.list")
-            content.imageProperties.tintColor = .tintColor
-            content.imageProperties.maximumSize = CGSize(width: 44, height: 44)
-            content.imageProperties.reservedLayoutSize = CGSize(width: 44, height: 44)
             cell.contentConfiguration = content
-            cell.accessories = [.disclosureIndicator()]
+            let thumbnail = UICellAccessory.CustomViewConfiguration(
+                customView: cell.thumbnail,
+                placement: .leading(),
+                reservedLayoutWidth: .custom(PlaylistThumbnailView.side.width),
+                maintainsFixedSize: true
+            )
+            cell.accessories = [.customView(configuration: thumbnail), .disclosureIndicator()]
+            if let index = self?.playlistAlbumIndex {
+                cell.thumbnail.load(playlistId: playlist.id, index: index)
+            }
         }
 
         let suggestedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, SuggestedPlaylist> { cell, _, suggestion in
@@ -1606,7 +1619,14 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
                         completion(false)
                     }
                 }
-                return UISwipeActionsConfiguration(actions: [deleteAction])
+                let coverAction = UIContextualAction(style: .normal, title: String(localized: "Cover")) { _, _, completion in
+                    self.impactLight.impactOccurred()
+                    self.presentCoverEditor(for: playlist)
+                    completion(true)
+                }
+                coverAction.image = UIImage(systemName: "photo")
+                coverAction.backgroundColor = .systemIndigo
+                return UISwipeActionsConfiguration(actions: [deleteAction, coverAction])
             }
             return UICollectionViewCompositionalLayout { _, environment in
                 let section = NSCollectionLayoutSection.list(using: config, layoutEnvironment: environment)
@@ -1614,6 +1634,49 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
                 return section
             }
         }
+    }
+
+    /// Opens the cover editor for a playlist once its tracks are resolved, so
+    /// the sheet can offer the albums it draws from.
+    private func presentCoverEditor(for playlist: PlaylistItem) {
+        Task { [weak self] in
+            guard let self else { return }
+            let tracks = await self.playlistAlbumIndex.tracks(forPlaylist: playlist.id)
+            let subject = ArtworkSubject(playlistId: playlist.id, name: playlist.name, tracks: tracks)
+            ArtworkEditorViewController.present(for: subject, from: self) { [weak self] in
+                guard let self else { return }
+                ToastView.show(String(localized: "Artwork updated"), in: self.view, style: .success)
+            }
+        }
+    }
+
+    private func confirmAutomaticCover(for playlist: PlaylistItem) {
+        let subject = ArtworkSubject(playlistId: playlist.id, name: playlist.name, tracks: [])
+        ArtworkEditorViewController.confirmReset(for: subject, from: self, anchor: nil) { [weak self] in
+            ArtworkEditorViewController.reset(subject) { [weak self] succeeded in
+                guard succeeded, let self else { return }
+                ToastView.show(String(localized: "Automatic cover restored"), in: self.view, style: .success)
+            }
+        }
+    }
+
+    private func buildPlaylistContextMenu(for playlist: PlaylistItem) -> UIMenu {
+        var actions = [UIAction(
+            title: String(localized: "Edit Cover…"),
+            image: UIImage(systemName: "photo")
+        ) { [weak self] _ in
+            self?.presentCoverEditor(for: playlist)
+        }]
+        let subject = ArtworkSubject(playlistId: playlist.id, name: playlist.name, tracks: [])
+        if AlbumArtworkEditor.hasCustomCover(subject) {
+            actions.append(UIAction(
+                title: String(localized: "Use Automatic Cover"),
+                image: UIImage(systemName: "arrow.uturn.backward")
+            ) { [weak self] _ in
+                self?.confirmAutomaticCover(for: playlist)
+            })
+        }
+        return UIMenu(children: actions)
     }
 
     private func presentSettings() {
@@ -1804,6 +1867,10 @@ extension LibraryViewController: UICollectionViewDelegate {
             return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
                 self?.buildSuggestedPlaylistMenu(for: suggestion)
             }
+        case .playlist(let playlist):
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                self?.buildPlaylistContextMenu(for: playlist)
+            }
         default:
             return nil
         }
@@ -1869,5 +1936,127 @@ final class ListArtworkCell: UICollectionViewListCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         currentArtworkKey = nil
+    }
+}
+
+/// Maps library files to their tracks so a playlist's cover and editor can
+/// name the albums it draws from without a database read per file. The map is
+/// rebuilt when the library's size changes or on `invalidate()`.
+final class PlaylistAlbumIndex {
+
+    private var tracksByURL: [URL: Track] = [:]
+    private var indexedCount = -1
+
+    func invalidate() {
+        indexedCount = -1
+    }
+
+    private func refreshIfNeeded() {
+        let all = Library.shared.allTracks
+        guard all.count != indexedCount else { return }
+        tracksByURL = Dictionary(all.map { ($0.fileURL, $0) }, uniquingKeysWith: { first, _ in first })
+        indexedCount = all.count
+    }
+
+    func tracks(forPlaylist id: Int64) async -> [Track] {
+        refreshIfNeeded()
+        let lookup = tracksByURL
+        let root = LibraryPaths.root
+        return await Task.detached(priority: .userInitiated) {
+            let records = (try? DatabaseManager.shared.fetchPlaylistTracks(playlistId: id)) ?? []
+            return records.compactMap { lookup[root.appendingPathComponent($0.trackFileURL)] }
+        }.value
+    }
+
+    func albumKeys(forPlaylist id: Int64) async -> [(title: String, artist: String)] {
+        let tracks = await tracks(forPlaylist: id)
+        return PlaylistCover.mosaicAlbums(tracks.map { (title: $0.albumTitle, artist: $0.artist) })
+    }
+}
+
+/// A playlist row's leading thumbnail: the picture the person chose, else a
+/// small mosaic of the playlist's first albums laid out like the detail page's
+/// cover, else a placeholder. Loads are generation-checked, so a cell that was
+/// reused while one was in flight never receives it.
+final class PlaylistThumbnailView: UIView {
+
+    static let side = CGSize(width: 52, height: 52)
+
+    private let mosaic = StackedArtworkMosaicView(cornerRadius: 8, showsShadow: false, placeholderPointSize: 22)
+    private var generation = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: CGRect(origin: .zero, size: Self.side))
+        isAccessibilityElement = false
+        mosaic.isAccessibilityElement = false
+        mosaic.artworkElement.isAccessibilityElement = false
+        mosaic.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(mosaic)
+        NSLayoutConstraint.activate([
+            mosaic.topAnchor.constraint(equalTo: topAnchor),
+            mosaic.leadingAnchor.constraint(equalTo: leadingAnchor),
+            mosaic.trailingAnchor.constraint(equalTo: trailingAnchor),
+            mosaic.bottomAnchor.constraint(equalTo: bottomAnchor),
+            widthAnchor.constraint(equalToConstant: Self.side.width),
+            heightAnchor.constraint(equalToConstant: Self.side.height),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var intrinsicContentSize: CGSize { Self.side }
+
+    func reset() {
+        generation += 1
+        mosaic.setCovers([])
+    }
+
+    func load(playlistId: Int64, index: PlaylistAlbumIndex) {
+        generation += 1
+        let current = generation
+        AlbumArtworkCache.shared.loadThumbnail(
+            forAlbum: PlaylistCover.title(forPlaylist: playlistId), artist: PlaylistCover.artist
+        ) { [weak self] custom in
+            guard let self, self.generation == current else { return }
+            if let custom {
+                self.mosaic.setCovers([custom])
+                return
+            }
+            Task { [weak self] in
+                let keys = await index.albumKeys(forPlaylist: playlistId)
+                self?.loadAlbumThumbnails(keys, generation: current)
+            }
+        }
+    }
+
+    private func loadAlbumThumbnails(_ keys: [(title: String, artist: String)], generation current: Int) {
+        guard generation == current else { return }
+        guard !keys.isEmpty else {
+            mosaic.setCovers([])
+            return
+        }
+        var coversByIndex = [Int: UIImage]()
+        var remaining = keys.count
+        for (position, key) in keys.enumerated() {
+            AlbumArtworkCache.shared.loadThumbnail(forAlbum: key.title, artist: key.artist) { [weak self] image in
+                guard let self, self.generation == current else { return }
+                if let image { coversByIndex[position] = image }
+                remaining -= 1
+                if remaining == 0 {
+                    self.mosaic.setCovers(keys.indices.compactMap { coversByIndex[$0] })
+                }
+            }
+        }
+    }
+}
+
+final class PlaylistListCell: UICollectionViewListCell {
+
+    let thumbnail = PlaylistThumbnailView()
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        thumbnail.reset()
     }
 }

@@ -546,6 +546,12 @@ nonisolated final class DatabaseManager: Sendable {
             }
         }
 
+        migrator.registerMigration("v13") { db in
+            try db.alter(table: "playlists") { t in
+                t.add(column: "customCoverData", .blob)
+            }
+        }
+
         return migrator
     }
 
@@ -1604,7 +1610,10 @@ nonisolated final class DatabaseManager: Sendable {
     /// remaster into a deluxe card), falls back to the largest art among any
     /// album that shares the consolidation key.
     func fetchAlbumArtwork(title: String, artist: String) throws -> Data? {
-        try dbQueue.read { db in
+        if let playlistId = PlaylistCover.playlistId(title: title, artist: artist) {
+            return try playlistCover(id: playlistId)
+        }
+        return try dbQueue.read { db in
             if let chosen = try Self.customCover(db: db, title: title, artist: artist) {
                 return chosen
             }
@@ -1743,6 +1752,40 @@ nonisolated final class DatabaseManager: Sendable {
         try dbQueue.write { db in
             try PlaylistRecord(name: name, createdAt: Date())
                 .insertAndFetch(db, as: PlaylistRecord.self)
+        }
+    }
+
+    /// The picture a person chose for this playlist, or nil while it shows the
+    /// automatic mosaic of its albums.
+    func playlistCover(id: Int64) throws -> Data? {
+        try dbQueue.read { db in
+            try Row.fetchOne(
+                db,
+                sql: "SELECT customCoverData FROM playlists WHERE id = ? AND customCoverData IS NOT NULL",
+                arguments: [id]
+            )?["customCoverData"]
+        }
+    }
+
+    func savePlaylistCover(_ data: Data, id: Int64) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE playlists SET customCoverData = ? WHERE id = ?", arguments: [data, id])
+        }
+    }
+
+    func clearPlaylistCover(id: Int64) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE playlists SET customCoverData = NULL WHERE id = ?", arguments: [id])
+        }
+    }
+
+    func hasPlaylistCover(id: Int64) -> Bool {
+        (try? playlistCover(id: id)) != nil
+    }
+
+    func playlistIdsWithCovers() throws -> Set<Int64> {
+        try dbQueue.read { db in
+            Set(try Int64.fetchAll(db, sql: "SELECT id FROM playlists WHERE customCoverData IS NOT NULL"))
         }
     }
 

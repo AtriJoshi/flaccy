@@ -35,6 +35,13 @@ nonisolated enum AlbumArtworkEditor {
         DatabaseManager.shared.hasCustomCover(forKeys: keys(for: album))
     }
 
+    static func hasCustomCover(_ subject: ArtworkSubject) -> Bool {
+        switch subject.kind {
+        case .album: hasCustomCover(subject.album)
+        case .playlist(let id): DatabaseManager.shared.hasPlaylistCover(id: id)
+        }
+    }
+
     static func encode(_ image: PlatformImage) -> Data? {
         image.jpegData(compressionQuality: jpegQuality)
     }
@@ -89,6 +96,28 @@ nonisolated enum AlbumArtworkEditor {
         return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 
+    static func save(_ data: Data, for subject: ArtworkSubject) throws {
+        switch subject.kind {
+        case .album:
+            try save(data, for: subject.album)
+        case .playlist(let id):
+            try DatabaseManager.shared.savePlaylistCover(data, id: id)
+            AlbumArtworkCache.shared.invalidate(keys: [(subject.cacheTitle, subject.cacheArtist)])
+            AppLogger.info("Custom cover saved for playlist \(subject.title) (\(data.count / 1024) KB)", category: .content)
+        }
+    }
+
+    static func reset(_ subject: ArtworkSubject) throws {
+        switch subject.kind {
+        case .album:
+            try reset(subject.album)
+        case .playlist(let id):
+            try DatabaseManager.shared.clearPlaylistCover(id: id)
+            AlbumArtworkCache.shared.invalidate(keys: [(subject.cacheTitle, subject.cacheArtist)])
+            AppLogger.info("Custom cover cleared for playlist \(subject.title)", category: .content)
+        }
+    }
+
     static func save(_ data: Data, for album: Album) throws {
         let keys = keys(for: album)
         try DatabaseManager.shared.saveCustomCover(data, forKeys: keys)
@@ -108,6 +137,63 @@ nonisolated enum AlbumArtworkEditor {
             ArtworkPaletteExtractor.invalidate(title: key.title, artist: key.artist)
         }
         AlbumArtworkCache.shared.invalidate(keys: keys)
+    }
+}
+
+/// What the artwork editor is choosing a cover for: a release, or a playlist.
+/// A playlist is addressed in the artwork cache by the reserved key
+/// `PlaylistCover` defines, and carries a stand-in `Album` holding its tracks so
+/// the folder and tag finders can read their files like a release's.
+nonisolated struct ArtworkSubject: Sendable {
+
+    enum Kind: Sendable {
+        case album
+        case playlist(id: Int64)
+    }
+
+    let kind: Kind
+    let title: String
+    let credit: String
+    let album: Album
+
+    init(album: Album) {
+        kind = .album
+        title = album.title
+        credit = album.artist
+        self.album = album
+    }
+
+    init(playlistId: Int64, name: String, tracks: [Track]) {
+        kind = .playlist(id: playlistId)
+        title = name
+        credit = ""
+        album = Album(title: name, artist: "", artwork: nil, tracks: tracks, year: nil, genre: nil)
+    }
+
+    var isPlaylist: Bool {
+        if case .playlist = kind { return true }
+        return false
+    }
+
+    var tracks: [Track] { album.tracks }
+
+    var cacheTitle: String {
+        if case .playlist(let id) = kind { return PlaylistCover.title(forPlaylist: id) }
+        return title
+    }
+
+    var cacheArtist: String { isPlaylist ? PlaylistCover.artist : credit }
+
+    /// The line under the sheet's title: the artist for a release, the track
+    /// count for a playlist.
+    var subtitle: String {
+        isPlaylist ? String(localized: "Playlist · \(tracks.count) tracks") : "\(title) · \(credit)"
+    }
+
+    /// What the online search starts with. A playlist's name matches no
+    /// catalog entry, so its search starts empty and waits for the person.
+    var defaultQuery: String {
+        isPlaylist ? "" : OnlineArtworkSearch.defaultQuery(title: title, artist: credit)
     }
 }
 

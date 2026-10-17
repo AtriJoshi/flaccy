@@ -7,13 +7,18 @@ import UniformTypeIdentifiers
 /// Headless verification for the artwork editor. `--exercise-artwork` drives
 /// the real save and reset path against the seeded library and logs
 /// `ArtworkExercise PASS/FAIL` per expectation; `--shot-artwork-editor
-/// [loaded|soft|online|zoomed|saved]` opens the real sheet over the seeded album
-/// and captures it. Compiled out of Release entirely.
+/// [loaded|soft|online|zoomed|saved|playlist|playlist-empty]` opens the real
+/// sheet over the seeded album (or a seeded playlist) and captures it.
+/// `--exercise-playlist-cover` does the same for a playlist's chosen cover.
+/// Compiled out of Release entirely.
 enum DebugArtworkDrive {
 
     static func runIfRequested(window: NSWindow?) {
         if CommandLine.arguments.contains("--exercise-artwork") {
             Task { await exercise(window: window) }
+        }
+        if CommandLine.arguments.contains("--exercise-playlist-cover") {
+            Task { await exercisePlaylistCover(window: window) }
         }
         if let index = CommandLine.arguments.firstIndex(of: "--shot-artwork-editor") {
             let variant = index + 1 < CommandLine.arguments.count && !CommandLine.arguments[index + 1].hasPrefix("--")
@@ -58,6 +63,132 @@ enum DebugArtworkDrive {
         let line = "ArtworkExercise \(verdict): \(results.filter { $0 }.count) of \(results.count)"
         AppLogger.info(line, category: .general)
         FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    private static func exercisePlaylistCover(window: NSWindow?) async {
+        try? FileManager.default.removeItem(atPath: NSTemporaryDirectory() + "artwork-exercise.txt")
+        results = []
+        let parent = window ?? NSApp.windows.first(where: { $0.contentViewController is RootContainerViewController })
+        guard await waitForLibrary() != nil, let parent else {
+            report("a seeded library and a window are available", false)
+            return
+        }
+        let tracks = Library.shared.albums.prefix(3).compactMap { $0.tracks.first }
+        report("the library offers tracks from three albums", tracks.count == 3)
+        let database = DatabaseManager.shared
+        let name = "Cover Exercise \(UUID().uuidString.prefix(6))"
+        guard let playlist = try? database.createPlaylist(name: name), let id = playlist.id else {
+            report("a playlist could be created", false)
+            return
+        }
+        defer { try? database.deletePlaylist(id: id) }
+        PlaylistActions.add(tracks, toPlaylist: id, named: name, in: nil)
+        let reservedTitle = PlaylistCover.title(forPlaylist: id)
+        let subject = ArtworkSubject(playlistId: id, name: name, tracks: tracks)
+
+        let mosaic = MosaicArtworkView(frame: NSRect(x: 0, y: 0, width: 130, height: 130))
+        mosaic.configure(playlistId: id, tracks: tracks, fallbackSeed: name)
+        try? await Task.sleep(for: .milliseconds(600))
+        report("a new playlist has no custom cover", !AlbumArtworkEditor.hasCustomCover(subject)
+               && (try? database.fetchAlbumArtwork(title: reservedTitle, artist: PlaylistCover.artist)) == nil)
+        report("the mosaic view starts on the album mosaic", !mosaic.showsCustomCover)
+
+        guard let editor = MacArtworkEditor.present(forPlaylist: playlist, tracks: tracks, from: parent) else {
+            report("the playlist editor opened", false)
+            return
+        }
+        await waitUntil { editor.debugLocalTileCount >= 3 }
+        report("the From This Playlist shelf offers each album's cover", editor.debugLocalTileCount == 3)
+        report("a playlist with no cover starts with an empty preview", editor.debugCropImageSize == .zero)
+        report("the online search waits for the person", editor.debugOnlineTileCount == 0)
+
+        let source = quadrantImage(width: 1200, height: 900)
+        editor.debugAdopt(source, source: "exercise")
+        report("an adopted picture enables Save", editor.debugSaveEnabled)
+        var notifications = 0
+        let token = NotificationCenter.default.addObserver(forName: AlbumArtworkCache.didChangeNotification, object: nil, queue: .main) { _ in
+            notifications += 1
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        editor.debugSave()
+        await waitUntil { AlbumArtworkEditor.hasCustomCover(subject) }
+        let saved = try? database.fetchAlbumArtwork(title: reservedTitle, artist: PlaylistCover.artist)
+        report("Save stores the cover under the reserved key", saved != nil && saved.flatMap(decode).map { isColor($0, $0.width / 4, $0.height / 4, red: true) } == true)
+        report("the editor now reports a custom cover", AlbumArtworkEditor.hasCustomCover(subject))
+        await waitUntil { notifications > 0 && mosaic.showsCustomCover }
+        report("saving fires the change notification once", notifications == 1)
+        report("the mosaic view reports the custom state", mosaic.showsCustomCover)
+        await waitUntil { parent.attachedSheet == nil }
+
+        let sameText = Album(title: reservedTitle, artist: "Anyone", artwork: nil, tracks: [], year: nil, genre: nil)
+        report("an album titled with the same text is unaffected",
+               (try? database.fetchAlbumArtwork(title: sameText.title, artist: sameText.artist)) == nil
+               && !AlbumArtworkEditor.hasCustomCover(sameText))
+        let firstAlbum = Library.shared.albums[0]
+        report("a real album still serves its own artwork",
+               (try? database.fetchAlbumArtwork(title: firstAlbum.title, artist: firstAlbum.artist)) != saved)
+
+        if let reopened = MacArtworkEditor.present(forPlaylist: playlist, tracks: tracks, from: parent) {
+            await waitUntil { reopened.debugCropImageSize != .zero }
+            report("reopening shows the chosen cover as the current artwork", reopened.debugCropImageSize != .zero)
+            report("the online search still waits", reopened.debugOnlineTileCount == 0)
+            reopened.requestCancel()
+            await waitUntil { parent.attachedSheet == nil }
+        } else {
+            report("the editor reopened", false)
+        }
+
+        try? database.savePlaylistCover(saved ?? Data(), id: id)
+        AlbumArtworkCache.shared.invalidate(keys: [(reservedTitle, PlaylistCover.artist)])
+        await waitUntil { mosaic.showsCustomCover }
+        await Library.shared.reloadFromDatabase()
+        await Library.shared.reload()
+        let model = LibraryViewModel()
+        model.search(query: "")
+        try? await Task.sleep(for: .milliseconds(500))
+        report("a library reload leaves the playlist cover alone",
+               (try? database.playlistCover(id: id)) == saved && AlbumArtworkEditor.hasCustomCover(subject))
+
+        do {
+            try AlbumArtworkEditor.reset(subject)
+        } catch {
+            report("resetting the cover: \(error)", false)
+        }
+        report("reset returns no cover", (try? database.fetchAlbumArtwork(title: reservedTitle, artist: PlaylistCover.artist)) == nil
+               && !AlbumArtworkEditor.hasCustomCover(subject))
+        await waitUntil { !mosaic.showsCustomCover }
+        report("the mosaic view goes back to the album mosaic", !mosaic.showsCustomCover)
+
+        try? database.savePlaylistCover(saved ?? Data(), id: id)
+        PlaylistsViewController.rename(playlistId: id, from: name, to: name + " Renamed", in: nil)
+        let renamed = (try? database.fetchAllPlaylists())?.first { $0.name == name + " Renamed" }
+        report("renaming the playlist keeps its cover",
+               renamed?.id.flatMap { try? database.playlistCover(id: $0) } == saved)
+        report("the old playlist row is gone with no cover left behind", (try? database.playlistCover(id: id)) == nil)
+        if let renamedId = renamed?.id {
+            try? database.deletePlaylist(id: renamedId)
+            report("deleting the playlist leaves no cover", (try? database.playlistCover(id: renamedId)) == nil
+                   && !((try? database.playlistIdsWithCovers()) ?? [renamedId]).contains(renamedId))
+        } else {
+            report("the renamed playlist exists", false)
+        }
+
+        let verdict = results.allSatisfy { $0 } ? "PASSED" : "FAILED"
+        let line = "ArtworkExercise \(verdict): \(results.filter { $0 }.count) of \(results.count)"
+        AppLogger.info(line, category: .general)
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    /// Gives the named playlist a picture the way the editor would, for a
+    /// capture of the playlist page with a custom cover.
+    static func seedCustomCover(forPlaylistNamed name: String) {
+        guard let record = (try? DatabaseManager.shared.fetchAllPlaylists())?.first(where: { $0.name == name }),
+              let id = record.id,
+              let framing = ArtworkFraming(imageWidth: 900, imageHeight: 900, frameSide: 400),
+              let data = AlbumArtworkEditor.render(gradientImage(side: 900, hue: 0.85), framing: framing)
+        else { return }
+        try? DatabaseManager.shared.savePlaylistCover(data, id: id)
+        AlbumArtworkCache.shared.invalidate(keys: [(PlaylistCover.title(forPlaylist: id), PlaylistCover.artist)])
     }
 
     private static func exerciseSearchFixtures() {
@@ -305,7 +436,12 @@ enum DebugArtworkDrive {
             LibraryNavigator.revealAlbum(title: hero.title, artist: hero.artist)
             try? await Task.sleep(for: .seconds(3))
         }
-        guard let editor = MacArtworkEditor.present(for: album, from: window ?? NSApp.windows.first(where: { $0.contentViewController is RootContainerViewController })) else {
+        let parent = window ?? NSApp.windows.first(where: { $0.contentViewController is RootContainerViewController })
+        if variant.hasPrefix("playlist") {
+            await shootPlaylist(variant: variant, hero: hero, parent: parent)
+            return
+        }
+        guard let editor = MacArtworkEditor.present(for: album, from: parent) else {
             AppLogger.error("ArtworkShot: the editor did not open", category: .general)
             return
         }
@@ -327,6 +463,24 @@ enum DebugArtworkDrive {
             DebugDrive.capture(window: window, name: "flaccy-shot-artwork-saved-after")
             try? AlbumArtworkEditor.reset(hero)
         }
+    }
+
+    private static func shootPlaylist(variant: String, hero: Album, parent: NSWindow?) async {
+        let name = "Shot Playlist"
+        let tracks = Library.shared.albums.prefix(4).compactMap { $0.tracks.first }
+        guard let playlist = try? DatabaseManager.shared.createPlaylist(name: name), let id = playlist.id else { return }
+        PlaylistActions.add(tracks, toPlaylist: id, named: name, in: nil)
+        if variant == "playlist" { seedCustomCover(forPlaylistNamed: name) }
+        guard let editor = MacArtworkEditor.present(forPlaylist: playlist, tracks: tracks, from: parent) else {
+            AppLogger.error("ArtworkShot: the playlist editor did not open", category: .general)
+            return
+        }
+        try? await Task.sleep(for: .seconds(3))
+        AppLogger.info("ArtworkShot \(variant): local tiles \(editor.debugLocalTileCount), online tiles \(editor.debugOnlineTileCount), save enabled \(editor.debugSaveEnabled)", category: .general)
+        DebugDrive.captureSheet(of: parent, name: "flaccy-shot-artwork-\(variant)")
+        editor.requestCancel()
+        try? await Task.sleep(for: .seconds(1))
+        try? DatabaseManager.shared.deletePlaylist(id: id)
     }
 
     private static func syntheticTrack(url: URL, number: Int) -> Track {

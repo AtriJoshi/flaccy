@@ -2,7 +2,7 @@ import AppKit
 import FlaccyCore
 import UniformTypeIdentifiers
 
-/// The sheet where a person chooses a cover for an album: frame the current
+/// The sheet where a person chooses a cover for an album or a playlist: frame the current
 /// one, bring their own from a file, the clipboard or a drop, pick a picture
 /// that already lies beside the music or sits inside its files, or find a
 /// higher-resolution match online. Nothing is written until Save.
@@ -16,7 +16,7 @@ final class ArtworkEditorViewController: NSViewController {
 
     var onFinish: ((Outcome) -> Void)?
 
-    private let album: Album
+    private let subject: ArtworkSubject
     private let initialInput: ArtworkInput?
     private let localRoot: URL
     private let hasCustomCover: Bool
@@ -35,10 +35,15 @@ final class ArtworkEditorViewController: NSViewController {
     private let pasteButton = GlassCapsuleButton(title: String(localized: "Paste"), symbolName: "doc.on.clipboard")
     private let searchField = NSSearchField()
     private let searchButton = GlassCapsuleButton(title: String(localized: "Search"), symbolName: "magnifyingglass")
-    private let localShelf = ArtworkShelfView(title: String(localized: "In Your Files"))
+    private lazy var localShelf = ArtworkShelfView(
+        title: subject.isPlaylist ? String(localized: "From This Playlist") : String(localized: "In Your Files")
+    )
     private let searchRow = NSStackView()
     private lazy var onlineShelf = ArtworkShelfView(title: String(localized: "Find Online"), controls: searchRow)
-    private let resetButton = NSButton(title: String(localized: "Use Original Artwork"), target: nil, action: nil)
+    private lazy var resetButton = NSButton(
+        title: subject.isPlaylist ? String(localized: "Use Automatic Cover") : String(localized: "Use Original Artwork"),
+        target: nil, action: nil
+    )
     private let cancelButton = NSButton(title: String(localized: "Cancel"), target: nil, action: nil)
     private let saveButton = NSButton(title: String(localized: "Save"), target: nil, action: nil)
 
@@ -56,13 +61,13 @@ final class ArtworkEditorViewController: NSViewController {
     private var localTask: Task<Void, Never>?
     private var pasteboardTimer: Timer?
     private var lastPasteboardCount = -1
-    private var defaultQuery: String { OnlineArtworkSearch.defaultQuery(title: album.title, artist: album.artist) }
+    private var defaultQuery: String { subject.defaultQuery }
 
-    init(album: Album, initial: ArtworkInput?, localRoot: URL = LibraryPaths.root) {
-        self.album = album
+    init(subject: ArtworkSubject, initial: ArtworkInput?, localRoot: URL = LibraryPaths.root) {
+        self.subject = subject
         self.initialInput = initial
         self.localRoot = localRoot
-        self.hasCustomCover = AlbumArtworkEditor.hasCustomCover(album)
+        self.hasCustomCover = AlbumArtworkEditor.hasCustomCover(subject)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -106,6 +111,7 @@ final class ArtworkEditorViewController: NSViewController {
         framingChanged(animated: false)
         refreshPasteAvailability()
         loadCurrentArtwork()
+        showEmptyPlaylistHint()
         if let initialInput { accept(initialInput) }
         loadLocalPictures()
         runSearch()
@@ -161,10 +167,12 @@ final class ArtworkEditorViewController: NSViewController {
     }
 
     private func buildHeader() -> NSView {
-        let title = NSTextField(labelWithString: String(localized: "Artwork"))
+        let title = NSTextField(
+            labelWithString: subject.isPlaylist ? String(localized: "Playlist Cover") : String(localized: "Artwork")
+        )
         title.font = .systemFont(ofSize: 17, weight: .semibold)
         title.textColor = MacColors.onArtwork()
-        let subtitle = NSTextField(labelWithString: "\(album.title) · \(album.artist)")
+        let subtitle = NSTextField(labelWithString: subject.subtitle)
         subtitle.font = .systemFont(ofSize: 12.5)
         subtitle.textColor = MacColors.onArtwork(0.6)
         subtitle.lineBreakMode = .byTruncatingTail
@@ -173,6 +181,7 @@ final class ArtworkEditorViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
+        keepTextHeight(title, subtitle)
         root.addSubview(stack)
         return stack
     }
@@ -215,6 +224,7 @@ final class ArtworkEditorViewController: NSViewController {
         softLabel.lineBreakMode = .byTruncatingTail
         softLabel.stringValue = String(localized: "Low resolution — this will look soft on large displays")
         softLabel.isHidden = true
+        keepTextHeight(infoLabel, softLabel)
 
         let zoomOut = iconButton("minus.magnifyingglass", label: String(localized: "Zoom Out"), action: #selector(zoomOutTapped))
         let zoomIn = iconButton("plus.magnifyingglass", label: String(localized: "Zoom In"), action: #selector(zoomInTapped))
@@ -239,7 +249,7 @@ final class ArtworkEditorViewController: NSViewController {
         column.addSubview(below)
 
         let fill = cropView.widthAnchor.constraint(equalTo: column.widthAnchor)
-        fill.priority = .init(750)
+        fill.priority = .init(700)
         NSLayoutConstraint.activate([
             cropView.topAnchor.constraint(equalTo: column.topAnchor),
             cropView.centerXAnchor.constraint(equalTo: column.centerXAnchor),
@@ -262,6 +272,7 @@ final class ArtworkEditorViewController: NSViewController {
         let title = NSTextField(labelWithString: String(localized: "Previews"))
         title.font = .systemFont(ofSize: 11, weight: .semibold)
         title.textColor = MacColors.onArtwork(0.5)
+        keepTextHeight(title)
         let specs: [(ArtworkFramedView, CGFloat, CGFloat, String)] = [
             (albumPreview, 104, 10, String(localized: "Album tile preview")),
             (listPreview, 44, 6, String(localized: "List row preview")),
@@ -312,7 +323,9 @@ final class ArtworkEditorViewController: NSViewController {
         sources.spacing = 6
         sources.alignment = .leading
 
-        searchField.placeholderString = String(localized: "Artist and album")
+        searchField.placeholderString = subject.isPlaylist
+            ? String(localized: "Search for cover art")
+            : String(localized: "Artist and album")
         searchField.stringValue = defaultQuery
         searchField.sendsWholeSearchString = true
         searchField.sendsSearchStringImmediately = false
@@ -384,6 +397,13 @@ final class ArtworkEditorViewController: NSViewController {
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
         ])
+    }
+
+    /// The preview square wants all the room it can get, but a line of text
+    /// must never be the thing that gives way for it: a label squeezed to no
+    /// height simply disappears.
+    private func keepTextHeight(_ labels: NSTextField...) {
+        for label in labels { label.setContentCompressionResistancePriority(.init(900), for: .vertical) }
     }
 
     private func iconButton(_ symbol: String, label: String, action: Selector) -> NSButton {
@@ -473,11 +493,20 @@ final class ArtworkEditorViewController: NSViewController {
             self.setBackdrop(cgImage)
             self.infoLabel.stringValue = self.describe(cgImage, source: self.sourceLabel)
         }
-        if let cached = AlbumArtworkCache.shared.artwork(forAlbum: album.title, artist: album.artist) {
+        let (title, artist) = (subject.cacheTitle, subject.cacheArtist)
+        if let cached = AlbumArtworkCache.shared.artwork(forAlbum: title, artist: artist) {
             apply(cached)
         } else {
-            AlbumArtworkCache.shared.loadArtwork(forAlbum: album.title, artist: album.artist, completion: apply)
+            AlbumArtworkCache.shared.loadArtwork(forAlbum: title, artist: artist, completion: apply)
         }
+    }
+
+    /// A playlist with no chosen picture has no current cover to frame, so the
+    /// preview says what to do instead of sitting empty.
+    private func showEmptyPlaylistHint() {
+        guard subject.isPlaylist, !hasCustomCover, initialInput == nil else { return }
+        cropView.setPlaceholderSymbol("music.note.list")
+        infoLabel.stringValue = String(localized: "No cover chosen yet")
     }
 
     private func adopt(_ image: CGImage, source: String) {
@@ -533,7 +562,9 @@ final class ArtworkEditorViewController: NSViewController {
         panel.allowedContentTypes = [.jpeg, .png, .webP, .heic, .tiff, .gif, .bmp]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = String(localized: "Choose an image for this album's cover")
+        panel.message = subject.isPlaylist
+                ? String(localized: "Choose an image for this playlist's cover")
+                : String(localized: "Choose an image for this album's cover")
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             MainActor.assumeIsolated { self?.accept(.file(url)) }
@@ -549,7 +580,12 @@ final class ArtworkEditorViewController: NSViewController {
     }
 
     private func loadLocalPictures() {
-        let album = album
+        let subject = subject
+        guard !subject.isPlaylist else {
+            loadPlaylistAlbumCovers()
+            return
+        }
+        let album = subject.album
         let root = localRoot
         localTask = Task { [weak self] in
             let folderItems = await Task.detached { LocalArtworkFinder.folderImages(for: album, root: root) }.value
@@ -558,6 +594,17 @@ final class ArtworkEditorViewController: NSViewController {
             let embedded = await LocalArtworkFinder.embeddedImages(for: album)
             guard !Task.isCancelled else { return }
             self.showLocal(folderItems + embedded)
+        }
+    }
+
+    /// The covers of the releases the playlist draws from, read from the
+    /// database, so the shelf fills at once and offers ready-made choices.
+    private func loadPlaylistAlbumCovers() {
+        let subject = subject
+        localTask = Task { [weak self] in
+            let items = await Task.detached { LocalArtworkFinder.playlistAlbumCovers(for: subject) }.value
+            guard let self, !Task.isCancelled else { return }
+            self.showLocal(items)
         }
     }
 
@@ -607,16 +654,36 @@ final class ArtworkEditorViewController: NSViewController {
         searchTask?.cancel()
         thumbnailTasks.forEach { $0.cancel() }
         thumbnailTasks = []
+        let query = searchField.stringValue
+        if subject.isPlaylist, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showIdleSearch()
+            return
+        }
         onlineShelf.setBusy(true)
         onlineShelf.showStatus(nil)
-        let query = searchField.stringValue
-        let (title, artist) = (album.title, album.artist)
+        let (title, artist) = searchSubject
         searchTask = Task { [weak self] in
             let result = await OnlineArtworkSearch.lookup(query: query, title: title, artist: artist)
             guard let self, token == self.searchToken, !Task.isCancelled else { return }
             self.onlineShelf.setBusy(false)
             self.showOnline(result, token: token)
         }
+    }
+
+    /// A playlist's name matches no catalog entry, so its search waits for
+    /// words instead of running on the name.
+    private func showIdleSearch() {
+        onlineShelf.setBusy(false)
+        candidates = [:]
+        onlineShelf.setTiles([])
+        onlineShelf.showStatus(String(localized: "Type an album or artist and press Return to find cover art."))
+    }
+
+    /// What the online providers score results against: the release for an
+    /// album, nothing at all for a playlist, whose search is only ever the
+    /// person's own words.
+    private var searchSubject: (title: String, artist: String) {
+        subject.isPlaylist ? ("", "") : (subject.title, subject.credit)
     }
 
     private func showOnline(_ result: ArtworkSearchResult, token: Int) {
@@ -702,12 +769,12 @@ final class ArtworkEditorViewController: NSViewController {
         isSaving = true
         refreshSaveState()
         cropView.setLoading(true)
-        let album = album
+        let subject = subject
         Task { [weak self] in
             do {
                 let data = try await Task.detached { () throws -> Data in
                     guard let data = AlbumArtworkEditor.render(image, framing: framing) else { throw ArtworkInputError.unreadable }
-                    try AlbumArtworkEditor.save(data, for: album)
+                    try AlbumArtworkEditor.save(data, for: subject)
                     return data
                 }.value
                 AppLogger.info("Artwork editor saved \(data.count / 1024) KB", category: .ui)
@@ -750,9 +817,15 @@ final class ArtworkEditorViewController: NSViewController {
     @objc private func confirmReset() {
         guard let window = view.window else { return }
         let alert = NSAlert()
-        alert.messageText = String(localized: "Use the original artwork?")
-        alert.informativeText = String(localized: "Your chosen cover will be removed and the artwork from the music files is used again.")
-        alert.addButton(withTitle: String(localized: "Use Original")).hasDestructiveAction = true
+        if subject.isPlaylist {
+            alert.messageText = String(localized: "Use the automatic cover?")
+            alert.informativeText = String(localized: "Your chosen picture will be removed and the playlist goes back to a mosaic of its albums.")
+            alert.addButton(withTitle: String(localized: "Use Automatic Cover")).hasDestructiveAction = true
+        } else {
+            alert.messageText = String(localized: "Use the original artwork?")
+            alert.informativeText = String(localized: "Your chosen cover will be removed and the artwork from the music files is used again.")
+            alert.addButton(withTitle: String(localized: "Use Original")).hasDestructiveAction = true
+        }
         alert.addButton(withTitle: String(localized: "Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
@@ -761,14 +834,16 @@ final class ArtworkEditorViewController: NSViewController {
     }
 
     private func performReset() {
-        let album = album
+        let subject = subject
         Task { [weak self] in
             do {
-                try await Task.detached { try AlbumArtworkEditor.reset(album) }.value
+                try await Task.detached { try AlbumArtworkEditor.reset(subject) }.value
                 self?.onFinish?(.restored)
             } catch {
                 AppLogger.error("Resetting cover failed: \(error.localizedDescription)", category: .database)
-                self?.fail(String(localized: "Couldn't restore the original artwork. Try again."))
+                self?.fail(subject.isPlaylist
+                    ? String(localized: "Couldn't restore the automatic cover. Try again.")
+                    : String(localized: "Couldn't restore the original artwork. Try again."))
             }
         }
     }

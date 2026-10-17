@@ -84,6 +84,23 @@ nonisolated enum LocalArtworkFinder {
         return items
     }
 
+    /// The covers of the releases a playlist draws from, one per distinct
+    /// album in playlist order, labelled with the album's title. They come
+    /// from the database's hoisted covers, so nothing is read off the disk.
+    static func playlistAlbumCovers(for subject: ArtworkSubject) -> [LocalArtworkItem] {
+        let albums = PlaylistCover.shelfAlbums(subject.tracks.map { (title: $0.albumTitle, artist: $0.artist) })
+        var seen = Set<String>()
+        var items: [LocalArtworkItem] = []
+        for album in albums {
+            guard let data = try? DatabaseManager.shared.fetchAlbumArtwork(title: album.title, artist: album.artist),
+                  seen.insert(contentHash(of: data)).inserted,
+                  let item = item(forData: data, label: album.title, id: "playlist-album-\(items.count)")
+            else { continue }
+            items.append(item)
+        }
+        return items
+    }
+
     static func relativePaths(of fileURLs: [URL], under root: URL) -> [String] {
         let prefix = root.standardizedFileURL.resolvingSymlinksInPath().path + "/"
         return fileURLs.compactMap { url in

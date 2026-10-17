@@ -2,14 +2,15 @@ import PhotosUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// The sheet where a person chooses a cover for an album: frame the current
-/// one, bring their own from Photos, Files, the clipboard or a drop, or pick
-/// a higher-resolution match found online. Nothing is written until Save.
+/// The sheet where a person chooses a cover for an album or a playlist: frame
+/// the current one, bring their own from Photos, Files, the clipboard or a
+/// drop, pick one of the playlist's own albums, or pick a match found online.
+/// Nothing is written until Save.
 final class ArtworkEditorViewController: UIViewController {
 
     var onSaved: (() -> Void)?
 
-    private let album: Album
+    private let subject: ArtworkSubject
     private let hasCustomCover: Bool
     private let cropView = ArtworkCropView()
     private let backdropImageView = UIImageView()
@@ -20,6 +21,13 @@ final class ArtworkEditorViewController: UIViewController {
     private let onlineHeader = UILabel()
     private let onlineSpinner = UIActivityIndicatorView(style: .medium)
     private let onlineStatus = UILabel()
+    private let searchField = UISearchTextField()
+    private let shelfHeader = UILabel()
+    private var shelfView: UICollectionView!
+    private var shelfDataSource: UICollectionViewDiffableDataSource<Int, String>!
+    private var shelfItems = [String: LocalArtworkItem]()
+    private var selectedShelfID: String?
+    private var shelfTask: Task<Void, Never>?
     private var candidatesView: UICollectionView!
     private var candidatesDataSource: UICollectionViewDiffableDataSource<Int, ArtworkCandidate>!
     private let resetButton = UIButton(type: .system)
@@ -31,9 +39,9 @@ final class ArtworkEditorViewController: UIViewController {
     private var didApplyCurrentArtwork = false
     private var thumbnails = [URL: UIImage]()
 
-    init(album: Album) {
-        self.album = album
-        self.hasCustomCover = AlbumArtworkEditor.hasCustomCover(album)
+    init(subject: ArtworkSubject) {
+        self.subject = subject
+        self.hasCustomCover = AlbumArtworkEditor.hasCustomCover(subject)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -43,10 +51,15 @@ final class ArtworkEditorViewController: UIViewController {
     deinit {
         loadTask?.cancel()
         searchTask?.cancel()
+        shelfTask?.cancel()
     }
 
     static func present(for album: Album, from presenter: UIViewController, onSaved: (() -> Void)? = nil) {
-        let editor = ArtworkEditorViewController(album: album)
+        present(for: ArtworkSubject(album: album), from: presenter, onSaved: onSaved)
+    }
+
+    static func present(for subject: ArtworkSubject, from presenter: UIViewController, onSaved: (() -> Void)? = nil) {
+        let editor = ArtworkEditorViewController(subject: subject)
         editor.onSaved = onSaved
         let navigation = UINavigationController(rootViewController: editor)
         navigation.modalPresentationStyle = .pageSheet
@@ -77,7 +90,8 @@ final class ArtworkEditorViewController: UIViewController {
         setupContent()
         setupDrop()
         loadCurrentArtwork()
-        startOnlineSearch()
+        loadPlaylistShelf()
+        startOnlineSearch(query: subject.defaultQuery)
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(pasteboardChanged), name: UIPasteboard.changedNotification, object: nil
@@ -162,7 +176,9 @@ final class ArtworkEditorViewController: UIViewController {
         infoLabel.textColor = UIColor.white.withAlphaComponent(0.6)
         infoLabel.textAlignment = .center
         infoLabel.numberOfLines = 2
-        infoLabel.text = String(localized: "Pinch and drag to frame the cover")
+        infoLabel.text = subject.isPlaylist && !hasCustomCover
+            ? String(localized: "Choose a picture for this playlist")
+            : String(localized: "Pinch and drag to frame the cover")
         content.addArrangedSubview(infoLabel)
 
         sourceRow.axis = .horizontal
@@ -180,6 +196,10 @@ final class ArtworkEditorViewController: UIViewController {
         content.addArrangedSubview(sourceRow)
         updatePasteAvailability()
 
+        if subject.isPlaylist {
+            setupPlaylistShelf()
+        }
+
         let headerRow = UIStackView()
         headerRow.axis = .horizontal
         headerRow.spacing = 8
@@ -194,6 +214,10 @@ final class ArtworkEditorViewController: UIViewController {
         headerRow.addArrangedSubview(UIView())
         content.addArrangedSubview(headerRow)
 
+        if subject.isPlaylist {
+            setupSearchField()
+        }
+
         setupCandidates()
         content.addArrangedSubview(candidatesView)
 
@@ -204,7 +228,9 @@ final class ArtworkEditorViewController: UIViewController {
         content.addArrangedSubview(onlineStatus)
 
         var resetConfig = UIButton.Configuration.plain()
-        resetConfig.title = String(localized: "Use Original Artwork")
+        resetConfig.title = subject.isPlaylist
+            ? String(localized: "Use Automatic Cover")
+            : String(localized: "Use Original Artwork")
         resetConfig.image = UIImage(systemName: "arrow.uturn.backward")
         resetConfig.imagePadding = 6
         resetConfig.baseForegroundColor = .systemRed
@@ -224,6 +250,100 @@ final class ArtworkEditorViewController: UIViewController {
             content.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -20),
             candidatesView.heightAnchor.constraint(equalToConstant: 148),
         ])
+    }
+
+    private func setupPlaylistShelf() {
+        shelfHeader.text = String(localized: "From This Playlist")
+        shelfHeader.font = .scaled(.headline, size: 17, weight: .semibold)
+        shelfHeader.textColor = .white
+        shelfHeader.isHidden = true
+        content.addArrangedSubview(shelfHeader)
+
+        shelfView = makeHorizontalShelf()
+        shelfView.isHidden = true
+        let registration = UICollectionView.CellRegistration<ArtworkCandidateCell, String> { [weak self] cell, _, id in
+            guard let self, let item = self.shelfItems[id] else { return }
+            cell.configure(
+                image: item.thumbnail.map { UIImage(cgImage: $0) },
+                label: item.label,
+                accessibilityLabel: String(localized: "\(item.label), cover from this playlist"),
+                isSelected: id == self.selectedShelfID
+            )
+        }
+        shelfDataSource = UICollectionViewDiffableDataSource(collectionView: shelfView) { view, indexPath, id in
+            view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
+        }
+        content.addArrangedSubview(shelfView)
+        shelfView.heightAnchor.constraint(equalToConstant: 148).isActive = true
+    }
+
+    private func setupSearchField() {
+        searchField.placeholder = String(localized: "Search for a cover")
+        searchField.returnKeyType = .search
+        searchField.autocorrectionType = .no
+        searchField.autocapitalizationType = .none
+        searchField.accessibilityLabel = String(localized: "Search for a cover")
+        searchField.addAction(UIAction { [weak self] _ in self?.submitSearch() }, for: .primaryActionTriggered)
+        searchField.addAction(UIAction { [weak self] _ in self?.searchTextChanged() }, for: .editingChanged)
+        content.addArrangedSubview(searchField)
+    }
+
+    private func submitSearch() {
+        searchField.resignFirstResponder()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        startOnlineSearch(query: searchField.text ?? "")
+    }
+
+    private func searchTextChanged() {
+        guard (searchField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        startOnlineSearch(query: "")
+    }
+
+    private func loadPlaylistShelf() {
+        guard subject.isPlaylist else { return }
+        let subject = subject
+        shelfTask = Task { [weak self] in
+            let items = await Task.detached(priority: .userInitiated) {
+                LocalArtworkFinder.playlistAlbumCovers(for: subject)
+            }.value
+            await MainActor.run {
+                guard let self, !Task.isCancelled, !items.isEmpty else { return }
+                self.shelfItems = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+                var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
+                snapshot.appendSections([0])
+                snapshot.appendItems(items.map(\.id))
+                self.shelfDataSource.apply(snapshot, animatingDifferences: false)
+                self.shelfHeader.isHidden = false
+                self.shelfView.isHidden = false
+            }
+        }
+    }
+
+    private func selectShelfItem(_ id: String) {
+        guard let item = shelfItems[id] else { return }
+        selectedShelfID = id
+        var snapshot = shelfDataSource.snapshot()
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        shelfDataSource.apply(snapshot, animatingDifferences: false)
+        UISelectionFeedbackGenerator().selectionChanged()
+
+        loadTask?.cancel()
+        cropView.setLoading(true)
+        infoLabel.text = String(localized: "Loading \(item.label) cover…")
+        loadTask = Task { [weak self] in
+            let data = try? await Task.detached(priority: .userInitiated) { try item.loadData() }.value
+            await MainActor.run {
+                guard let self, !Task.isCancelled else { return }
+                self.cropView.setLoading(false)
+                guard let data else {
+                    self.selectedShelfID = nil
+                    self.infoLabel.text = String(localized: "That file couldn't be read as an image.")
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    return
+                }
+                self.load(data: data, source: item.label)
+            }
+        }
     }
 
     private func makeSourceButton(title: String, image: String, action: @escaping () -> Void) -> UIView {
@@ -258,24 +378,30 @@ final class ArtworkEditorViewController: UIViewController {
         return glass
     }
 
-    private func setupCandidates() {
+    private func makeHorizontalShelf() -> UICollectionView {
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
         layout.itemSize = CGSize(width: 120, height: 148)
         layout.minimumLineSpacing = 12
-        candidatesView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        candidatesView.backgroundColor = .clear
-        candidatesView.showsHorizontalScrollIndicator = false
-        candidatesView.clipsToBounds = false
-        candidatesView.delegate = self
-        candidatesView.translatesAutoresizingMaskIntoConstraints = false
+        let shelf = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        shelf.backgroundColor = .clear
+        shelf.showsHorizontalScrollIndicator = false
+        shelf.clipsToBounds = false
+        shelf.delegate = self
+        shelf.translatesAutoresizingMaskIntoConstraints = false
+        return shelf
+    }
+
+    private func setupCandidates() {
+        candidatesView = makeHorizontalShelf()
         candidatesView.isHidden = true
 
         let registration = UICollectionView.CellRegistration<ArtworkCandidateCell, ArtworkCandidate> { [weak self] cell, _, candidate in
             guard let self else { return }
             cell.configure(
-                candidate: candidate,
                 image: self.thumbnails[candidate.thumbnailURL],
+                label: candidate.source,
+                accessibilityLabel: "\(candidate.title), \(candidate.artist), \(candidate.source)",
                 isSelected: candidate == self.selectedCandidate
             )
             if self.thumbnails[candidate.thumbnailURL] == nil {
@@ -313,31 +439,56 @@ final class ArtworkEditorViewController: UIViewController {
             self.setBackdrop(image)
             self.infoLabel.text = self.describe(image, source: String(localized: "Current artwork"))
         }
-        if let cached = AlbumArtworkCache.shared.artwork(forAlbum: album.title, artist: album.artist) {
+        let title = subject.cacheTitle
+        let artist = subject.cacheArtist
+        if let cached = AlbumArtworkCache.shared.artwork(forAlbum: title, artist: artist) {
             apply(cached)
         } else {
-            AlbumArtworkCache.shared.loadArtwork(forAlbum: album.title, artist: album.artist, completion: apply)
+            AlbumArtworkCache.shared.loadArtwork(forAlbum: title, artist: artist, completion: apply)
         }
     }
 
-    private func startOnlineSearch() {
+    /// The title and artist the catalogs' answers are scored against. A
+    /// playlist's name matches no release, so its results are ranked by the
+    /// catalogs alone.
+    private var searchIdentity: (title: String, artist: String) {
+        subject.isPlaylist ? ("", "") : (subject.title, subject.credit)
+    }
+
+    private func showOnlineStatus(_ text: String) {
+        candidatesView.isHidden = true
+        onlineStatus.text = text
+        onlineStatus.isHidden = false
+    }
+
+    private func startOnlineSearch(query: String) {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if subject.isPlaylist && trimmed.isEmpty {
+            onlineSpinner.stopAnimating()
+            showOnlineStatus(String(localized: "Search Apple Music, Deezer and Cover Art Archive"))
+            return
+        }
         onlineSpinner.startAnimating()
-        searchTask = Task { [weak self, album] in
-            let results = await OnlineArtworkSearch.search(title: album.title, artist: album.artist)
+        let identity = searchIdentity
+        searchTask = Task { [weak self] in
+            let result = await OnlineArtworkSearch.lookup(query: trimmed, title: identity.title, artist: identity.artist)
             await MainActor.run {
                 guard let self, !Task.isCancelled else { return }
                 self.onlineSpinner.stopAnimating()
-                if results.isEmpty {
-                    self.candidatesView.isHidden = true
-                    self.onlineStatus.text = String(localized: "No matching covers found online. Try Photos or Files instead.")
-                    self.onlineStatus.isHidden = false
+                if result.candidates.isEmpty {
+                    self.showOnlineStatus(
+                        result.reachedAnyProvider
+                            ? String(localized: "No matching covers found online. Try Photos or Files instead.")
+                            : String(localized: "Couldn't reach the cover catalogs. Check your connection and try again.")
+                    )
                     return
                 }
                 self.onlineStatus.isHidden = true
                 self.candidatesView.isHidden = false
                 var snapshot = NSDiffableDataSourceSnapshot<Int, ArtworkCandidate>()
                 snapshot.appendSections([0])
-                snapshot.appendItems(results)
+                snapshot.appendItems(result.candidates)
                 self.candidatesDataSource.apply(snapshot, animatingDifferences: true)
             }
         }
@@ -461,10 +612,10 @@ final class ArtworkEditorViewController: UIViewController {
             return
         }
         saveButton.isEnabled = false
-        let album = album
+        let subject = subject
         Task { [weak self] in
             do {
-                try await Task.detached { try AlbumArtworkEditor.save(data, for: album) }.value
+                try await Task.detached { try AlbumArtworkEditor.save(data, for: subject) }.value
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     self?.finish()
@@ -486,32 +637,66 @@ final class ArtworkEditorViewController: UIViewController {
     }
 
     private func confirmReset() {
-        let sheet = UIAlertController(
-            title: String(localized: "Use the original artwork?"),
-            message: String(localized: "Your chosen cover will be removed and the artwork from the music files is used again."),
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: String(localized: "Use Original"), style: .destructive) { [weak self] _ in
+        Self.confirmReset(for: subject, from: self, anchor: resetButton) { [weak self] in
             self?.performReset()
-        })
-        sheet.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
-        sheet.popoverPresentationController?.sourceView = resetButton
-        sheet.popoverPresentationController?.sourceRect = resetButton.bounds
-        present(sheet, animated: true)
+        }
     }
 
     private func performReset() {
-        let album = album
-        Task { [weak self] in
+        Self.reset(subject) { [weak self] succeeded in
+            guard succeeded else { return }
+            self?.finish()
+        }
+    }
+
+    /// Asks before a chosen cover is removed, in the words of whatever it
+    /// returns to: the files' own artwork for a release, the album mosaic for
+    /// a playlist.
+    static func confirmReset(
+        for subject: ArtworkSubject, from presenter: UIViewController, anchor: UIView?, onConfirmed: @escaping () -> Void
+    ) {
+        let sheet = UIAlertController(
+            title: subject.isPlaylist
+                ? String(localized: "Use the automatic cover?")
+                : String(localized: "Use the original artwork?"),
+            message: subject.isPlaylist
+                ? String(localized: "Your chosen picture will be removed and the playlist shows a mosaic of its albums again.")
+                : String(localized: "Your chosen cover will be removed and the artwork from the music files is used again."),
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(
+            title: subject.isPlaylist ? String(localized: "Use Automatic") : String(localized: "Use Original"),
+            style: .destructive
+        ) { _ in onConfirmed() })
+        sheet.addAction(UIAlertAction(title: String(localized: "Cancel"), style: .cancel))
+        let source = anchor ?? presenter.view
+        sheet.popoverPresentationController?.sourceView = source
+        if anchor != nil {
+            sheet.popoverPresentationController?.sourceRect = source?.bounds ?? .zero
+        } else {
+            let bounds = source?.bounds ?? .zero
+            sheet.popoverPresentationController?.sourceRect = CGRect(x: bounds.midX, y: bounds.midY, width: 0, height: 0)
+            sheet.popoverPresentationController?.permittedArrowDirections = []
+        }
+        presenter.present(sheet, animated: true)
+    }
+
+    /// Removes the chosen cover off the main thread and reports the outcome
+    /// on it, with the haptic that matches.
+    static func reset(_ subject: ArtworkSubject, completion: @escaping (Bool) -> Void) {
+        Task {
             do {
-                try await Task.detached { try AlbumArtworkEditor.reset(album) }.value
+                try await Task.detached { try AlbumArtworkEditor.reset(subject) }.value
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    self?.finish()
+                    completion(true)
                 }
             } catch {
                 AppLogger.error("Resetting cover failed: \(error.localizedDescription)", category: .database)
-                await MainActor.run { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+                await MainActor.run {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    completion(false)
+                }
             }
         }
     }
@@ -520,6 +705,11 @@ final class ArtworkEditorViewController: UIViewController {
 extension ArtworkEditorViewController: UICollectionViewDelegate {
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        if collectionView === shelfView {
+            guard let id = shelfDataSource.itemIdentifier(for: indexPath) else { return }
+            selectShelfItem(id)
+            return
+        }
         guard let candidate = candidatesDataSource.itemIdentifier(for: indexPath) else { return }
         select(candidate)
     }
@@ -646,11 +836,11 @@ private final class ArtworkCandidateCell: UICollectionViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(candidate: ArtworkCandidate, image: UIImage?, isSelected: Bool) {
+    func configure(image: UIImage?, label: String, accessibilityLabel: String, isSelected: Bool) {
         imageView.image = image
-        sourceLabel.text = candidate.source
+        sourceLabel.text = label
         UIView.animate(withDuration: 0.18) { self.ring.alpha = isSelected ? 1 : 0 }
-        accessibilityLabel = "\(candidate.title), \(candidate.artist), \(candidate.source)"
+        self.accessibilityLabel = accessibilityLabel
         accessibilityTraits = isSelected ? [.button, .selected] : .button
     }
 }

@@ -10,6 +10,7 @@ final class PlaylistsViewController: NSViewController {
         let record: PlaylistRecord
         let trackCount: Int
         let tracks: [Track]
+        let hasCustomCover: Bool
         var totalDuration: TimeInterval { tracks.reduce(0) { $0 + $1.duration } }
         var createdAt: Date { record.createdAt }
     }
@@ -24,6 +25,7 @@ final class PlaylistsViewController: NSViewController {
     private var entries: [Entry] = []
     private var searchQuery = LibrarySearchState.query
     private var reloadGeneration = 0
+    private var artworkObserver: ArtworkChangeObserver?
     private var searchDebounce: Task<Void, Never>?
     private var sortColumn: Column = .created
     private var sortAscending = false
@@ -116,6 +118,7 @@ final class PlaylistsViewController: NSViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(searchQueryChanged(_:)), name: .flaccySearchQueryChanged, object: nil
         )
+        artworkObserver = ArtworkChangeObserver { [weak self] in self?.reload() }
         reload()
     }
 
@@ -151,6 +154,7 @@ final class PlaylistsViewController: NSViewController {
         )
         do {
             let records = try DatabaseManager.shared.fetchAllPlaylists()
+            let withCovers = (try? DatabaseManager.shared.playlistIdsWithCovers()) ?? []
             let query = searchQuery.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             return try records.compactMap { record in
                 guard let id = record.id else { return nil }
@@ -160,7 +164,10 @@ final class PlaylistsViewController: NSViewController {
                 }
                 let playlistTracks = try DatabaseManager.shared.fetchPlaylistTracks(playlistId: id)
                 let resolved = playlistTracks.compactMap { tracksByPath[canonicalSyncPath($0.trackFileURL)] }
-                return Entry(record: record, trackCount: playlistTracks.count, tracks: resolved)
+                return Entry(
+                    record: record, trackCount: playlistTracks.count, tracks: resolved,
+                    hasCustomCover: withCovers.contains(id)
+                )
             }
         } catch {
             AppLogger.error("Playlist fetch failed: \(error.localizedDescription)", category: .database)
@@ -252,6 +259,8 @@ final class PlaylistsViewController: NSViewController {
             AudioPlayer.shared.play(entry.tracks.shuffled(), startingAt: 0)
         })
         menu.addItem(.separator())
+        MacArtworkEditor.coverMenuItems(for: entry.record, tracks: entry.tracks, window: view.window)
+            .forEach(menu.addItem)
         menu.addItem(ClosureMenuItem(title: String(localized: "Rename…"), systemImage: "pencil") { [weak self] in
             self?.promptRename(entry.record)
         })
@@ -280,15 +289,19 @@ final class PlaylistsViewController: NSViewController {
     }
 
     /// DatabaseManager exposes no in-place rename, so renaming recreates the
-    /// playlist under the new name with the same track order and drops the
-    /// old row — the only playlist identity anywhere is the name shown.
-    private static func rename(playlistId: Int64, from oldName: String, to newName: String, in window: NSWindow?) {
+    /// playlist under the new name with the same track order and the same
+    /// chosen cover, and drops the old row — the only playlist identity
+    /// anywhere is the name shown.
+    static func rename(playlistId: Int64, from oldName: String, to newName: String, in window: NSWindow?) {
         do {
             let tracks = try DatabaseManager.shared.fetchPlaylistTracks(playlistId: playlistId)
             let renamed = try DatabaseManager.shared.createPlaylist(name: newName)
             guard let newId = renamed.id else { return }
             for track in tracks {
                 try DatabaseManager.shared.addTrackToPlaylist(playlistId: newId, trackFileURL: track.trackFileURL)
+            }
+            if let cover = try DatabaseManager.shared.playlistCover(id: playlistId) {
+                try DatabaseManager.shared.savePlaylistCover(cover, id: newId)
             }
             try DatabaseManager.shared.deletePlaylist(id: playlistId)
             AppLogger.info("Playlist \(oldName) renamed to \(newName)", category: .database)
@@ -369,7 +382,15 @@ extension PlaylistsViewController: NSTableViewDelegate {
             let cellID = NSUserInterfaceItemIdentifier("playlistCell")
             let cell = tableView.makeView(withIdentifier: cellID, owner: self) as? PlaylistCellView
                 ?? PlaylistCellView(identifier: cellID)
-            cell.configure(name: entry.record.name, trackCount: entry.trackCount, tracks: entry.tracks)
+            cell.configure(
+                name: entry.record.name, trackCount: entry.trackCount, tracks: entry.tracks,
+                playlistId: entry.record.id, hasCustomCover: entry.hasCustomCover
+            )
+            cell.onPictureDrop = { [weak self] input in
+                MacArtworkEditor.present(
+                    forPlaylist: entry.record, tracks: entry.tracks, initial: input, from: self?.view.window
+                )
+            }
             return cell
         }
 
@@ -433,9 +454,18 @@ final class PlaylistCellView: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(name: String, trackCount: Int, tracks: [Track]) {
+    var onPictureDrop: ((ArtworkInput) -> Void)? {
+        get { mosaic.onPictureDrop }
+        set { mosaic.onPictureDrop = newValue }
+    }
+
+    func configure(name: String, trackCount: Int, tracks: [Track], playlistId: Int64?, hasCustomCover: Bool) {
         nameLabel.stringValue = name
         countLabel.stringValue = String(localized: "\(trackCount) songs")
-        mosaic.configure(with: tracks, fallbackSeed: name)
+        if let playlistId {
+            mosaic.configure(playlistId: playlistId, tracks: tracks, fallbackSeed: name, hasCustomCover: hasCustomCover)
+        } else {
+            mosaic.configure(with: tracks, fallbackSeed: name)
+        }
     }
 }

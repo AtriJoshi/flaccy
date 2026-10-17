@@ -153,6 +153,9 @@ enum DebugDrive {
         case .section(let section):
             if section == .playlists {
                 seedDemoPlaylists()
+                if CommandLine.arguments.contains("--custom-cover") {
+                    DebugArtworkDrive.seedCustomCover(forPlaylistNamed: "Late Shift")
+                }
             }
             startHeroPlayback()
             try? await Task.sleep(for: .seconds(2))
@@ -177,6 +180,9 @@ enum DebugDrive {
             name = "flaccy-shot-artist"
         case .playlistDetail(let playlistName):
             seedDemoPlaylists()
+            if CommandLine.arguments.contains("--custom-cover") {
+                DebugArtworkDrive.seedCustomCover(forPlaylistNamed: playlistName)
+            }
             startHeroPlayback()
             try? await Task.sleep(for: .seconds(2))
             NotificationCenter.default.post(
@@ -310,7 +316,7 @@ enum DebugDrive {
 
     /// Seeds two populated playlists from the fictional catalog so the
     /// Playlists screenshot never renders an empty state. Idempotent.
-    private static func seedDemoPlaylists() {
+    static func seedDemoPlaylists() {
         let plans: [(name: String, picks: [(String, Int)])] = [
             ("Night Drive", [("Parallax Hours", 1), ("Signal Bloom", 3), ("Cassini", 0),
                              ("Midnatt", 0), ("Aurorae", 1), ("Paper Cities", 0), ("Almagest", 0), ("Nightglow", 1)]),

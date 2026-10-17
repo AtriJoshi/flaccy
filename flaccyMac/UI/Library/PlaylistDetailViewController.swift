@@ -14,6 +14,7 @@ final class PlaylistDetailViewController: NSViewController {
     private let scrollView = NSScrollView()
     private let tableView = SongsTableView()
     private let mosaic = MosaicArtworkView()
+    private let coverOverlay = ArtworkEditOverlayView()
     private let nameLabel = NSTextField(labelWithString: "")
     private let summaryLabel = NSTextField(labelWithString: "")
     private var rows: [Row] = []
@@ -32,6 +33,8 @@ final class PlaylistDetailViewController: NSViewController {
         view = NSView()
 
         mosaic.translatesAutoresizingMaskIntoConstraints = false
+        coverOverlay.translatesAutoresizingMaskIntoConstraints = false
+        configureCoverOverlay()
 
         nameLabel.stringValue = playlist.name
         nameLabel.font = .systemFont(ofSize: 24, weight: .bold)
@@ -89,6 +92,7 @@ final class PlaylistDetailViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(mosaic)
+        view.addSubview(coverOverlay)
         view.addSubview(meta)
         view.addSubview(scrollView)
 
@@ -97,6 +101,11 @@ final class PlaylistDetailViewController: NSViewController {
             mosaic.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
             mosaic.widthAnchor.constraint(equalToConstant: 130),
             mosaic.heightAnchor.constraint(equalToConstant: 130),
+
+            coverOverlay.topAnchor.constraint(equalTo: mosaic.topAnchor),
+            coverOverlay.leadingAnchor.constraint(equalTo: mosaic.leadingAnchor),
+            coverOverlay.trailingAnchor.constraint(equalTo: mosaic.trailingAnchor),
+            coverOverlay.bottomAnchor.constraint(equalTo: mosaic.bottomAnchor),
 
             meta.leadingAnchor.constraint(equalTo: mosaic.trailingAnchor, constant: 20),
             meta.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -28),
@@ -162,9 +171,37 @@ final class PlaylistDetailViewController: NSViewController {
         }
         let totalSeconds = rows.reduce(0.0) { $0 + $1.track.duration }
         summaryLabel.stringValue = PlaybackFormat.songsAndMinutes(count: rows.count, totalSeconds: totalSeconds)
-        mosaic.configure(with: rows.map(\.track), fallbackSeed: playlist.name)
+        if let id = playlist.id {
+            mosaic.configure(playlistId: id, tracks: rows.map(\.track), fallbackSeed: playlist.name)
+        } else {
+            mosaic.configure(with: rows.map(\.track), fallbackSeed: playlist.name)
+        }
         tableView.reloadData()
         AppLogger.debug("Playlist detail \(playlist.name): \(rows.count) rows", category: .ui)
+    }
+
+    /// The cover's pencil, picture drop and context menu open the same editor
+    /// the album page uses, over the playlist's own tracks.
+    private func configureCoverOverlay() {
+        coverOverlay.editLabel = String(localized: "Edit Cover")
+        coverOverlay.ringCornerRadius = 8
+        coverOverlay.onEdit = { [weak self] in
+            guard let self else { return }
+            MacArtworkEditor.present(forPlaylist: self.playlist, tracks: self.rows.map(\.track), from: self.view.window)
+        }
+        coverOverlay.onDrop = { [weak self] input in
+            guard let self else { return }
+            MacArtworkEditor.present(
+                forPlaylist: self.playlist, tracks: self.rows.map(\.track), initial: input, from: self.view.window
+            )
+        }
+        coverOverlay.onMenu = { [weak self] in
+            guard let self else { return nil }
+            let menu = NSMenu()
+            MacArtworkEditor.coverMenuItems(for: self.playlist, tracks: self.rows.map(\.track), window: self.view.window)
+                .forEach(menu.addItem)
+            return menu
+        }
     }
 
     private func play(shuffled: Bool) {
