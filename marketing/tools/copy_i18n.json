@@ -39,6 +39,11 @@
       "headline": "Deine Uhr spielt\nMusik *offline.*",
       "sub": "Ohne iPhone."
     },
+    "watchsync": {
+      "kicker": "Watch-Sync",
+      "headline": "Alben aufs\n*Handgelenk.*",
+      "sub": "Kleinere Dateien. Mehr Musik passt drauf."
+    },
     "queue": {
       "kicker": "Als Nächstes",
       "headline": "Eine Warteschlange,\n*die sich erinnert.*",
@@ -99,6 +104,11 @@
       "kicker": "Apple Watch",
       "headline": "Tu reloj reproduce\n*sin conexión.*",
       "sub": "No necesitas iPhone."
+    },
+    "watchsync": {
+      "kicker": "Sync con Watch",
+      "headline": "Envía álbumes\n*a tu muñeca.*",
+      "sub": "Archivos más pequeños, así cabe más música."
     },
     "queue": {
       "kicker": "A continuación",
@@ -161,6 +171,11 @@
       "headline": "Votre montre joue\n*hors ligne.*",
       "sub": "Pas besoin d'iPhone."
     },
+    "watchsync": {
+      "kicker": "Synchro Watch",
+      "headline": "Albums sur\n*votre poignet.*",
+      "sub": "Fichiers plus légers, plus de musique rentre."
+    },
     "queue": {
       "kicker": "À suivre",
       "headline": "Une file d'attente\n*qui se souvient.*",
@@ -221,6 +236,11 @@
       "kicker": "Apple Watch",
       "headline": "Il tuo orologio\nriproduce *offline.*",
       "sub": "Non serve l'iPhone."
+    },
+    "watchsync": {
+      "kicker": "Sync Watch",
+      "headline": "Manda gli album\n*al tuo polso.*",
+      "sub": "File più piccoli, più musica ci sta."
     },
     "queue": {
       "kicker": "Prossimi brani",
@@ -283,6 +303,11 @@
       "headline": "iPhoneなしで\n*音楽を再生。*",
       "sub": "オフラインでも、iPhoneは不要。"
     },
+    "watchsync": {
+      "kicker": "Watch同期",
+      "headline": "アルバムを\n*手首へ。*",
+      "sub": "ファイルが軽いから、音楽がもっと入る。"
+    },
     "queue": {
       "kicker": "次に再生",
       "headline": "再起動しても\n*消えないキュー。*",
@@ -343,6 +368,11 @@
       "kicker": "Apple Watch",
       "headline": "워치에서 음악을\n*오프라인으로.*",
       "sub": "iPhone 없이도 재생."
+    },
+    "watchsync": {
+      "kicker": "워치 동기화",
+      "headline": "앨범을\n*손목으로.*",
+      "sub": "파일이 작아서 음악을 더 담을 수 있어요."
     },
     "queue": {
       "kicker": "다음 곡",
@@ -405,6 +435,11 @@
       "headline": "Zegarek odtwarza\n*muzykę offline.*",
       "sub": "Nie potrzebujesz iPhone'a."
     },
+    "watchsync": {
+      "kicker": "Sync z Watch",
+      "headline": "Wyślij albumy\n*na nadgarstek.*",
+      "sub": "Mniejsze pliki, więc zmieści się więcej muzyki."
+    },
     "queue": {
       "kicker": "Następne",
       "headline": "Kolejka, która\n*pamięta.*",
@@ -465,6 +500,11 @@
       "kicker": "Apple Watch",
       "headline": "Seu relógio toca\n*música offline.*",
       "sub": "Não precisa de iPhone."
+    },
+    "watchsync": {
+      "kicker": "Sincronizar Watch",
+      "headline": "Mande álbuns para\n*seu pulso.*",
+      "sub": "Arquivos menores, então cabe mais música."
     },
     "queue": {
       "kicker": "A seguir",
@@ -527,6 +567,11 @@
       "headline": "你的手表离线\n*播放音乐。*",
       "sub": "无需 iPhone。"
     },
+    "watchsync": {
+      "kicker": "手表同步",
+      "headline": "把专辑发到\n*你的手腕。*",
+      "sub": "文件更小，更多音乐装得下。"
+    },
     "queue": {
       "kicker": "接下来播放",
       "headline": "重启之后，\n*队列依然在。*",
@@ -587,6 +632,11 @@
       "kicker": "Apple Watch",
       "headline": "你的手錶離線\n*播放音樂。*",
       "sub": "無需 iPhone。"
+    },
+    "watchsync": {
+      "kicker": "手錶同步",
+      "headline": "把專輯送到\n*你的手腕。*",
+      "sub": "檔案更小，更多音樂裝得下。"
     },
     "queue": {
       "kicker": "接下來播放",

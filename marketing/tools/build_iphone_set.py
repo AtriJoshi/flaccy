@@ -25,8 +25,8 @@ SLIDES = [
     dict(id="scrobble", raw="charts", accent=c.AMBER, secondary=c.CORAL),
     dict(id="year", raw="year", accent=c.CORAL, secondary=c.AMBER),
     dict(id="watch", layout="watch", raw="now-playing", accent=c.BLUE, secondary=c.TEAL),
+    dict(id="watchsync", raw="watch-sync", accent=c.TEAL, secondary=c.BLUE),
     dict(id="eqpro", raw="equalizer-advanced", accent=c.AMBER, secondary=c.TEAL),
-    dict(id="themes", layout="pair", raw_left="library", raw_right="now-playing", accent=c.ROSE, secondary=c.AMBER),
 ]
 
 LOCALES = ["en", "de", "es", "fr", "it", "ja", "ko", "pl", "pt-BR", "zh-Hans", "zh-Hant"]

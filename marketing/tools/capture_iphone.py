@@ -34,7 +34,7 @@ SCREENS = {
     "listening":    dict(env={"FLACCY_ROUTE": "listening-guide"}, wait=10),
     "enrichment":   dict(env={"FLACCY_ROUTE": "enrichment"}, wait=10),
     "wantlist":     dict(env={"FLACCY_ROUTE": "wantlist"}, wait=10),
-    "watch-sync":   dict(env={"FLACCY_ROUTE": "watch-sync"}, wait=10),
+    "watch-sync":   dict(env={"FLACCY_ROUTE": "watch-sync"}, wait=12, extra=["--demo-watch-sync"]),
     "paywall":      dict(env={"FLACCY_ROUTE": "paywall"}, wait=10),
     "debut":        dict(env={"FLACCY_DEBUT": "1"}, wait=9, extra=["--debut"]),
 }

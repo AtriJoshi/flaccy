@@ -38,6 +38,11 @@
     "headline": "Your watch plays\nmusic *offline.*",
     "sub": "No iPhone needed."
   },
+  "watchsync": {
+    "kicker": "Watch sync",
+    "headline": "Send albums to\n*your wrist.*",
+    "sub": "Smaller files, so more music fits."
+  },
   "queue": {
     "kicker": "Up Next",
     "headline": "A queue that\n*remembers.*",
