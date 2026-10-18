@@ -29,7 +29,8 @@ final class LyricsPanelViewController: NSViewController {
     private let linesStack = NSStackView()
     private let documentView = FlippedView()
     private let plainTextView = NSTextField(wrappingLabelWithString: "")
-    private let stateLabel = NSTextField(labelWithString: "")
+    private let stateTitle = NSTextField(labelWithString: "")
+    private let stateLabel = NSTextField(wrappingLabelWithString: "")
     private let stateIcon = NSImageView()
     private let spinner = NSProgressIndicator()
     private let retryButton = NSButton(title: "", target: nil, action: nil)
@@ -40,6 +41,7 @@ final class LyricsPanelViewController: NSViewController {
     private static let offsetStepMs = 100
     private static let offsetLimitMs = 10_000
     private static let seekLeadIn: TimeInterval = 0.15
+    private static let stateWidth: CGFloat = 300
     private static let timingNoteFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
 
     private var lineViews: [LyricRowView] = []
@@ -95,9 +97,16 @@ final class LyricsPanelViewController: NSViewController {
 
         stateIcon.symbolConfiguration = .init(pointSize: 28, weight: .light)
         stateIcon.contentTintColor = .tertiaryLabelColor
-        stateLabel.font = .systemFont(ofSize: 13)
+        stateTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        stateTitle.textColor = .labelColor
+        stateTitle.alignment = .center
+        stateTitle.lineBreakMode = .byWordWrapping
+        stateTitle.maximumNumberOfLines = 3
+        stateTitle.preferredMaxLayoutWidth = Self.stateWidth
+        stateLabel.font = .systemFont(ofSize: 12.5)
         stateLabel.textColor = .secondaryLabelColor
         stateLabel.alignment = .center
+        stateLabel.preferredMaxLayoutWidth = Self.stateWidth
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -134,7 +143,7 @@ final class LyricsPanelViewController: NSViewController {
         timingControls.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(timingControls)
 
-        let stateStack = NSStackView(views: [stateIcon, stateLabel, spinner, retryButton])
+        let stateStack = NSStackView(views: [stateIcon, stateTitle, stateLabel, spinner, retryButton])
         stateStack.orientation = .vertical
         stateStack.spacing = 8
         stateStack.alignment = .centerX
@@ -151,6 +160,7 @@ final class LyricsPanelViewController: NSViewController {
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
             stateStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stateStack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stateStack.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -48),
             timingControls.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
             timingControls.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
         ])
@@ -317,7 +327,7 @@ final class LyricsPanelViewController: NSViewController {
         guard isViewLoaded, isActive else { return }
         guard let track = player.currentTrack else {
             loadedTrackKey = nil
-            showState(icon: "quote.bubble", text: String(localized: "Nothing playing"))
+            showState(icon: "quote.bubble", words: LyricsStatusCopy.idle)
             return
         }
         let key = "\(track.title)\u{0}\(track.artist)"
@@ -332,7 +342,7 @@ final class LyricsPanelViewController: NSViewController {
         currentLineIndex = -1
         clearLines()
         plainTextView.isHidden = true
-        showState(icon: nil, text: "")
+        showState(icon: nil, words: nil)
         spinner.startAnimation(nil)
 
         Task { [weak self] in
@@ -342,25 +352,25 @@ final class LyricsPanelViewController: NSViewController {
             )
             guard let self, self.loadGeneration == generation else { return }
             self.spinner.stopAnimation(nil)
-            self.render(outcome)
+            self.render(outcome, song: track.title)
         }
     }
 
-    private func render(_ outcome: LyricsOutcome) {
+    private func render(_ outcome: LyricsOutcome, song: String) {
         let found: Lyrics
         switch outcome {
         case .found(let result):
             found = result
         case .missing:
-            showState(icon: "quote.bubble", text: String(localized: "No lyrics found"))
+            showState(icon: "quote.bubble", words: LyricsStatusCopy.missing(song: song))
             return
-        case .failed:
-            showState(icon: "wifi.exclamationmark", text: String(localized: "Couldn't reach lrclib.net"))
+        case .failed(let failure):
+            showState(icon: Self.icon(for: failure), words: LyricsStatusCopy.failed(failure))
             retryButton.isHidden = false
             return
         }
         if found.document.instrumental {
-            showState(icon: "music.note", text: String(localized: "Instrumental"))
+            showState(icon: "music.note", words: LyricsStatusCopy.instrumental)
             return
         }
         if found.document.hasSynced {
@@ -381,7 +391,16 @@ final class LyricsPanelViewController: NSViewController {
             scrollToTop()
             return
         }
-        showState(icon: "quote.bubble", text: String(localized: "No lyrics found"))
+        showState(icon: "quote.bubble", words: LyricsStatusCopy.missing(song: song))
+    }
+
+    private static func icon(for failure: LyricsFailure) -> String {
+        switch failure {
+        case .unreachable: return "wifi.exclamationmark"
+        case .timedOut: return "hourglass"
+        case .busy: return "tortoise"
+        case .server, .rejected: return "exclamationmark.triangle"
+        }
     }
 
     private func buildLineViews() {
@@ -576,7 +595,7 @@ final class LyricsPanelViewController: NSViewController {
         return "\(sign)\(String(format: "%.1f", seconds)) s"
     }
 
-    private func showState(icon: String?, text: String) {
+    private func showState(icon: String?, words: LyricsStatusCopy.Words?) {
         retryButton.isHidden = true
         timingButton.isHidden = true
         hideTimingNote()
@@ -587,8 +606,10 @@ final class LyricsPanelViewController: NSViewController {
         cancelScroll()
         stopDisplayLink()
         plainTextView.isHidden = true
-        stateLabel.stringValue = text
-        stateLabel.isHidden = text.isEmpty
+        stateTitle.stringValue = words?.title ?? ""
+        stateTitle.isHidden = words == nil
+        stateLabel.stringValue = words?.body ?? ""
+        stateLabel.isHidden = words == nil
         if let icon {
             stateIcon.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)
             stateIcon.isHidden = false
@@ -598,6 +619,7 @@ final class LyricsPanelViewController: NSViewController {
     }
 
     private func hideState() {
+        stateTitle.isHidden = true
         stateLabel.isHidden = true
         stateIcon.isHidden = true
     }

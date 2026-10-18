@@ -44,6 +44,7 @@ SHARED_IOS_FILES = %w[
   Localizable.xcstrings
   LovedTracksService.swift
   LyricsService.swift
+  LyricsStatusCopy.swift
   LyricsTimingNoteCopy.swift
   MetadataEnrichmentService.swift
   MetadataService.swift

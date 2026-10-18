@@ -224,16 +224,16 @@ final class LyricsViewController: UIViewController {
             case .found(let result):
                 found = result
             case .missing:
-                showStatus(String(localized: "No lyrics available"))
+                showStatus(LyricsStatusCopy.missing(song: trackTitle), symbol: "quote.bubble")
                 return
-            case .failed:
-                showStatus(String(localized: "Couldn't reach lrclib.net"))
+            case .failed(let failure):
+                showStatus(LyricsStatusCopy.failed(failure), symbol: Self.symbol(for: failure))
                 retryButton.isHidden = false
                 return
             }
 
             if found.document.instrumental {
-                showInstrumental()
+                showStatus(LyricsStatusCopy.instrumental, symbol: "music.note")
                 return
             }
 
@@ -244,14 +244,51 @@ final class LyricsViewController: UIViewController {
                 showPlainLyrics(plain)
                 showTimingNote(for: found.document)
             } else {
-                showStatus(String(localized: "No lyrics available"))
+                showStatus(LyricsStatusCopy.missing(song: trackTitle), symbol: "quote.bubble")
             }
         }
     }
 
-    private func showStatus(_ text: String) {
-        statusLabel.text = text
+    private func showStatus(_ words: LyricsStatusCopy.Words, symbol: String) {
+        let centered = NSMutableParagraphStyle()
+        centered.alignment = .center
+        centered.paragraphSpacing = 8
+
+        let attachment = NSTextAttachment()
+        attachment.image = UIImage(
+            systemName: symbol,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 32, weight: .medium)
+        )?.withTintColor(.white.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
+
+        let attributed = NSMutableAttributedString(attachment: attachment)
+        attributed.append(NSAttributedString(
+            string: "\n" + words.title,
+            attributes: [
+                .font: UIFont.scaled(.title3, size: 20, weight: .semibold),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.8),
+            ]
+        ))
+        attributed.append(NSAttributedString(
+            string: "\n" + words.body,
+            attributes: [
+                .font: UIFont.scaled(.subheadline, size: 15, weight: .regular),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.55),
+            ]
+        ))
+        attributed.addAttribute(.paragraphStyle, value: centered, range: NSRange(location: 0, length: attributed.length))
+
+        statusLabel.attributedText = attributed
+        statusLabel.numberOfLines = 0
         statusLabel.isHidden = false
+    }
+
+    private static func symbol(for failure: LyricsFailure) -> String {
+        switch failure {
+        case .unreachable: return "wifi.exclamationmark"
+        case .timedOut: return "hourglass"
+        case .busy: return "tortoise"
+        case .server, .rejected: return "exclamationmark.triangle"
+        }
     }
 
     /// A network failure is recoverable, so it gets a way to recover — a miss
@@ -410,31 +447,6 @@ final class LyricsViewController: UIViewController {
         let seconds = Double(abs(offsetMs)) / 1000
         let sign = offsetMs > 0 ? "+" : "\u{2212}"
         return "\(sign)\(String(format: "%.1f", seconds)) s"
-    }
-
-    private func showInstrumental() {
-        let attachment = NSTextAttachment()
-        attachment.image = UIImage(
-            systemName: "music.note",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 32, weight: .medium)
-        )?.withTintColor(.white.withAlphaComponent(0.5), renderingMode: .alwaysOriginal)
-
-        let attributed = NSMutableAttributedString(attachment: attachment)
-        attributed.append(NSAttributedString(
-            string: String(localized: "\nInstrumental"),
-            attributes: [
-                .font: UIFont.scaled(.title3, size: 20, weight: .medium),
-                .foregroundColor: UIColor.white.withAlphaComponent(0.5),
-            ]
-        ))
-
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        attributed.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: attributed.length))
-
-        statusLabel.attributedText = attributed
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = false
     }
 
     private func showSyncedLyrics(_ found: Lyrics) {

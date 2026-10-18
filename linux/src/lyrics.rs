@@ -2,7 +2,7 @@ use crate::db::{Db, LyricsContent, LyricsRow};
 use crate::library::Track;
 use flaccy_shared::lyrics::{
     best_candidate, clean_title, lead_artist, parse_lrc, parse_lyricsfile, Candidate, Document,
-    Wanted,
+    LyricsFailure, Wanted,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -50,14 +50,14 @@ impl Lyrics {
     }
 }
 
-/// Distinguishes "lrclib has nothing for this track" from "we couldn't ask".
-/// A miss is cached (and expires); a failure is not, so a flaky network never
-/// leaves a permanently blank panel.
+/// Distinguishes "lrclib has nothing for this track" from "we couldn't ask",
+/// and says why we couldn't. A miss is cached (and expires); a failure is not,
+/// so a flaky network never leaves a permanently blank panel.
 #[derive(Clone)]
 pub enum LyricsResult {
     Found(Lyrics),
     Missing,
-    Failed,
+    Failed(LyricsFailure),
 }
 
 fn user_agent() -> String {
@@ -142,14 +142,17 @@ fn found_or_missing(lyrics: Lyrics) -> LyricsResult {
 /// Resolution order: the local database cache, then lyrics the user keeps
 /// alongside the audio (`.lrc` sidecar or an embedded tag), then lrclib. A
 /// cached answer from an older pipeline revision is shown if the server cannot
-/// improve on it.
+/// improve on it, and a cached miss never hides a file the listener has added
+/// since. An unreadable cache costs only the memory, never the lookup.
 pub fn fetch_blocking(db_path: &Path, music_root: &Path, track: &Track) -> LyricsResult {
-    let db = match Db::open(db_path) {
-        Ok(db) => db,
-        Err(_) => return LyricsResult::Failed,
-    };
-    let cached = db.fetch_lyrics(&track.title, &track.artist);
-    if let Some(row) = cached.as_ref().filter(|row| is_current(row)) {
+    let db = Db::open(db_path).ok();
+    let cached = db
+        .as_ref()
+        .and_then(|db| db.fetch_lyrics(&track.title, &track.artist));
+    if let Some(row) = cached
+        .as_ref()
+        .filter(|row| is_current(row) && has_content(row))
+    {
         return found_or_missing(lyrics_from_row(row));
     }
     let offset_ms = cached.as_ref().map_or(0, |row| row.offset_ms);
@@ -162,11 +165,16 @@ pub fn fetch_blocking(db_path: &Path, music_root: &Path, track: &Track) -> Lyric
             instrumental: false,
             revision: REVISION,
         };
-        let _ = db.save_lyrics(&track.title, &track.artist, &content);
+        if let Some(db) = &db {
+            let _ = db.save_lyrics(&track.title, &track.artist, &content);
+        }
         return found_or_missing(Lyrics {
             document: document_from(local.synced_raw.as_deref(), local.plain.as_deref(), None, false),
             offset_ms,
         });
+    }
+    if cached.as_ref().is_some_and(is_current) {
+        return LyricsResult::Missing;
     }
 
     let stale = cached.as_ref().filter(|row| has_content(row));
@@ -179,7 +187,9 @@ pub fn fetch_blocking(db_path: &Path, music_root: &Path, track: &Track) -> Lyric
                 instrumental: fetched.instrumental,
                 revision: REVISION,
             };
-            let _ = db.save_lyrics(&track.title, &track.artist, &content);
+            if let Some(db) = &db {
+                let _ = db.save_lyrics(&track.title, &track.artist, &content);
+            }
             found_or_missing(Lyrics {
                 document: document_from(
                     fetched.synced.as_deref(),
@@ -192,21 +202,25 @@ pub fn fetch_blocking(db_path: &Path, music_root: &Path, track: &Track) -> Lyric
         }
         Remote::Missing => match stale {
             Some(row) => {
-                let _ = db.set_lyrics_revision(&track.title, &track.artist, REVISION);
+                if let Some(db) = &db {
+                    let _ = db.set_lyrics_revision(&track.title, &track.artist, REVISION);
+                }
                 found_or_missing(lyrics_from_row(row))
             }
             None => {
-                let _ = db.save_lyrics(
-                    &track.title,
-                    &track.artist,
-                    &LyricsContent {
-                        synced: None,
-                        plain: None,
-                        lyricsfile: None,
-                        instrumental: false,
-                        revision: REVISION,
-                    },
-                );
+                if let Some(db) = &db {
+                    let _ = db.save_lyrics(
+                        &track.title,
+                        &track.artist,
+                        &LyricsContent {
+                            synced: None,
+                            plain: None,
+                            lyricsfile: None,
+                            instrumental: false,
+                            revision: REVISION,
+                        },
+                    );
+                }
                 crate::logger::info(
                     "lyrics",
                     &format!(
@@ -217,9 +231,9 @@ pub fn fetch_blocking(db_path: &Path, music_root: &Path, track: &Track) -> Lyric
                 LyricsResult::Missing
             }
         },
-        Remote::Failed => match stale {
+        Remote::Failed(failure) => match stale {
             Some(row) => found_or_missing(lyrics_from_row(row)),
-            None => LyricsResult::Failed,
+            None => LyricsResult::Failed(failure),
         },
     }
 }
@@ -241,13 +255,13 @@ struct Fetched {
 enum Remote {
     Found(Fetched),
     Missing,
-    Failed,
+    Failed(LyricsFailure),
 }
 
 enum Reply {
     Body(String),
     NotFound,
-    Failed,
+    Failed(LyricsFailure),
 }
 
 /// lrclib's exact-match endpoint is strict about the album name and about the
@@ -300,7 +314,7 @@ fn get_exact(
     match request(agent, ua, &url) {
         Reply::Body(body) => parse_record(&body).unwrap_or(Remote::Missing),
         Reply::NotFound => Remote::Missing,
-        Reply::Failed => Remote::Failed,
+        Reply::Failed(failure) => Remote::Failed(failure),
     }
 }
 
@@ -319,7 +333,7 @@ fn search_fallback(
     let body = match request(agent, ua, &url) {
         Reply::Body(body) => body,
         Reply::NotFound => return Remote::Missing,
-        Reply::Failed => return Remote::Failed,
+        Reply::Failed(failure) => return Remote::Failed(failure),
     };
     let Ok(records) = serde_json::from_str::<Vec<serde_json::Value>>(&body) else {
         return Remote::Missing;
@@ -368,13 +382,14 @@ fn search_fallback(
 /// One GET, retried once when the server is overloaded or throttling, waiting
 /// as long as it asks within reason. A 404 is an answer, not a failure.
 fn request(agent: &ureq::Agent, ua: &str, url: &str) -> Reply {
+    let mut last_failure = LyricsFailure::Unreachable;
     for attempt in 0..2 {
         match agent.get(url).set("User-Agent", ua).call() {
             Ok(response) => {
                 return response
                     .into_string()
                     .map(Reply::Body)
-                    .unwrap_or(Reply::Failed);
+                    .unwrap_or(Reply::Failed(LyricsFailure::Unreachable));
             }
             Err(ureq::Error::Status(404, _)) => return Reply::NotFound,
             Err(ureq::Error::Status(code, response))
@@ -385,15 +400,38 @@ fn request(agent: &ureq::Agent, ua: &str, url: &str) -> Reply {
                     .and_then(|value| value.trim().parse::<f64>().ok())
                     .unwrap_or(DEFAULT_RETRY_WAIT)
                     .clamp(SHORTEST_RETRY_WAIT, LONGEST_RETRY_WAIT);
+                last_failure = LyricsFailure::from_status(code);
                 std::thread::sleep(Duration::from_secs_f64(wait));
             }
             Err(err) => {
                 crate::logger::warn("lyrics", &format!("lrclib request failed: {err}"));
-                return Reply::Failed;
+                return Reply::Failed(failure_of(&err));
             }
         }
     }
-    Reply::Failed
+    Reply::Failed(last_failure)
+}
+
+/// What a transport or status error from lrclib means to the listener.
+fn failure_of(err: &ureq::Error) -> LyricsFailure {
+    match err {
+        ureq::Error::Status(code, _) => LyricsFailure::from_status(*code),
+        ureq::Error::Transport(transport) => {
+            let timed_out = std::error::Error::source(transport)
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .is_some_and(|io| {
+                    matches!(
+                        io.kind(),
+                        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                    )
+                });
+            if timed_out {
+                LyricsFailure::TimedOut
+            } else {
+                LyricsFailure::Unreachable
+            }
+        }
+    }
 }
 
 fn parse_record(body: &str) -> Option<Remote> {
@@ -582,5 +620,65 @@ mod tests {
             ..lyrics
         };
         assert_eq!(earlier.text_at(9.6), Some("a"));
+    }
+
+    fn scratch_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("flaccy-lyrics-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn track(rel_path: &str) -> Track {
+        Track {
+            id: 1,
+            rel_path: rel_path.to_string(),
+            title: "Song".to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            album_artist: None,
+            track_number: 1,
+            duration: 100.0,
+            codec: None,
+            bit_depth: None,
+            sample_rate: None,
+            channels: None,
+            loved: false,
+            play_count: 0,
+            date_added: 0,
+            last_played: None,
+        }
+    }
+
+    #[test]
+    fn a_cached_miss_does_not_hide_a_lrc_file_added_since() {
+        let dir = scratch_dir("miss-then-sidecar");
+        let db_path = dir.join("library.sqlite");
+        let db = Db::open(&db_path).unwrap();
+        db.save_lyrics(
+            "Song",
+            "Artist",
+            &LyricsContent {
+                synced: None,
+                plain: None,
+                lyricsfile: None,
+                instrumental: false,
+                revision: REVISION,
+            },
+        )
+        .unwrap();
+        drop(db);
+        assert!(matches!(
+            fetch_blocking(&db_path, &dir, &track("missing.flac")),
+            LyricsResult::Missing
+        ));
+        std::fs::write(dir.join("song.lrc"), "[00:05.00]Hello there").unwrap();
+        match fetch_blocking(&db_path, &dir, &track("song.flac")) {
+            LyricsResult::Found(lyrics) => {
+                assert_eq!(lyrics.document.lines.last().unwrap().text, "Hello there");
+            }
+            _ => panic!("the sidecar should have been read past the cached miss"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

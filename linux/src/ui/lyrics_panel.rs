@@ -6,7 +6,8 @@ use crate::ui::screen::is_watched;
 use crate::ui::Ui;
 use adw::prelude::*;
 use flaccy_shared::lyrics::{
-    timing_note, Document, Line, LineProgress, TimingNote, INTERLUDE_BEATS,
+    failure_status, idle_status, instrumental_status, missing_status, searching_status,
+    timing_note, Document, Line, LineProgress, LyricsStatus, TimingNote, INTERLUDE_BEATS,
 };
 use gtk::glib;
 use gtk::pango;
@@ -80,6 +81,11 @@ pub struct LyricsPanel {
     pub set_active: Rc<dyn Fn(bool)>,
 }
 
+fn show_status(page: &adw::StatusPage, status: &LyricsStatus) {
+    page.set_title(&status.title);
+    page.set_description(Some(&status.body));
+}
+
 pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
     let header = gtk::Label::builder()
         .label("Lyrics")
@@ -117,10 +123,11 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
     plain_view.add_css_class("lyric-line");
     plain_view.add_css_class("lyric-line-current");
 
+    let idle = idle_status();
     let status = adw::StatusPage::builder()
         .icon_name("format-justify-center-symbolic")
-        .title("No Lyrics")
-        .description("Play a track to look up lyrics on lrclib.net.")
+        .title(idle.title)
+        .description(idle.body)
         .build();
     let retry = gtk::Button::with_label("Try Again");
     retry.add_css_class("pill");
@@ -369,20 +376,24 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
             scroller.reset();
             retry.set_visible(false);
             timing_button.set_visible(false);
+            let song = state
+                .borrow()
+                .track
+                .as_ref()
+                .map(|track| track.title.clone())
+                .unwrap_or_default();
             synced_note.show(None);
             plain_note.show(None);
             let lyrics = match result {
                 LyricsResult::Found(lyrics) => lyrics,
                 LyricsResult::Missing => {
-                    status.set_title("No Lyrics Found");
-                    status.set_description(Some("lrclib.net has no lyrics for this track."));
+                    show_status(&status, &missing_status(&song));
                     stack.set_visible_child_name("status");
                     sync_driver();
                     return;
                 }
-                LyricsResult::Failed => {
-                    status.set_title("Couldn't Reach lrclib.net");
-                    status.set_description(Some("Check your connection and try again."));
+                LyricsResult::Failed(failure) => {
+                    show_status(&status, &failure_status(*failure));
                     retry.set_visible(true);
                     stack.set_visible_child_name("status");
                     sync_driver();
@@ -391,8 +402,7 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
             };
             let document = &lyrics.document;
             if document.instrumental {
-                status.set_title("Instrumental");
-                status.set_description(Some("This track has no lyrics."));
+                show_status(&status, &instrumental_status());
                 stack.set_visible_child_name("status");
             } else if document.has_synced() {
                 list.append(&head_spacer);
@@ -411,8 +421,7 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
                 plain_note.show(timing_note(document));
                 stack.set_visible_child_name("plain");
             } else {
-                status.set_title("No Lyrics Found");
-                status.set_description(Some("lrclib.net has no lyrics for this track."));
+                show_status(&status, &missing_status(&song));
                 stack.set_visible_child_name("status");
             }
             sync_driver();
@@ -435,8 +444,7 @@ pub fn build(ui: &Rc<Ui>, opts: LyricsOptions) -> LyricsPanel {
                 state.generation
             };
             subtitle.set_label(&format!("{} — {}", track.title, track.artist));
-            status.set_title("Looking Up Lyrics…");
-            status.set_description(Some(""));
+            show_status(&status, &searching_status());
             retry.set_visible(false);
             stack.set_visible_child_name("status");
 

@@ -24,13 +24,14 @@ nonisolated struct Lyrics: Sendable {
     }
 }
 
-/// Separates "lrclib has nothing for this track" from "we couldn't ask it".
-/// A miss is remembered (and expires); a failure is not, so a flaky network
-/// leaves a Retry rather than a permanently blank panel.
+/// Separates "lrclib has nothing for this track" from "we couldn't ask it",
+/// and says why we couldn't. A miss is remembered (and expires); a failure is
+/// not, so a flaky network leaves a Retry rather than a permanently blank
+/// panel.
 nonisolated enum LyricsOutcome: Sendable {
     case found(Lyrics)
     case missing
-    case failed
+    case failed(LyricsFailure)
 }
 
 /// The pure rules behind the lyrics pipeline, kept apart from the service so
@@ -174,7 +175,7 @@ final class LyricsService {
         fileURL: URL? = nil, duration: TimeInterval = 0
     ) async -> LyricsOutcome {
         let cached = try? DatabaseManager.shared.fetchLyrics(trackTitle: track, artist: artist)
-        if let cached, LyricsResolution.isCurrent(cached) {
+        if let cached, LyricsResolution.isCurrent(cached), LyricsResolution.hasContent(cached) {
             return LyricsResolution.outcome(LyricsResolution.lyrics(from: cached))
         }
         let offsetMs = cached?.offsetMs ?? 0
@@ -191,6 +192,7 @@ final class LyricsService {
                 offsetMs: offsetMs
             ))
         }
+        if let cached, LyricsResolution.isCurrent(cached) { return .missing }
 
         let stale = cached.flatMap { LyricsResolution.hasContent($0) ? $0 : nil }
         switch await lookupRemote(track: track, artist: artist, album: album, duration: duration) {
@@ -214,8 +216,8 @@ final class LyricsService {
             )
             AppLogger.info("No lyrics for \(track) — \(artist) (cached miss)", category: .content)
             return .missing
-        case .failed:
-            guard let stale else { return .failed }
+        case .failed(let failure):
+            guard let stale else { return .failed(failure) }
             return LyricsResolution.outcome(LyricsResolution.lyrics(from: stale))
         }
     }
@@ -265,13 +267,13 @@ final class LyricsService {
     private enum Remote {
         case found(Fetched)
         case missing
-        case failed
+        case failed(LyricsFailure)
     }
 
     private enum Reply {
         case body(Data)
         case notFound
-        case failed
+        case failed(LyricsFailure)
     }
 
     /// lrclib's exact-match endpoint is strict about the album name and about
@@ -315,7 +317,7 @@ final class LyricsService {
         switch await request(path: "/api/get", query: query) {
         case .body(let body): return Self.parseRecord(body)
         case .notFound: return .missing
-        case .failed: return .failed
+        case .failed(let failure): return .failed(failure)
         }
     }
 
@@ -328,7 +330,7 @@ final class LyricsService {
         switch await request(path: "/api/search", query: query) {
         case .body(let data): body = data
         case .notFound: return .missing
-        case .failed: return .failed
+        case .failed(let failure): return .failed(failure)
         }
         guard let items = try? JSONSerialization.jsonObject(with: body) as? [Any] else { return .missing }
         let records = items.map { $0 as? [String: Any] ?? [:] }
@@ -355,30 +357,36 @@ final class LyricsService {
     /// waiting as long as it asks within reason. A 404 is an answer, not a
     /// failure.
     private func request(path: String, query: String) async -> Reply {
-        guard let url = URL(string: "https://lrclib.net\(path)?\(query)") else { return .failed }
+        guard let url = URL(string: "https://lrclib.net\(path)?\(query)") else { return .failed(.rejected(400)) }
         var urlRequest = URLRequest(url: url)
         urlRequest.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        var lastFailure = LyricsFailure.unreachable
         for attempt in 0..<2 {
             do {
                 let (data, response) = try await session.data(for: urlRequest)
-                guard let http = response as? HTTPURLResponse else { return .failed }
+                guard let http = response as? HTTPURLResponse else { return .failed(.unreachable) }
                 switch http.statusCode {
                 case 200..<300:
                     return .body(data)
                 case 404:
                     return .notFound
                 case let code where attempt == 0 && (code == 429 || code >= 500):
+                    lastFailure = .forStatus(code)
                     try await Task.sleep(for: .seconds(Self.retryWait(for: http)))
                 default:
                     AppLogger.error("Lyrics request failed: HTTP \(http.statusCode)", category: .content)
-                    return .failed
+                    return .failed(.forStatus(http.statusCode))
                 }
             } catch {
                 AppLogger.error("Lyrics request failed: \(error.localizedDescription)", category: .content)
-                return .failed
+                return .failed(Self.failure(of: error))
             }
         }
-        return .failed
+        return .failed(lastFailure)
+    }
+
+    private static func failure(of error: Error) -> LyricsFailure {
+        (error as? URLError)?.code == .timedOut ? .timedOut : .unreachable
     }
 
     private static func retryWait(for response: HTTPURLResponse) -> TimeInterval {
