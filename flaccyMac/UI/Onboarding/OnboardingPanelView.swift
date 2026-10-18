@@ -337,7 +337,10 @@ final class OnboardingPanelView: NSView {
             self.spinner.stopAnimation(nil)
             self.progressLabel.stringValue = ""
             if !success {
-                MacToast.show(String(localized: "Couldn't download the sample album."), style: .error, in: self.window)
+                let message = SampleMusicService.shared.interruption == .resumable
+                    ? String(localized: "The sample album download was interrupted. Try again to pick up where it stopped.")
+                    : String(localized: "Couldn't reach the sample music server. Check your connection and try again.")
+                MacToast.show(message, style: .error, in: self.window)
             }
         }
     }

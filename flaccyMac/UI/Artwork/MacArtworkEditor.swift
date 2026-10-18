@@ -116,7 +116,7 @@ enum MacArtworkEditor {
                     MacToast.show(String(localized: "Automatic cover restored"), style: .success, in: window)
                 } catch {
                     AppLogger.error("Resetting playlist cover failed: \(error.localizedDescription)", category: .database)
-                    MacToast.show(String(localized: "Couldn't restore the automatic cover. Try again."), style: .error, in: window)
+                    MacToast.show(String(localized: "Couldn't restore the automatic cover — the library database couldn't be written. Check free disk space and try again."), style: .error, in: window)
                 }
             }
         }

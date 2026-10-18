@@ -137,7 +137,7 @@ enum TrackContextMenu {
                     if let host { ToastView.show(String(localized: "Added to \(playlist.name)"), in: host.view, style: .success) }
                 } catch {
                     AppLogger.error("Failed to add track to playlist: \(error.localizedDescription)", category: .database)
-                    if let host { ToastView.show(String(localized: "Failed to add to playlist"), in: host.view, style: .error) }
+                    if let host { ToastView.show(String(localized: "Couldn't add to \u{201C}\(playlist.name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), in: host.view, style: .error) }
                 }
             })
         }
@@ -236,6 +236,7 @@ enum TrackContextMenu {
                 if let host { ToastView.show(String(localized: "Added to \(name)"), in: host.view, style: .success) }
             } catch {
                 AppLogger.error("Failed to create playlist: \(error.localizedDescription)", category: .database)
+                if let host { ToastView.show(String(localized: "Couldn't create \u{201C}\(name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), in: host.view, style: .error) }
             }
         })
         host.present(alert, animated: true)

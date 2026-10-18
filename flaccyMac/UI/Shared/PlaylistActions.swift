@@ -63,7 +63,7 @@ enum PlaylistActions {
                 }
             } catch {
                 AppLogger.error("Playlist creation failed: \(error.localizedDescription)", category: .database)
-                MacToast.show(String(localized: "Couldn't create playlist."), style: .error, in: window)
+                MacToast.show(String(localized: "Couldn't create \u{201C}\(name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), style: .error, in: window)
             }
         }
 
@@ -90,7 +90,7 @@ enum PlaylistActions {
             NotificationCenter.default.post(name: .flaccyPlaylistsDidChange, object: nil)
         } catch {
             AppLogger.error("Add to playlist failed: \(error.localizedDescription)", category: .database)
-            MacToast.show(String(localized: "Couldn't add to playlist."), style: .error, in: window)
+            MacToast.show(String(localized: "Couldn't add to \u{201C}\(name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), style: .error, in: window)
         }
     }
 

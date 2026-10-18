@@ -356,14 +356,18 @@ final class YearInMusicViewController: NSViewController {
         panel.nameFieldStringValue = "Flaccy \(selectedYear) \(selectedSlide.displayName) \(suffix).png"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            guard let data = image.pngData() else { return }
+            guard let data = image.pngData() else {
+                AppLogger.error("Year in Music export failed: the slide could not be encoded as PNG", category: .ui)
+                MacToast.show(String(localized: "Couldn't export the slide — it couldn't be encoded as a PNG. Try again."), style: .error, in: self?.view.window)
+                return
+            }
             do {
                 try data.write(to: url)
                 AppLogger.info("Year in Music export saved to \(url.path)", category: .ui)
                 MacToast.show(String(localized: "Exported \(url.lastPathComponent)"), style: .success, in: self?.view.window)
             } catch {
                 AppLogger.error("Year in Music export failed: \(error.localizedDescription)", category: .ui)
-                MacToast.show(String(localized: "Export failed"), style: .error, in: self?.view.window)
+                MacToast.show(String(localized: "Couldn't save \u{201C}\(url.lastPathComponent)\u{201D}: \(error.localizedDescription)"), style: .error, in: self?.view.window)
             }
         }
     }

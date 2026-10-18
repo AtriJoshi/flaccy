@@ -499,6 +499,7 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
                 self?.viewModel.refreshPlaylists()
             } catch {
                 AppLogger.error("Failed to create playlist: \(error.localizedDescription)", category: .database)
+                if let self { ToastView.show(String(localized: "Couldn't create \u{201C}\(name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), in: self.view, style: .error) }
             }
         })
         present(alert, animated: true)
@@ -639,7 +640,7 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
                 config?.image = UIImage(systemName: "arrow.clockwise.circle")
             case .unreachable:
                 config?.title = String(localized: "Try Again")
-                config?.subtitle = String(localized: "Couldn't reach the server — check your connection")
+                config?.subtitle = String(localized: "Couldn't reach the sample music server — check your connection")
                 config?.image = UIImage(systemName: "arrow.clockwise.circle")
             case nil:
                 config?.title = String(localized: "Add Sample Music")
@@ -1616,6 +1617,7 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
                         completion(true)
                     } catch {
                         AppLogger.error("Failed to delete playlist: \(error.localizedDescription)", category: .database)
+                        ToastView.show(String(localized: "Couldn't delete \u{201C}\(playlist.name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), in: self.view, style: .error)
                         completion(false)
                     }
                 }
@@ -1758,6 +1760,7 @@ final class LibraryViewController: UIViewController, SonglinkShareable {
             ToastView.show(String(localized: "Saved \u{201C}\(suggestion.title)\u{201D}"), in: view, style: .success)
         } catch {
             AppLogger.error("Failed to save suggested playlist: \(error.localizedDescription)", category: .database)
+            ToastView.show(String(localized: "Couldn't create \u{201C}\(suggestion.title)\u{201D} — the library database couldn't be written. Check free disk space and try again."), in: view, style: .error)
         }
     }
 }

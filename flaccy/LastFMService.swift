@@ -1308,11 +1308,11 @@ enum LastFMError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidCallbackURL: String(localized: "Invalid Last.fm callback URL")
-        case .authenticationFailed: String(localized: "Last.fm authentication failed")
-        case .authenticationUnavailable: String(localized: "Couldn't open the Last.fm sign-in page")
-        case .invalidURL: String(localized: "Invalid Last.fm API URL")
-        case .invalidResponse: String(localized: "Invalid response from Last.fm")
+        case .invalidCallbackURL: String(localized: "Last.fm returned to Flaccy without a sign-in token, so you're not signed in. Try again.")
+        case .authenticationFailed: String(localized: "Last.fm didn't confirm the sign-in, so you're not signed in. Try again.")
+        case .authenticationUnavailable: String(localized: "Couldn't open the Last.fm sign-in page. Close any other sign-in sheet and try again.")
+        case .invalidURL: String(localized: "Flaccy built an invalid Last.fm request address, so nothing was sent.")
+        case .invalidResponse: String(localized: "Last.fm or Flaccy's signing service sent a reply Flaccy couldn't read. Try again later.")
         case .apiKeyNotConfigured: String(localized: "Last.fm API key not configured")
         case .apiError(let message): String(localized: "Last.fm API error: \(message)")
         }

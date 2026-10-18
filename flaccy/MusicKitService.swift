@@ -29,6 +29,35 @@ nonisolated struct MusicKitAlbumMatch: Sendable {
     let appleMusicURL: URL
 }
 
+/// How one Apple Music catalog search ended: a match, a catalog with nothing
+/// that fits, a search that never completed, or no permission to search.
+nonisolated enum MusicKitLookup<Match: Sendable>: Sendable {
+    case found(Match)
+    case notFound
+    case failed
+    case denied
+
+    var match: Match? {
+        if case .found(let match) = self { return match }
+        return nil
+    }
+
+    /// The sentence that says why a search for `title` produced no match, or
+    /// nil when it produced one.
+    func missMessage(title: String) -> String? {
+        switch self {
+        case .found:
+            nil
+        case .notFound:
+            String(localized: "\u{201C}\(title)\u{201D} isn't in the Apple Music catalog.")
+        case .failed:
+            String(localized: "Couldn't reach Apple Music. Check your connection and try again.")
+        case .denied:
+            String(localized: "Allow Apple Music access for Flaccy to look up \u{201C}\(title)\u{201D}.")
+        }
+    }
+}
+
 final class MusicKitService {
 
     static let shared = MusicKitService()
@@ -54,12 +83,16 @@ final class MusicKitService {
     }
 
     nonisolated func findSong(title: String, artist: String) async -> MusicKitSongMatch? {
+        await lookupSong(title: title, artist: artist).match
+    }
+
+    nonisolated func lookupSong(title: String, artist: String) async -> MusicKitLookup<MusicKitSongMatch> {
         let cacheKey = "\(artist.lowercased())|\(title.lowercased())" as NSString
         if let cached = songCache.object(forKey: cacheKey) {
-            return cached.match
+            return .found(cached.match)
         }
 
-        guard await requestAuthorizationIfNeeded() else { return nil }
+        guard await requestAuthorizationIfNeeded() else { return .denied }
 
         do {
             var request = MusicCatalogSearchRequest(term: "\(artist) \(title)", types: [Song.self])
@@ -75,7 +108,7 @@ final class MusicKitService {
 
             guard let song = match, let url = song.url else {
                 await AppLogger.debug("MusicKit: no song match for \(artist) - \(title)", category: .content)
-                return nil
+                return .notFound
             }
 
             let result = MusicKitSongMatch(
@@ -85,20 +118,24 @@ final class MusicKitService {
                 appleMusicURL: url
             )
             songCache.setObject(CachedSongMatch(match: result), forKey: cacheKey)
-            return result
+            return .found(result)
         } catch {
             await AppLogger.error("MusicKit song search failed: \(error.localizedDescription)", category: .content)
-            return nil
+            return .failed
         }
     }
 
     nonisolated func findAlbum(title: String, artist: String) async -> MusicKitAlbumMatch? {
+        await lookupAlbum(title: title, artist: artist).match
+    }
+
+    nonisolated func lookupAlbum(title: String, artist: String) async -> MusicKitLookup<MusicKitAlbumMatch> {
         let cacheKey = "\(artist.lowercased())|\(title.lowercased())" as NSString
         if let cached = albumCache.object(forKey: cacheKey) {
-            return cached.match
+            return .found(cached.match)
         }
 
-        guard await requestAuthorizationIfNeeded() else { return nil }
+        guard await requestAuthorizationIfNeeded() else { return .denied }
 
         do {
             var request = MusicCatalogSearchRequest(term: "\(artist) \(title)", types: [MusicKit.Album.self])
@@ -112,7 +149,7 @@ final class MusicKitService {
 
             guard let album = match, let url = album.url else {
                 await AppLogger.debug("MusicKit: no album match for \(artist) - \(title)", category: .content)
-                return nil
+                return .notFound
             }
 
             let artworkURL = album.artwork?.url(width: 1600, height: 1600)
@@ -124,10 +161,10 @@ final class MusicKitService {
                 appleMusicURL: url
             )
             albumCache.setObject(CachedAlbumMatch(match: result), forKey: cacheKey)
-            return result
+            return .found(result)
         } catch {
             await AppLogger.error("MusicKit album search failed: \(error.localizedDescription)", category: .content)
-            return nil
+            return .failed
         }
     }
 

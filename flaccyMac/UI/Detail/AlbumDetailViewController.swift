@@ -418,7 +418,7 @@ final class AlbumDetailViewController: NSViewController {
             scope: .album, key: EnrichmentKey.album(title: title, artist: artist)
         )) ?? nil
         guard record?.lastFailure == .transport else { return }
-        metaLabel.stringValue = String(localized: "Metadata unavailable offline")
+        metaLabel.stringValue = String(localized: "Couldn't reach the metadata sources. Year and genre will load once you're online.")
         metaLabel.textColor = MacColors.tertiaryLabel
         metaLabel.isHidden = false
     }

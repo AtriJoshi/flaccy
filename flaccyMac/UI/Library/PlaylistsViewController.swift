@@ -308,7 +308,7 @@ final class PlaylistsViewController: NSViewController {
             NotificationCenter.default.post(name: .flaccyPlaylistsDidChange, object: nil)
         } catch {
             AppLogger.error("Playlist rename failed: \(error.localizedDescription)", category: .database)
-            MacToast.show(String(localized: "Couldn't rename playlist."), style: .error, in: window)
+            MacToast.show(String(localized: "Couldn't rename \u{201C}\(oldName)\u{201D} — the library database couldn't be written. Check free disk space and try again."), style: .error, in: window)
         }
     }
 
@@ -328,7 +328,7 @@ final class PlaylistsViewController: NSViewController {
                 NotificationCenter.default.post(name: .flaccyPlaylistsDidChange, object: nil)
             } catch {
                 AppLogger.error("Playlist delete failed: \(error.localizedDescription)", category: .database)
-                MacToast.show(String(localized: "Couldn't delete playlist."), style: .error, in: window)
+                MacToast.show(String(localized: "Couldn't delete \u{201C}\(record.name)\u{201D} — the library database couldn't be written. Check free disk space and try again."), style: .error, in: window)
             }
         }
     }

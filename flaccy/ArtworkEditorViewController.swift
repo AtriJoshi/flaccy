@@ -625,7 +625,7 @@ final class ArtworkEditorViewController: UIViewController {
                 await MainActor.run {
                     UINotificationFeedbackGenerator().notificationOccurred(.error)
                     self?.saveButton.isEnabled = true
-                    self?.infoLabel.text = String(localized: "Couldn't save the artwork. Try again.")
+                    self?.infoLabel.text = String(localized: "Couldn't save the artwork — the library database couldn't be written. Check free disk space and try again.")
                 }
             }
         }

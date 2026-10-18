@@ -785,7 +785,11 @@ final class ArtworkEditorViewController: NSViewController {
                 self.isSaving = false
                 self.cropView.setLoading(false)
                 self.refreshSaveState()
-                self.fail(String(localized: "Couldn't save the artwork. Try again."))
+                if case ArtworkInputError.unreadable = error {
+                    self.fail(String(localized: "Couldn't save the artwork — the framed picture couldn't be rendered. Choose a different image."))
+                } else {
+                    self.fail(String(localized: "Couldn't save the artwork — the library database couldn't be written. Check free disk space and try again."))
+                }
             }
         }
     }
@@ -842,8 +846,8 @@ final class ArtworkEditorViewController: NSViewController {
             } catch {
                 AppLogger.error("Resetting cover failed: \(error.localizedDescription)", category: .database)
                 self?.fail(subject.isPlaylist
-                    ? String(localized: "Couldn't restore the automatic cover. Try again.")
-                    : String(localized: "Couldn't restore the original artwork. Try again."))
+                    ? String(localized: "Couldn't restore the automatic cover — the library database couldn't be written. Check free disk space and try again.")
+                    : String(localized: "Couldn't restore the original artwork — the library database couldn't be written. Check free disk space and try again."))
             }
         }
     }

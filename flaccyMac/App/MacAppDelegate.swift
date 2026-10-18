@@ -265,7 +265,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
                 PurchaseFunnel.noteFolderChosen()
             } catch {
                 AppLogger.error("Bookmark creation failed: \(error.localizedDescription)", category: .content)
-                MacToast.show(String(localized: "Couldn't access that folder."), style: .error, in: window)
+                MacToast.show(String(localized: "Couldn't use \u{201C}\(url.lastPathComponent)\u{201D} as your music folder — macOS wouldn't grant Flaccy lasting access: \(error.localizedDescription)"), style: .error, in: window)
             }
         }
     }

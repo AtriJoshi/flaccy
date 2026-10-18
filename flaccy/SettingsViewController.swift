@@ -965,9 +965,9 @@ final class SettingsViewController: UITableViewController {
                 guard !isAuthCancellation(error) else { return }
                 notificationFeedback.notificationOccurred(.error)
                 let message = (error as? LastFMError)?.errorDescription
-                    ?? String(localized: "Last.fm sign-in didn't complete. Check your connection and try again.")
+                    ?? String(localized: "Last.fm sign-in didn't complete: \(error.localizedDescription)")
                 let alert = UIAlertController(
-                    title: String(localized: "Couldn't Connect"),
+                    title: String(localized: "Couldn't Connect to Last.fm"),
                     message: message,
                     preferredStyle: .alert
                 )

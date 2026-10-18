@@ -199,9 +199,17 @@ enum MacTrackMenuFactory {
         let record = (try? DatabaseManager.shared.fetchEnrichmentRecord(
             scope: .album, key: EnrichmentKey.album(title: album.title, artist: album.artist)
         )) ?? nil
-        return record?.lastFailure == .transport
-            ? String(localized: "Metadata unavailable offline")
-            : String(localized: "No new metadata found")
+        let title = album.title
+        switch record?.lastFailure {
+        case .transport:
+            return String(localized: "Couldn't reach the metadata sources for \u{201C}\(title)\u{201D}. Check your connection and try again.")
+        case .rateLimited:
+            return String(localized: "The metadata sources are busy. Try \u{201C}\(title)\u{201D} again in a few minutes.")
+        case .unauthorized:
+            return String(localized: "A metadata source refused the request for \u{201C}\(title)\u{201D}. Try again later.")
+        case .notFound, nil:
+            return String(localized: "The metadata sources have nothing new for \u{201C}\(title)\u{201D}.")
+        }
     }
 
     private static func disabledHeader(_ title: String) -> NSMenuItem {

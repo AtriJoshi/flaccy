@@ -736,7 +736,7 @@ final class ChartsViewController: NSViewController {
         guard let data = viewModel.data else { return }
         let palette = ArtworkPaletteExtractor.fallbackPalette(seed: data.persona + data.period.rawValue)
         guard let image = RecapShareCardRenderer.makeImage(data: data, palette: palette) else {
-            MacToast.show(String(localized: "Couldn't render the share card."), style: .error, in: view.window)
+            MacToast.show(String(localized: "Couldn't draw the recap card — the system couldn't allocate its image. Try again."), style: .error, in: view.window)
             return
         }
         let menu = NSMenu()

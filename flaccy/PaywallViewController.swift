@@ -554,7 +554,7 @@ final class PaywallViewController: UIViewController {
                 notificationFeedback.notificationOccurred(.error)
                 presentInfoAlert(
                     title: String(localized: "Purchase Failed"),
-                    message: String(localized: "The purchase couldn't be completed. Check your connection and try again.")
+                    message: String(localized: "The purchase couldn't be completed: \(error.localizedDescription)")
                 )
             }
         }

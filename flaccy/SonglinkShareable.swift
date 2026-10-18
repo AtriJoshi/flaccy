@@ -43,7 +43,7 @@ extension SonglinkShareable {
 
     func shareTrackViaSonglink(title: String, artist: String, from sourceView: UIView) {
         startSonglinkLookup(
-            failureMessage: String(localized: "Couldn't find this track on streaming platforms"),
+            title: title,
             sourceView: sourceView
         ) {
             await SonglinkService.shared.lookup(title: title, artist: artist)
@@ -52,7 +52,7 @@ extension SonglinkShareable {
 
     func shareAlbumViaSonglink(title: String, artist: String, from sourceView: UIView) {
         startSonglinkLookup(
-            failureMessage: String(localized: "Couldn't find this album on streaming platforms"),
+            title: title,
             sourceView: sourceView
         ) {
             await SonglinkService.shared.lookupAlbum(title: title, artist: artist)
@@ -67,19 +67,19 @@ extension SonglinkShareable {
     /// Cancels any in-flight lookup, then runs a new one behind a tap-to-cancel
     /// loading overlay without retaining the presenting view controller.
     private func startSonglinkLookup(
-        failureMessage: String,
+        title: String,
         sourceView: UIView,
-        lookup: @escaping () async -> SonglinkResult?
+        lookup: @escaping () async -> SonglinkOutcome
     ) {
         songlinkLookupHandle?.cancel()
         let overlay = showSonglinkLoading()
         let task = Task { [weak self, weak sourceView] in
-            let result = await lookup()
+            let outcome = await lookup()
             overlay.dismiss()
             guard !Task.isCancelled, let self else { return }
-            guard let result else {
-                if let sourceView {
-                    ToastView.show(failureMessage, in: sourceView, style: .error)
+            guard let result = outcome.result else {
+                if let sourceView, let message = outcome.failureMessage(title: title) {
+                    ToastView.show(message, in: sourceView, style: .error)
                 }
                 return
             }

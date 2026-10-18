@@ -560,18 +560,23 @@ extension WantlistViewController: UICollectionViewDelegate {
         }
         Task { [weak self] in
             let url: URL?
+            var missMessage = String(localized: "\u{201C}\(title)\u{201D} isn't in the Apple Music catalog.")
             if isAlbum {
-                url = await MusicKitService.shared.findAlbum(title: title, artist: artist)?.appleMusicURL
+                let lookup = await MusicKitService.shared.lookupAlbum(title: title, artist: artist)
+                url = lookup.match?.appleMusicURL
+                missMessage = lookup.missMessage(title: title) ?? missMessage
             } else if title.isEmpty {
                 url = nil
             } else {
-                url = await MusicKitService.shared.findSong(title: title, artist: artist)?.appleMusicURL
+                let lookup = await MusicKitService.shared.lookupSong(title: title, artist: artist)
+                url = lookup.match?.appleMusicURL
+                missMessage = lookup.missMessage(title: title) ?? missMessage
             }
             guard let self else { return }
             if let url {
                 await UIApplication.shared.open(url)
             } else {
-                ToastView.show(String(localized: "Not found on Apple Music"), in: self.view, style: .error)
+                ToastView.show(missMessage, in: self.view, style: .error)
             }
         }
     }

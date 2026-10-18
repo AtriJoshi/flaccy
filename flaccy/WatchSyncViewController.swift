@@ -56,7 +56,7 @@ private enum AlbumSyncStatus {
         case .synced: return (String(localized: "Synced"), .systemGreen)
         case .sending: return (String(localized: "Sending"), .systemBlue)
         case .waiting: return (String(localized: "Waiting"), .systemGray)
-        case .failed: return (String(localized: "Failed"), .systemRed)
+        case .failed: return (String(localized: "Send failed"), .systemRed)
         case .storageFull: return (String(localized: "Storage Full"), .systemOrange)
         case .partial, .notSynced: return nil
         }
@@ -67,7 +67,7 @@ private enum AlbumSyncStatus {
         case .synced: return String(localized: "Synced")
         case let .sending(fraction): return String(localized: "Sending, \(SyncFormat.percent(fraction))")
         case .waiting: return String(localized: "Waiting")
-        case .failed: return String(localized: "Failed")
+        case .failed: return String(localized: "Couldn't send to Apple Watch. Tap to retry.")
         case .storageFull: return String(localized: "Storage full")
         case let .partial(synced, total): return String(localized: "\(synced) of \(total) synced")
         case .notSynced: return String(localized: "Not synced")

@@ -423,7 +423,7 @@ final class LastFMSettingsPane: SettingsPane {
                 }
                 AppLogger.error("Last.fm authentication failed: \(error.localizedDescription)", category: .auth)
                 let message = (error as? LastFMError)?.errorDescription
-                    ?? String(localized: "Couldn't connect to Last.fm.")
+                    ?? String(localized: "Couldn't connect to Last.fm: \(error.localizedDescription)")
                 MacToast.show(message, style: .error, in: self?.view.window)
             }
         }
@@ -1001,7 +1001,7 @@ final class LibrarySettingsPane: SettingsPane {
                 self?.refresh()
             } catch {
                 AppLogger.error("Bookmark creation failed: \(error.localizedDescription)", category: .content)
-                MacToast.show(String(localized: "Couldn't access that folder."), style: .error, in: self?.view.window)
+                MacToast.show(String(localized: "Couldn't use \u{201C}\(url.lastPathComponent)\u{201D} as your music folder — macOS wouldn't grant Flaccy lasting access: \(error.localizedDescription)"), style: .error, in: self?.view.window)
             }
         }
     }

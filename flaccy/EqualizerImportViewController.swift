@@ -342,7 +342,7 @@ extension EqualizerImportViewController: UIDocumentPickerDelegate {
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first, let text = try? String(contentsOf: url, encoding: .utf8) else {
-            ToastView.show(String(localized: "That file could not be read"), in: view, style: .error)
+            ToastView.show(String(localized: "Couldn't read that file as UTF-8 text. Equalizer APO and AutoEq profiles are plain text files."), in: view, style: .error)
             return
         }
         textView.text = text

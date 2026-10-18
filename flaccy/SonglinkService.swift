@@ -23,6 +23,37 @@ nonisolated struct SonglinkResult: Sendable {
     let artist: String
 }
 
+/// How one Songlink lookup ended. `noMatch` means the catalog or the page
+/// answered and has nothing for the item; `unreachable` means no answer came
+/// back (offline, timeout, throttled or a failing page); `needsAppleMusicAccess`
+/// means the Apple Music permission that resolves the item was refused.
+nonisolated enum SonglinkOutcome: Sendable {
+    case found(SonglinkResult)
+    case noMatch
+    case unreachable
+    case needsAppleMusicAccess
+
+    var result: SonglinkResult? {
+        if case .found(let result) = self { return result }
+        return nil
+    }
+
+    /// The toast that says why a lookup for `title` produced no links, or nil
+    /// when it produced some.
+    func failureMessage(title: String) -> String? {
+        switch self {
+        case .found:
+            nil
+        case .noMatch:
+            String(localized: "Songlink has no streaming links for \u{201C}\(title)\u{201D}.")
+        case .unreachable:
+            String(localized: "Couldn't reach Songlink. Check your connection and try again.")
+        case .needsAppleMusicAccess:
+            String(localized: "Allow Apple Music access for Flaccy to find links for \u{201C}\(title)\u{201D}.")
+        }
+    }
+}
+
 final class SonglinkService {
 
     static let shared = SonglinkService()
@@ -59,48 +90,62 @@ final class SonglinkService {
         cache.countLimit = 100
     }
 
-    nonisolated func lookup(title: String, artist: String) async -> SonglinkResult? {
+    nonisolated func lookup(title: String, artist: String) async -> SonglinkOutcome {
         let cacheKey = "song|\(artist.lowercased())|\(title.lowercased())" as NSString
         if let cached = cache.object(forKey: cacheKey) {
-            return cached.result
+            return .found(cached.result)
         }
 
-        guard let songMatch = await MusicKitService.shared.findSong(title: title, artist: artist) else {
+        let songMatch: MusicKitSongMatch
+        switch await MusicKitService.shared.lookupSong(title: title, artist: artist) {
+        case .found(let match):
+            songMatch = match
+        case .notFound:
             await AppLogger.debug("Songlink: no Apple Music match for \(artist) - \(title)", category: .content)
-            return nil
+            return .noMatch
+        case .failed:
+            return .unreachable
+        case .denied:
+            return .needsAppleMusicAccess
         }
 
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled else { return .unreachable }
         await throttle.wait()
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled else { return .unreachable }
 
-        guard let result = await fetchSonglink(url: songMatch.appleMusicURL, title: title, artist: artist) else {
-            return nil
+        let outcome = await fetchSonglink(url: songMatch.appleMusicURL, title: title, artist: artist)
+        if let result = outcome.result {
+            cache.setObject(CachedResult(result: result), forKey: cacheKey)
         }
-
-        cache.setObject(CachedResult(result: result), forKey: cacheKey)
-        return result
+        return outcome
     }
 
-    nonisolated func lookupAlbum(title: String, artist: String) async -> SonglinkResult? {
+    nonisolated func lookupAlbum(title: String, artist: String) async -> SonglinkOutcome {
         let cacheKey = "album|\(artist.lowercased())|\(title.lowercased())" as NSString
         if let cached = cache.object(forKey: cacheKey) {
-            return cached.result
+            return .found(cached.result)
         }
 
-        guard let albumMatch = await MusicKitService.shared.findAlbum(title: title, artist: artist) else {
+        let albumMatch: MusicKitAlbumMatch
+        switch await MusicKitService.shared.lookupAlbum(title: title, artist: artist) {
+        case .found(let match):
+            albumMatch = match
+        case .notFound:
             await AppLogger.debug("Songlink: no Apple Music album match for \(artist) - \(title)", category: .content)
-            return nil
+            return .noMatch
+        case .failed:
+            return .unreachable
+        case .denied:
+            return .needsAppleMusicAccess
         }
 
         await throttle.wait()
 
-        guard let result = await fetchSonglink(url: albumMatch.appleMusicURL, title: title, artist: artist) else {
-            return nil
+        let outcome = await fetchSonglink(url: albumMatch.appleMusicURL, title: title, artist: artist)
+        if let result = outcome.result {
+            cache.setObject(CachedResult(result: result), forKey: cacheKey)
         }
-
-        cache.setObject(CachedResult(result: result), forKey: cacheKey)
-        return result
+        return outcome
     }
 
     /// Odesli retired its public API (every call now answers 401
@@ -108,38 +153,38 @@ final class SonglinkService {
     /// source: `song.link/i/<iTunes id>` and `album.link/i/<collection id>`
     /// resolve directly, and the page embeds its platform links as Next.js
     /// data. A page that cannot be parsed still yields the universal link.
-    nonisolated private func fetchSonglink(url: URL, title: String, artist: String) async -> SonglinkResult? {
+    nonisolated private func fetchSonglink(url: URL, title: String, artist: String) async -> SonglinkOutcome {
         guard let pageURL = SonglinkPage.pageURL(forAppleMusic: url) else {
             await AppLogger.warning("Songlink: no iTunes id in \(url.absoluteString)", category: .content)
-            return nil
+            return .noMatch
         }
         var request = URLRequest(url: pageURL)
         request.setValue("Mozilla/5.0 (compatible; Flaccy)", forHTTPHeaderField: "User-Agent")
         do {
             let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return nil }
+            guard let http = response as? HTTPURLResponse else { return .unreachable }
             if http.statusCode == 429 {
                 await AppLogger.warning("Songlink rate limited", category: .content)
-                return nil
+                return .unreachable
             }
             guard http.statusCode == 200 else {
                 await AppLogger.warning("Songlink page returned \(http.statusCode)", category: .content)
-                return nil
+                return http.statusCode == 404 ? .noMatch : .unreachable
             }
             let parsed = SonglinkPage.parse(html: String(decoding: data, as: UTF8.self))
             let links = parsed.links.map { platformLink(key: $0.platform, url: $0.url) }
                 .sorted { a, b in
                     (Self.knownPlatforms[a.key]?.order ?? 100) < (Self.knownPlatforms[b.key]?.order ?? 100)
                 }
-            return SonglinkResult(
+            return .found(SonglinkResult(
                 pageURL: parsed.pageURL ?? pageURL,
                 platformLinks: links,
                 title: parsed.title ?? title,
                 artist: parsed.artist ?? artist
-            )
+            ))
         } catch {
             await AppLogger.error("Songlink fetch failed: \(error.localizedDescription)", category: .content)
-            return nil
+            return .unreachable
         }
     }
 

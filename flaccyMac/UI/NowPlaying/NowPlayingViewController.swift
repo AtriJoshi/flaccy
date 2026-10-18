@@ -776,8 +776,11 @@ final class NowPlayingViewController: NSViewController {
         guard let track = player.currentTrack else { return }
         let anchor = (sender.representedObject as? NSView) ?? shareCapsule
         Task { [weak self] in
-            guard let result = await SonglinkService.shared.lookup(title: track.title, artist: track.artist) else {
-                MacToast.show(String(localized: "Couldn't find this track on streaming services."), style: .error, in: self?.view.window)
+            let outcome = await SonglinkService.shared.lookup(title: track.title, artist: track.artist)
+            guard let result = outcome.result else {
+                if let message = outcome.failureMessage(title: track.title) {
+                    MacToast.show(message, style: .error, in: self?.view.window)
+                }
                 return
             }
             guard let self, let anchor else { return }
@@ -791,8 +794,11 @@ final class NowPlayingViewController: NSViewController {
     @objc private func copySonglink(_ sender: NSMenuItem) {
         guard let track = player.currentTrack else { return }
         Task { [weak self] in
-            guard let result = await SonglinkService.shared.lookup(title: track.title, artist: track.artist) else {
-                MacToast.show(String(localized: "Couldn't find this track on streaming services."), style: .error, in: self?.view.window)
+            let outcome = await SonglinkService.shared.lookup(title: track.title, artist: track.artist)
+            guard let result = outcome.result else {
+                if let message = outcome.failureMessage(title: track.title) {
+                    MacToast.show(message, style: .error, in: self?.view.window)
+                }
                 return
             }
             NSPasteboard.general.clearContents()

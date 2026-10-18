@@ -1111,9 +1111,10 @@ final class NowPlayingViewController: UIViewController, SonglinkShareable {
 
     private func copySonglink(title: String, artist: String) {
         Task { [weak self] in
-            guard let result = await SonglinkService.shared.lookup(title: title, artist: artist) else {
-                if let self {
-                    ToastView.show(String(localized: "Couldn't find a Songlink for this track"), in: self.view, style: .error)
+            let outcome = await SonglinkService.shared.lookup(title: title, artist: artist)
+            guard let result = outcome.result else {
+                if let self, let message = outcome.failureMessage(title: title) {
+                    ToastView.show(message, in: self.view, style: .error)
                 }
                 return
             }
