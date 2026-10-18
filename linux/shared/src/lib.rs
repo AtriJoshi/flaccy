@@ -19,3 +19,4 @@ pub mod library_surface;
 pub mod load_progress;
 pub mod lyrics;
 pub mod playlist_cover;
+pub mod track_page_layout;

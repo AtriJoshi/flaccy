@@ -2,7 +2,7 @@ use crate::events::AppEvent;
 use crate::library::{disc_sections, format_time, Album, Track};
 use crate::ui::track_page::{
     balance_columns, column_count, even_runs, matches, reveal, reveal_row, ControlBar, Frame,
-    PageKind, TableOptions, TrackLayout, TrackTable, FILTER_THRESHOLD,
+    PageKind, TableOptions, TrackLayout, TrackTable, FILTER_THRESHOLD, SONGS_PER_COLUMN,
 };
 use crate::ui::{context, Ui};
 use adw::prelude::*;
@@ -10,10 +10,6 @@ use gtk::pango;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-
-/// An album with fewer songs than this is never split over several columns:
-/// the page would be wider than it is tall for no gain.
-const SONGS_PER_COLUMN: usize = 6;
 
 /// One disc, one side, or one run of an album's songs: an optional header over
 /// the boxed list of its rows.
