@@ -186,7 +186,9 @@ pub fn confirm_reset(ui: &Rc<Ui>, playlist_id: i64) {
                     "artwork",
                     &format!("resetting playlist cover failed: {err}"),
                 );
-                ui.core.toast("Couldn't restore the automatic cover");
+                ui.core.toast(
+                    "Couldn't restore the automatic cover — the library database couldn't be written. Check free disk space and try again.",
+                );
             }
         }
     });

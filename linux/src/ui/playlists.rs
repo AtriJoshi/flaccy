@@ -758,6 +758,7 @@ pub fn present_add_to_playlist(ui: &Rc<Ui>, rel_path: &str) {
                     }
                     Err(err) => {
                         crate::logger::error("database", &format!("playlist add failed: {err}"));
+                        ui.core.toast(&write_failure_message("add to", &name));
                     }
                 }
             }
@@ -864,6 +865,7 @@ pub fn prompt_new_playlist(ui: &Rc<Ui>, add_rel_path: Option<String>) {
             }
             Err(err) => {
                 crate::logger::error("database", &format!("create playlist failed: {err}"));
+                ui.core.toast(&write_failure_message("create", &name));
             }
         }
     });
@@ -922,7 +924,7 @@ pub fn prompt_save_tracks(ui: &Rc<Ui>, default_name: &str, rel_paths: Vec<String
             }
             Err(err) => {
                 crate::logger::error("database", &format!("save playlist failed: {err}"));
-                ui.core.toast("Couldn't save the playlist");
+                ui.core.toast(&write_failure_message("create", &name));
             }
         }
     });
@@ -1815,10 +1817,44 @@ fn resolve_playlist_tracks(ui: &Rc<Ui>, playlist_id: i64) -> Vec<Track> {
         .collect()
 }
 
+/// The toast for a playlist change the database refused, worded the same as
+/// the Apple clients: `verb` completes "Couldn't {verb} “{name}”".
+fn write_failure_message(verb: &str, name: &str) -> String {
+    format!(
+        "Couldn't {verb} “{name}” — the library database couldn't be written. Check free disk space and try again."
+    )
+}
+
+/// Deletes a playlist, telling the listener when the database refuses.
+fn delete_playlist_or_toast(ui: &Rc<Ui>, playlist_id: i64) -> bool {
+    let name = ui.core.db.playlist_name(playlist_id).unwrap_or_default();
+    match ui.core.db.delete_playlist(playlist_id) {
+        Ok(()) => true,
+        Err(err) => {
+            crate::logger::error("database", &format!("delete playlist failed: {err}"));
+            ui.core.toast(&write_failure_message("delete", &name));
+            false
+        }
+    }
+}
+
+/// Why a playlist with nothing to play has nothing to play: it holds no songs,
+/// or none of the songs it holds are in the library any more.
+fn unplayable_playlist_message(ui: &Rc<Ui>, playlist_id: i64) -> String {
+    let name = ui.core.db.playlist_name(playlist_id).unwrap_or_default();
+    match ui.core.db.playlist_tracks(playlist_id).len() {
+        0 => format!("“{name}” has no songs yet. Add some from a song’s menu."),
+        1 => format!("The song in “{name}” is no longer in the library. Its file may have moved."),
+        held => format!(
+            "None of the {held} songs in “{name}” are in the library any more. Their files may have moved."
+        ),
+    }
+}
+
 pub fn play_playlist(ui: &Rc<Ui>, playlist_id: i64, shuffle: bool) {
     let tracks = resolve_playlist_tracks(ui, playlist_id);
     if tracks.is_empty() {
-        ui.core.toast("Playlist has no playable tracks");
+        ui.core.toast(&unplayable_playlist_message(ui, playlist_id));
         return;
     }
     if shuffle != ui.core.player.shuffle_enabled() {
@@ -1865,6 +1901,7 @@ pub fn prompt_rename_playlist(ui: &Rc<Ui>, playlist_id: i64) {
             }
             Err(err) => {
                 crate::logger::error("database", &format!("rename playlist failed: {err}"));
+                ui.core.toast(&write_failure_message("rename", &current));
             }
         }
     });
@@ -1886,8 +1923,7 @@ pub fn confirm_delete_playlist(ui: &Rc<Ui>, playlist_id: i64) {
     let window = ui.window.clone();
     let ui = Rc::clone(ui);
     dialog.connect_response(None, move |_, response| {
-        if response == "delete" {
-            let _ = ui.core.db.delete_playlist(playlist_id);
+        if response == "delete" && delete_playlist_or_toast(&ui, playlist_id) {
             ui.core.hub.emit(&AppEvent::LibraryReloaded);
         }
     });
