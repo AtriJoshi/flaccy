@@ -8905,6 +8905,70 @@
         }
       }
     },
+    "%lld of %lld": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld von %lld"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld de %lld"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld sur %lld"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld di %lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld z %lld"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld de %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld"
+          }
+        }
+      }
+    },
     "%lld of %lld on Watch  ·  %@": {
       "localizations": {
         "de": {
@@ -10481,6 +10545,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 首歌曲"
+          }
+        }
+      }
+    },
+    "%lld songs · %lld min": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Titel · %lld Min."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld canciones · %lld min"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld morceaux · %lld min"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld brani · %lld min"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld曲 · %lld分"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld곡 · %lld분"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld utworów · %lld min"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld músicas · %lld min"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 首歌曲 · %lld 分钟"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 首歌曲 · %lld 分鐘"
           }
         }
       }
@@ -13525,6 +13653,70 @@
         }
       }
     },
+    "1 song · %lld min": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 Titel · %lld Min."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 canción · %lld min"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 morceau · %lld min"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 brano · %lld min"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1曲 · %lld分"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1곡 · %lld분"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 utwór · %lld min"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 música · %lld min"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 首歌曲 · %lld 分钟"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 首歌曲 · %lld 分鐘"
+          }
+        }
+      }
+    },
     "1 track": {
       "localizations": {
         "de": {
@@ -14357,6 +14549,70 @@
         }
       }
     },
+    "A metadata source refused the request for “%@”. Try again later.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine Metadatenquelle hat die Anfrage für „%@“ abgelehnt. Versuche es später erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Una fuente de metadatos rechazó la solicitud para “%@”. Inténtalo más tarde."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une source de métadonnées a refusé la demande pour « %@ ». Réessayez plus tard."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Una fonte dei metadati ha rifiutato la richiesta per “%@”. Riprova più tardi."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メタデータソースが「%@」のリクエストを拒否しました。後でもう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메타데이터 소스가 “%@”에 대한 요청을 거부했습니다. 나중에 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jedno ze źródeł metadanych odrzuciło żądanie dla „%@”. Spróbuj ponownie później."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma fonte de metadados recusou a solicitação para “%@”. Tente novamente mais tarde."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据来源拒绝了对“%@”的请求。请稍后再试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中繼資料來源拒絕了「%@」的請求。請稍後再試。"
+          }
+        }
+      }
+    },
     "A shareable recap built from your local play history.": {
       "localizations": {
         "de": {
@@ -14417,6 +14673,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "用本機播放記錄產生、可以分享的回顧。"
+          }
+        }
+      }
+    },
+    "A table is a view of the playlist: switch to List to reorder · right-click to remove": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Tabelle zeigt die Playlist an: Zum Sortieren zur Liste wechseln · mit rechts klicken zum Entfernen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La tabla muestra la playlist: cambia a Lista para reordenar · clic derecho para quitar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le tableau est une vue de la playlist : passez à Liste pour réordonner · clic droit pour supprimer"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La tabella è una vista della playlist: passa a Elenco per riordinare · clic destro per rimuovere"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テーブルはプレイリストの表示です。並べ替えはリスト表示に切り替えてください · 右クリックで削除"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "테이블은 재생목록을 보여 줍니다. 순서를 바꾸려면 목록으로 전환하세요 · 우클릭으로 제거"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tabela to widok playlisty: aby zmienić kolejność, przełącz na Listę · kliknij prawym, by usunąć"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A tabela é uma visualização da playlist: mude para Lista para reordenar · clique com o botão direito para remover"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表格是播放列表的视图：切换到列表以重新排序 · 右键点按即可移除"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表格是播放列表的檢視：切換到列表即可重新排序 · 按右鍵即可移除"
           }
         }
       }
@@ -18807,6 +19127,134 @@
         }
       }
     },
+    "Allow Apple Music access for Flaccy to find links for “%@”.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erlaube Flaccy den Zugriff auf Apple Music, um Links für „%@“ zu finden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite que Flaccy acceda a Apple Music para encontrar enlaces de “%@”."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez Flaccy à accéder à Apple Music pour trouver les liens de « %@ »."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consenti a Flaccy l'accesso ad Apple Music per trovare i link per “%@”."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」のリンクを探すため、FlaccyがApple Musicにアクセスすることを許可してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”의 링크를 찾으려면 Flaccy의 Apple Music 접근을 허용하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zezwól Flaccy na dostęp do Apple Music, aby znaleźć linki do „%@”."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permita que o Flaccy acesse o Apple Music para encontrar links de “%@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许 Flaccy 访问 Apple Music，以查找“%@”的链接。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許 Flaccy 存取 Apple Music，以尋找「%@」的連結。"
+          }
+        }
+      }
+    },
+    "Allow Apple Music access for Flaccy to look up “%@”.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erlaube Flaccy den Zugriff auf Apple Music, um „%@“ nachzuschlagen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite que Flaccy acceda a Apple Music para buscar “%@”."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez Flaccy à accéder à Apple Music pour rechercher « %@ »."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consenti a Flaccy l'accesso ad Apple Music per cercare “%@”."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を調べるため、FlaccyがApple Musicにアクセスすることを許可してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”을(를) 조회하려면 Flaccy의 Apple Music 접근을 허용하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zezwól Flaccy na dostęp do Apple Music, aby sprawdzić „%@”."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permita que o Flaccy acesse o Apple Music para consultar “%@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许 Flaccy 访问 Apple Music，以查询“%@”。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允許 Flaccy 存取 Apple Music，以查詢「%@」。"
+          }
+        }
+      }
+    },
     "Allow notifications in Settings first": {
       "localizations": {
         "de": {
@@ -22151,6 +22599,70 @@
         }
       }
     },
+    "Can't Reach lrclib.net": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net nicht erreichbar"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se puede acceder a lrclib.net"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d'atteindre lrclib.net"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere lrclib.net"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.netに接続できません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net에 연결할 수 없음"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie można połączyć się z lrclib.net"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não é possível acessar o lrclib.net"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 lrclib.net"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線到 lrclib.net"
+          }
+        }
+      }
+    },
     "Can't reach the online catalogs. Check your connection.": {
       "localizations": {
         "de": {
@@ -22607,6 +23119,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "排行"
+          }
+        }
+      }
+    },
+    "Checking the song's tags, files next to it, and lrclib.net.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tags des Titels, Dateien daneben und lrclib.net werden geprüft."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comprobando las etiquetas de la canción, los archivos junto a ella y lrclib.net."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification des balises du morceau, des fichiers à côté et de lrclib.net."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Controllo dei tag del brano, dei file accanto e di lrclib.net."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲のタグ、そばにあるファイル、lrclib.net を確認しています。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "곡의 태그, 옆에 있는 파일, lrclib.net을 확인하는 중입니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sprawdzanie tagów utworu, plików obok niego i lrclib.net."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificando as tags da música, os arquivos ao lado e o lrclib.net."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查歌曲的标签、旁边的文件和 lrclib.net。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在檢查歌曲的標籤、旁邊的檔案與 lrclib.net。"
           }
         }
       }
@@ -24431,6 +25007,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "把「Album」、「Album (Deluxe)」和「Album (Remastered)」合併成一張卡片，共同的歌曲只保留音質最好的一份，讓專輯和歌曲不再出現近似重複的項目。"
+          }
+        }
+      }
+    },
+    "Columns layout": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spaltenlayout"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diseño de columnas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disposition en colonnes"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout a colonne"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カラム表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "열 레이아웃"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Układ kolumn"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout de colunas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分栏布局"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分欄版面"
           }
         }
       }
@@ -26549,6 +27189,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法連接"
+          }
+        }
+      }
+    },
+    "Couldn't Connect to Last.fm": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Verbindung zu Last.fm"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con Last.fm"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de se connecter à Last.fm"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile connettersi a Last.fm"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmに接続できませんでした"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm에 연결할 수 없음"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć z Last.fm"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível conectar ao Last.fm"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 Last.fm"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至 Last.fm"
           }
         }
       }
