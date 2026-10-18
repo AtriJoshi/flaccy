@@ -2,16 +2,17 @@ import AppKit
 import FlaccyCore
 
 /// Immersive album page: palette-driven ambient backdrop, artwork card,
-/// metadata chips with Last.fm enrichment, glass play/shuffle capsules, a
-/// full track list with loved hearts and playing indicator, and a
-/// similar-artists shelf, following the system appearance.
+/// metadata chips with Last.fm enrichment, glass play/shuffle capsules, the
+/// songs in the layout the listener chose (list, table or columns, grouped by
+/// disc) with loved hearts and playing indicator, and a similar-artists shelf,
+/// following the system appearance. In a wide window the hero moves into a
+/// rail of its own beside the scrolling songs.
 final class AlbumDetailViewController: NSViewController {
 
     var onSelectArtist: ((String) -> Void)?
 
     private var album: Album
     private let backdrop = AmbientBackdropView()
-    private let scrollView = NSScrollView()
     private let artworkTile = ArtworkTileView()
     private let coverOverlay = ArtworkEditOverlayView()
     private var artworkObserver: ArtworkChangeObserver?
@@ -20,13 +21,11 @@ final class AlbumDetailViewController: NSViewController {
     private let metaLabel = NSTextField(labelWithString: "")
     private let metaPlaceholder = ShimmerLineView(width: 60, height: 13)
     private let chipsRow = NSStackView()
-    private let tracksStack = NSStackView()
     private let footerLabel = NSTextField(labelWithString: "")
     private let similarRow = SimilarArtistsRowView()
-    private var trackRows: [DetailTrackRowView] = []
-    private var rowTracks: [Track] = []
-    private var rowByURL: [URL: DetailTrackRowView] = [:]
-    private var playingURL: URL?
+    private let model = TrackPageModel(kind: .album)
+    private var pageFrame: TrackPageFrameView?
+    private var songs: TrackPageSongs?
     private var isAwaitingMetadata = false
 
     init(album: Album) {
@@ -43,12 +42,21 @@ final class AlbumDetailViewController: NSViewController {
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(backdrop)
 
-        let document = DetailDocumentView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-
         artworkTile.cornerRadius = 14
         artworkTile.wantsLayer = true
         artworkTile.translatesAutoresizingMaskIntoConstraints = false
+        coverOverlay.translatesAutoresizingMaskIntoConstraints = false
+        let coverHost = NSView()
+        coverHost.addSubview(artworkTile)
+        coverHost.addSubview(coverOverlay)
+        for layer in [artworkTile, coverOverlay] {
+            NSLayoutConstraint.activate([
+                layer.topAnchor.constraint(equalTo: coverHost.topAnchor),
+                layer.leadingAnchor.constraint(equalTo: coverHost.leadingAnchor),
+                layer.trailingAnchor.constraint(equalTo: coverHost.trailingAnchor),
+                layer.bottomAnchor.constraint(equalTo: coverHost.bottomAnchor),
+            ])
+        }
 
         titleLabel.font = .systemFont(ofSize: 28, weight: .bold)
         titleLabel.textColor = MacColors.primaryLabel
@@ -81,35 +89,28 @@ final class AlbumDetailViewController: NSViewController {
         headerText.alignment = .leading
         headerText.spacing = 10
         headerText.setCustomSpacing(4, after: titleLabel)
-        headerText.translatesAutoresizingMaskIntoConstraints = false
-
-        tracksStack.orientation = .vertical
-        tracksStack.spacing = 0
-        tracksStack.translatesAutoresizingMaskIntoConstraints = false
 
         footerLabel.font = .systemFont(ofSize: 12)
         footerLabel.textColor = MacColors.tertiaryLabel
-        footerLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        similarRow.translatesAutoresizingMaskIntoConstraints = false
         similarRow.onSelectArtist = { [weak self] name in
             self?.onSelectArtist?(name)
         }
 
-        coverOverlay.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(artworkTile)
-        document.addSubview(coverOverlay)
-        document.addSubview(headerText)
-        document.addSubview(tracksStack)
-        document.addSubview(footerLabel)
-        document.addSubview(similarRow)
-
-        scrollView.documentView = document
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.automaticallyAdjustsContentInsets = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(scrollView)
+        model.pageName = { [weak self] in self?.album.title ?? "" }
+        let hero = TrackHeroView(cover: coverHost, text: headerText)
+        let pageFrame = TrackPageFrameView(hero: hero)
+        pageFrame.translatesAutoresizingMaskIntoConstraints = false
+        let songs = TrackPageSongs(model: model, frame: pageFrame) { model in
+            TrackBlocksSurface(model: model, columns: false)
+        }
+        similarRow.contentInset = 10
+        let footer = NSStackView(views: [footerLabel])
+        footer.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 0)
+        pageFrame.setBody([songs.view, footer, similarRow])
+        view.addSubview(pageFrame)
+        self.pageFrame = pageFrame
+        self.songs = songs
 
         NSLayoutConstraint.activate([
             backdrop.topAnchor.constraint(equalTo: view.topAnchor),
@@ -117,39 +118,10 @@ final class AlbumDetailViewController: NSViewController {
             backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            document.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
-
-            artworkTile.topAnchor.constraint(equalTo: document.topAnchor, constant: 56),
-            artworkTile.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 32),
-            artworkTile.widthAnchor.constraint(equalToConstant: 232),
-            artworkTile.heightAnchor.constraint(equalToConstant: 232),
-
-            coverOverlay.topAnchor.constraint(equalTo: artworkTile.topAnchor),
-            coverOverlay.leadingAnchor.constraint(equalTo: artworkTile.leadingAnchor),
-            coverOverlay.trailingAnchor.constraint(equalTo: artworkTile.trailingAnchor),
-            coverOverlay.bottomAnchor.constraint(equalTo: artworkTile.bottomAnchor),
-
-            headerText.leadingAnchor.constraint(equalTo: artworkTile.trailingAnchor, constant: 28),
-            headerText.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -32),
-            headerText.bottomAnchor.constraint(equalTo: artworkTile.bottomAnchor),
-            headerText.topAnchor.constraint(greaterThanOrEqualTo: document.topAnchor, constant: 56),
-
-            tracksStack.topAnchor.constraint(equalTo: artworkTile.bottomAnchor, constant: 28),
-            tracksStack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
-            tracksStack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -24),
-
-            footerLabel.topAnchor.constraint(equalTo: tracksStack.bottomAnchor, constant: 12),
-            footerLabel.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 34),
-
-            similarRow.topAnchor.constraint(equalTo: footerLabel.bottomAnchor, constant: 32),
-            similarRow.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 34),
-            similarRow.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -32),
-            similarRow.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -32),
+            pageFrame.topAnchor.constraint(equalTo: view.topAnchor),
+            pageFrame.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            pageFrame.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            pageFrame.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
@@ -171,20 +143,25 @@ final class AlbumDetailViewController: NSViewController {
         super.viewWillAppear()
         NotificationCenter.default.removeObserver(self, name: AudioPlayer.trackDidChange, object: nil)
         NotificationCenter.default.removeObserver(self, name: LovedTracksService.didChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AudioPlayer.playbackStateDidChange, object: nil)
         NotificationCenter.default.addObserver(
             self, selector: #selector(playbackChanged), name: AudioPlayer.trackDidChange, object: nil
         )
         NotificationCenter.default.addObserver(
             self, selector: #selector(lovedChanged), name: LovedTracksService.didChange, object: nil
         )
-        updatePlayingState()
-        refreshLovedHearts()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(playbackChanged), name: AudioPlayer.playbackStateDidChange, object: nil
+        )
+        songs?.refreshPlaying()
+        songs?.refreshLoved()
     }
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
         NotificationCenter.default.removeObserver(self, name: AudioPlayer.trackDidChange, object: nil)
         NotificationCenter.default.removeObserver(self, name: LovedTracksService.didChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AudioPlayer.playbackStateDidChange, object: nil)
     }
 
     deinit {
@@ -225,58 +202,41 @@ final class AlbumDetailViewController: NSViewController {
         chipsRow.isHidden = chipsRow.arrangedSubviews.isEmpty
     }
 
+    /// The album's songs in display order, with the disc each falls under when
+    /// the release spans several.
     private func rebuildTracks() {
-        trackRows.forEach { $0.removeFromSuperview() }
-        trackRows = []
-        rowTracks = []
-        rowByURL = [:]
-        let sorted = TrackOrdering.ordered(
+        let sorted = orderedTracks()
+        let entries = sorted.enumerated().map { index, track in
+            TrackPageEntry(
+                track: track,
+                number: track.trackNumber > 0 ? track.trackNumber : index + 1,
+                rowID: nil
+            )
+        }
+        songs?.update(entries: entries, sections: discSections(of: sorted))
+    }
+
+    private func orderedTracks() -> [Track] {
+        TrackOrdering.ordered(
             album.tracks,
             number: { $0.trackNumber },
             path: { $0.fileURL.path },
             title: { $0.title }
         )
-        let currentPath = AudioPlayer.shared.currentTrack?.fileURL
-        playingURL = currentPath
-        for (index, track) in sorted.enumerated() {
-            let row = DetailTrackRowView()
-            row.configure(
-                number: track.trackNumber > 0 ? track.trackNumber : index + 1,
-                title: track.title,
-                duration: track.duration,
-                loved: LovedTracksService.shared.isLoved(track: track),
-                isPlaying: currentPath == track.fileURL
+    }
+
+    private func discSections(of sorted: [Track]) -> [TrackPageSection]? {
+        guard let sections = TrackOrdering.sections(
+            sorted, path: { LibraryPathResolver.relativePath(for: $0.fileURL) }
+        ) else { return nil }
+        var start = 0
+        return sections.map { section in
+            defer { start += section.items.count }
+            return TrackPageSection(
+                label: section.label,
+                range: start..<(start + section.items.count),
+                duration: section.items.reduce(0) { $0 + $1.duration }
             )
-            row.onDoubleClick = { [weak self] in
-                guard let self else { return }
-                AppLogger.info("Playing \(track.title) from album detail", category: .playback)
-                AudioPlayer.shared.play(sorted, startingAt: index)
-            }
-            row.onToggleLove = {
-                Task { _ = await LovedTracksService.shared.toggleLove(track: track) }
-            }
-            row.onMenu = { [weak row] in
-                MacTrackMenuFactory.menu(for: track, anchor: row)
-            }
-            tracksStack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: tracksStack.widthAnchor).isActive = true
-            trackRows.append(row)
-            rowTracks.append(track)
-            rowByURL[track.fileURL] = row
-        }
-    }
-
-    private func updatePlayingState() {
-        let newURL = AudioPlayer.shared.currentTrack?.fileURL
-        guard newURL != playingURL else { return }
-        if let old = playingURL { rowByURL[old]?.setPlaying(false) }
-        if let new = newURL { rowByURL[new]?.setPlaying(true) }
-        playingURL = newURL
-    }
-
-    private func refreshLovedHearts() {
-        for (row, track) in zip(trackRows, rowTracks) {
-            row.setLoved(LovedTracksService.shared.isLoved(track: track))
         }
     }
 
@@ -302,6 +262,7 @@ final class AlbumDetailViewController: NSViewController {
 
     #if DEBUG
     var debugShownImage: CGImage? { artworkTile.displayedImage }
+    var debugSongs: TrackPageSongs? { songs }
     #endif
 
     private func configureCoverOverlay() {
@@ -436,12 +397,7 @@ final class AlbumDetailViewController: NSViewController {
     }
 
     private func play(shuffled: Bool) {
-        let sorted = TrackOrdering.ordered(
-            album.tracks,
-            number: { $0.trackNumber },
-            path: { $0.fileURL.path },
-            title: { $0.title }
-        )
+        let sorted = orderedTracks()
         guard !sorted.isEmpty else { return }
         AppLogger.info("Playing album \(album.title) (shuffled: \(shuffled))", category: .playback)
         AudioPlayer.shared.play(shuffled ? sorted.shuffled() : sorted, startingAt: 0)
@@ -453,18 +409,18 @@ final class AlbumDetailViewController: NSViewController {
 
     @objc private func playbackChanged() {
         guard view.window != nil else { return }
-        updatePlayingState()
+        songs?.refreshPlaying()
     }
 
     @objc private func lovedChanged() {
         guard view.window != nil else { return }
-        refreshLovedHearts()
+        songs?.refreshLoved()
     }
 
     @objc private func libraryUpdated() {
         guard let refreshed = Library.shared.albums.first(where: { $0 == self.album }) else { return }
         album = refreshed
-        populate()
+        pageFrame?.preservingScroll { populate() }
     }
 }
 

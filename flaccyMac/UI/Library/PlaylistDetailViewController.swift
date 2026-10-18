@@ -1,8 +1,10 @@
 import AppKit
+import FlaccyCore
 
-/// One playlist: mosaic header with play/shuffle capsules over a reorderable
-/// track table — native drag reorder persists positions touching only the
-/// rows that moved, delete removes rows, double-click plays the playlist.
+/// One playlist: a mosaic hero with play/shuffle capsules over its songs in
+/// the layout the listener chose. The list layout reorders by drag, the table
+/// is a sortable view of the same songs, and in a wide window the hero moves
+/// into a rail beside the scrolling songs.
 final class PlaylistDetailViewController: NSViewController {
 
     private struct Row {
@@ -11,16 +13,15 @@ final class PlaylistDetailViewController: NSViewController {
     }
 
     private let playlist: PlaylistRecord
-    private let scrollView = NSScrollView()
-    private let tableView = SongsTableView()
     private let mosaic = MosaicArtworkView()
     private let coverOverlay = ArtworkEditOverlayView()
-    private let nameLabel = NSTextField(labelWithString: "")
+    private let nameLabel = NSTextField(wrappingLabelWithString: "")
     private let summaryLabel = NSTextField(labelWithString: "")
+    private let emptyLabel = NSTextField(wrappingLabelWithString: String(localized: "No songs yet. Right-click any song and choose Add to Playlist."))
+    private let model = TrackPageModel(kind: .playlist)
+    private var pageFrame: TrackPageFrameView?
+    private var songs: TrackPageSongs?
     private var rows: [Row] = []
-    private var playingPath: String?
-
-    private static let dragType = NSPasteboard.PasteboardType("com.midgarcorp.flaccy.playlistRow")
 
     init(playlist: PlaylistRecord) {
         self.playlist = playlist
@@ -35,10 +36,22 @@ final class PlaylistDetailViewController: NSViewController {
         mosaic.translatesAutoresizingMaskIntoConstraints = false
         coverOverlay.translatesAutoresizingMaskIntoConstraints = false
         configureCoverOverlay()
+        let coverHost = NSView()
+        coverHost.addSubview(mosaic)
+        coverHost.addSubview(coverOverlay)
+        for layer in [mosaic, coverOverlay] {
+            NSLayoutConstraint.activate([
+                layer.topAnchor.constraint(equalTo: coverHost.topAnchor),
+                layer.leadingAnchor.constraint(equalTo: coverHost.leadingAnchor),
+                layer.trailingAnchor.constraint(equalTo: coverHost.trailingAnchor),
+                layer.bottomAnchor.constraint(equalTo: coverHost.bottomAnchor),
+            ])
+        }
 
         nameLabel.stringValue = playlist.name
-        nameLabel.font = .systemFont(ofSize: 24, weight: .bold)
-        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        nameLabel.textColor = MacColors.primaryLabel
+        nameLabel.maximumNumberOfLines = 2
 
         summaryLabel.font = .systemFont(ofSize: 12)
         summaryLabel.textColor = .secondaryLabelColor
@@ -55,66 +68,43 @@ final class PlaylistDetailViewController: NSViewController {
         meta.orientation = .vertical
         meta.alignment = .leading
         meta.spacing = 8
-        meta.translatesAutoresizingMaskIntoConstraints = false
 
-        tableView.style = .inset
-        tableView.rowHeight = 26
-        tableView.allowsMultipleSelection = true
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.target = self
-        tableView.doubleAction = #selector(rowDoubleClicked)
-        tableView.registerForDraggedTypes([Self.dragType])
-        tableView.onDeleteRows = { [weak self] indexes in
-            self?.removeRows(at: indexes)
+        emptyLabel.font = .systemFont(ofSize: 13)
+        emptyLabel.textColor = MacColors.secondaryLabel
+        emptyLabel.isHidden = true
+
+        model.pageName = { [weak self] in self?.playlist.name ?? "" }
+        model.menu = { [weak self] entry, anchor in
+            var options = MacTrackMenuFactory.TrackOptions()
+            options.removeFromPlaylist = { [weak self] in
+                self?.removeEntries([entry])
+            }
+            return MacTrackMenuFactory.menu(for: entry.track, anchor: anchor, options: options)
         }
-        tableView.menuProvider = { [weak self] row in
-            self?.contextMenu(forRow: row)
+        model.remove = { [weak self] entries in self?.removeEntries(entries) }
+        model.reorder = { [weak self] sources, row in self?.moveRows(sources, to: row) }
+
+        let hero = TrackHeroView(cover: coverHost, text: meta)
+        let pageFrame = TrackPageFrameView(hero: hero)
+        pageFrame.translatesAutoresizingMaskIntoConstraints = false
+        let songs = TrackPageSongs(model: model, frame: pageFrame) { model in
+            PlaylistListSurface(model: model)
         }
-
-        let columns: [(String, String, CGFloat)] = [
-            ("number", "#", 36),
-            ("title", String(localized: "Title"), 280),
-            ("artist", String(localized: "Artist"), 180),
-            ("duration", String(localized: "Time"), 60),
-        ]
-        for (id, title, width) in columns {
-            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
-            column.title = title
-            column.width = width
-            tableView.addTableColumn(column)
+        songs.hint = { layout in
+            layout == .table
+                ? String(localized: "A table is a view of the playlist: switch to List to reorder · right-click to remove")
+                : String(localized: "Drag rows to reorder · right-click to remove")
         }
-
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.automaticallyAdjustsContentInsets = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(mosaic)
-        view.addSubview(coverOverlay)
-        view.addSubview(meta)
-        view.addSubview(scrollView)
+        pageFrame.setBody([songs.view, emptyLabel])
+        view.addSubview(pageFrame)
+        self.pageFrame = pageFrame
+        self.songs = songs
 
         NSLayoutConstraint.activate([
-            mosaic.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 52),
-            mosaic.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
-            mosaic.widthAnchor.constraint(equalToConstant: 130),
-            mosaic.heightAnchor.constraint(equalToConstant: 130),
-
-            coverOverlay.topAnchor.constraint(equalTo: mosaic.topAnchor),
-            coverOverlay.leadingAnchor.constraint(equalTo: mosaic.leadingAnchor),
-            coverOverlay.trailingAnchor.constraint(equalTo: mosaic.trailingAnchor),
-            coverOverlay.bottomAnchor.constraint(equalTo: mosaic.bottomAnchor),
-
-            meta.leadingAnchor.constraint(equalTo: mosaic.trailingAnchor, constant: 20),
-            meta.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -28),
-            meta.centerYAnchor.constraint(equalTo: mosaic.centerYAnchor),
-
-            scrollView.topAnchor.constraint(equalTo: mosaic.bottomAnchor, constant: 20),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            pageFrame.topAnchor.constraint(equalTo: view.topAnchor),
+            pageFrame.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            pageFrame.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            pageFrame.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
@@ -126,31 +116,48 @@ final class PlaylistDetailViewController: NSViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(reload), name: .flaccyPlaylistsDidChange, object: nil
         )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(playbackChanged), name: AudioPlayer.trackDidChange, object: nil
-        )
         reload()
     }
 
-    /// Repaints the title column so the playing row lights up here too, the way
-    /// it already does in the songs table and album detail.
-    @objc private func playbackChanged() {
-        let newPath = AudioPlayer.shared.currentTrack?.fileURL.path
-        guard newPath != playingPath else { return }
-        playingPath = newPath
-        guard let titleIndex = tableView.tableColumns.firstIndex(where: {
-            $0.identifier.rawValue == "title"
-        }) else { return }
-        let visible = tableView.rows(in: tableView.visibleRect)
-        guard visible.length > 0 else { return }
-        tableView.reloadData(
-            forRowIndexes: IndexSet(integersIn: visible.location..<(visible.location + visible.length)),
-            columnIndexes: IndexSet(integer: titleIndex)
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        stopObservingPlayback()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(playbackChanged), name: AudioPlayer.trackDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(playbackChanged), name: AudioPlayer.playbackStateDidChange, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(lovedChanged), name: LovedTracksService.didChange, object: nil
+        )
+        songs?.refreshPlaying()
+        songs?.refreshLoved()
+    }
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        stopObservingPlayback()
     }
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+    }
+
+    private func stopObservingPlayback() {
+        NotificationCenter.default.removeObserver(self, name: AudioPlayer.trackDidChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AudioPlayer.playbackStateDidChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: LovedTracksService.didChange, object: nil)
+    }
+
+    @objc private func playbackChanged() {
+        guard view.window != nil else { return }
+        songs?.refreshPlaying()
+    }
+
+    @objc private func lovedChanged() {
+        guard view.window != nil else { return }
+        songs?.refreshLoved()
     }
 
     @objc private func reload() {
@@ -169,6 +176,13 @@ final class PlaylistDetailViewController: NSViewController {
             AppLogger.error("Playlist tracks fetch failed: \(error.localizedDescription)", category: .database)
             rows = []
         }
+        render()
+        AppLogger.debug("Playlist detail \(playlist.name): \(rows.count) rows", category: .ui)
+    }
+
+    /// Paints the hero and the songs from `rows`, keeping the page where the
+    /// reader scrolled it.
+    private func render() {
         let totalSeconds = rows.reduce(0.0) { $0 + $1.track.duration }
         summaryLabel.stringValue = PlaybackFormat.songsAndMinutes(count: rows.count, totalSeconds: totalSeconds)
         if let id = playlist.id {
@@ -176,8 +190,13 @@ final class PlaylistDetailViewController: NSViewController {
         } else {
             mosaic.configure(with: rows.map(\.track), fallbackSeed: playlist.name)
         }
-        tableView.reloadData()
-        AppLogger.debug("Playlist detail \(playlist.name): \(rows.count) rows", category: .ui)
+        emptyLabel.isHidden = !rows.isEmpty
+        let entries = rows.enumerated().map { index, row in
+            TrackPageEntry(track: row.track, number: index + 1, rowID: row.record.id)
+        }
+        pageFrame?.preservingScroll {
+            songs?.update(entries: entries, sections: nil)
+        }
     }
 
     /// The cover's pencil, picture drop and context menu open the same editor
@@ -211,75 +230,25 @@ final class PlaylistDetailViewController: NSViewController {
         AudioPlayer.shared.play(shuffled ? tracks.shuffled() : tracks, startingAt: 0)
     }
 
-    @objc private func rowDoubleClicked() {
-        let row = tableView.clickedRow
-        guard row >= 0, row < rows.count else { return }
-        AudioPlayer.shared.play(rows.map(\.track), startingAt: row)
-    }
-
-    private func removeRows(at indexes: IndexSet) {
-        let victims = indexes.compactMap { $0 < rows.count ? rows[$0] : nil }
-        guard !victims.isEmpty else { return }
-        for victim in victims {
-            guard let rowId = victim.record.id else { continue }
+    private func removeEntries(_ entries: [TrackPageEntry]) {
+        let ids = entries.compactMap(\.rowID)
+        guard !ids.isEmpty else { return }
+        for id in ids {
             do {
-                try DatabaseManager.shared.removeTrackFromPlaylist(id: rowId)
+                try DatabaseManager.shared.removeTrackFromPlaylist(id: id)
             } catch {
                 AppLogger.error("Playlist row removal failed: \(error.localizedDescription)", category: .database)
             }
         }
-        AppLogger.info("Removed \(victims.count) row(s) from playlist \(playlist.name)", category: .database)
+        AppLogger.info("Removed \(ids.count) row(s) from playlist \(playlist.name)", category: .database)
         NotificationCenter.default.post(name: .flaccyPlaylistsDidChange, object: nil)
     }
 
-    private func contextMenu(forRow row: Int) -> NSMenu? {
-        guard row >= 0, row < rows.count else { return nil }
-        if !tableView.selectedRowIndexes.contains(row) {
-            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        }
-        var options = MacTrackMenuFactory.TrackOptions()
-        options.removeFromPlaylist = { [weak self] in
-            self?.removeRows(at: IndexSet(integer: row))
-        }
-        return MacTrackMenuFactory.menu(for: rows[row].track, anchor: tableView, options: options)
-    }
-}
-
-extension PlaylistDetailViewController: NSTableViewDataSource {
-
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        rows.count
-    }
-
-    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-        let item = NSPasteboardItem()
-        item.setString("\(row)", forType: Self.dragType)
-        return item
-    }
-
-    func tableView(
-        _ tableView: NSTableView,
-        validateDrop info: NSDraggingInfo,
-        proposedRow row: Int,
-        proposedDropOperation dropOperation: NSTableView.DropOperation
-    ) -> NSDragOperation {
-        guard dropOperation == .above else { return [] }
-        return .move
-    }
-
-    func tableView(
-        _ tableView: NSTableView,
-        acceptDrop info: NSDraggingInfo,
-        row: Int,
-        dropOperation: NSTableView.DropOperation
-    ) -> Bool {
-        guard let items = info.draggingPasteboard.pasteboardItems else { return false }
-        let sourceRows = items
-            .compactMap { $0.string(forType: Self.dragType) }
-            .compactMap(Int.init)
-            .sorted()
-        guard !sourceRows.isEmpty else { return false }
-
+    /// Moves the dragged rows to just above `row`, shows the new order at once
+    /// and writes only the positions that changed.
+    private func moveRows(_ sources: IndexSet, to row: Int) {
+        let sourceRows = sources.filter { rows.indices.contains($0) }.sorted()
+        guard !sourceRows.isEmpty else { return }
         var reordered = rows
         let moved = sourceRows.map { rows[$0] }
         for source in sourceRows.reversed() {
@@ -288,51 +257,12 @@ extension PlaylistDetailViewController: NSTableViewDataSource {
         let insertionIndex = row - sourceRows.filter { $0 < row }.count
         reordered.insert(contentsOf: moved, at: insertionIndex)
         rows = reordered
-        tableView.reloadData()
+        render()
         PlaylistActions.persistOrder(rows.map(\.record))
         NotificationCenter.default.post(name: .flaccyPlaylistsDidChange, object: nil)
-        return true
-    }
-}
-
-extension PlaylistDetailViewController: NSTableViewDelegate {
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row rowIndex: Int) -> NSView? {
-        guard rowIndex < rows.count, let identifier = tableColumn?.identifier else { return nil }
-        let row = rows[rowIndex]
-
-        if identifier.rawValue == "title" {
-            let cellID = NSUserInterfaceItemIdentifier("titleCell")
-            let cell = tableView.makeView(withIdentifier: cellID, owner: self) as? PlayingTitleCellView
-                ?? PlayingTitleCellView(identifier: cellID)
-            cell.configure(
-                title: row.track.title,
-                isPlaying: AudioPlayer.shared.currentTrack?.fileURL == row.track.fileURL
-            )
-            return cell
-        }
-
-        let cellID = NSUserInterfaceItemIdentifier("textCell.\(identifier.rawValue)")
-        let cell = tableView.makeView(withIdentifier: cellID, owner: self) as? TextCellView
-            ?? TextCellView(identifier: cellID)
-        switch identifier.rawValue {
-        case "number":
-            cell.text = "\(rowIndex + 1)"
-            cell.isDimmed = true
-        case "artist":
-            cell.text = row.track.artist
-            cell.isDimmed = false
-        case "duration":
-            cell.text = PlaybackFormat.duration(row.track.duration)
-            cell.isDimmed = true
-        default:
-            cell.text = ""
-        }
-        return cell
     }
 
-    func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
-        guard tableColumn?.identifier.rawValue == "title", row < rows.count else { return nil }
-        return rows[row].track.title
-    }
+    #if DEBUG
+    var debugSongs: TrackPageSongs? { songs }
+    #endif
 }
