@@ -411,7 +411,7 @@ enum ScreenshotSeeder {
         try? db.saveLyrics(record)
     }
 
-    private static func makeWAV(frequency: Double, seconds: Double, sampleRate: Double = 1_000) -> Data {
+    static func makeWAV(frequency: Double, seconds: Double, sampleRate: Double = 1_000) -> Data {
         let frameCount = Int(seconds * sampleRate)
         var samples = [Int16](repeating: 0, count: frameCount)
         let amplitude = 0.2 * Double(Int16.max)

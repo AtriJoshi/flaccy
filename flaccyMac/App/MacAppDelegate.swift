@@ -28,6 +28,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.info("Flaccy for Mac launched (root: \(LibraryRoot.current.path))", category: .general)
         #if DEBUG
         ScreenshotSeeder.seedIfRequested()
+        DebugLayoutFixtures.seedIfRequested()
         #endif
 
         NSApp.mainMenu = MainMenu.build()
