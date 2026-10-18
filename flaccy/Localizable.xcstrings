@@ -26681,6 +26681,70 @@
         }
       }
     },
+    "Couldn't add to “%@” — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hinzufügen zu „%@“ nicht möglich – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo añadir a “%@”: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’ajouter à « %@ » : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile aggiungere a “%@”: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」に追加できませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”에 추가할 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się dodać do „%@” — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível adicionar a “%@”: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法添加到“%@”——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法加入「%@」——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
+          }
+        }
+      }
+    },
     "Couldn't connect to Last.fm.": {
       "localizations": {
         "de": {
@@ -26741,6 +26805,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法連接到 Last.fm。"
+          }
+        }
+      }
+    },
+    "Couldn't connect to Last.fm: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verbindung zu Last.fm nicht möglich: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con Last.fm: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de se connecter à Last.fm : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile connettersi a Last.fm: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmに接続できませんでした: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm에 연결할 수 없음: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć z Last.fm: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível conectar ao Last.fm: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 Last.fm：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至 Last.fm：%@"
           }
         }
       }
@@ -26809,6 +26937,70 @@
         }
       }
     },
+    "Couldn't create “%@” — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ konnte nicht erstellt werden – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo crear “%@”: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de créer « %@ » : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile creare “%@”: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を作成できませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”을(를) 만들 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się utworzyć „%@” — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível criar “%@”: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法创建“%@”——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法建立「%@」——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
+          }
+        }
+      }
+    },
     "Couldn't delete playlist.": {
       "localizations": {
         "de": {
@@ -26869,6 +27061,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法刪除播放列表。"
+          }
+        }
+      }
+    },
+    "Couldn't delete “%@” — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ konnte nicht gelöscht werden – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo eliminar “%@”: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de supprimer « %@ » : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile eliminare “%@”: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を削除できませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”을(를) 삭제할 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się usunąć „%@” — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível excluir “%@”: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法删除“%@”——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法刪除「%@」——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
           }
         }
       }
@@ -27073,6 +27329,134 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法下載範例專輯。"
+          }
+        }
+      }
+    },
+    "Couldn't draw the recap card — the system couldn't allocate its image. Try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Rückblick-Karte konnte nicht gezeichnet werden – das System konnte ihr Bild nicht bereitstellen. Versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo dibujar la tarjeta del resumen: el sistema no pudo reservar su imagen. Inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de dessiner la carte récapitulative : le système n’a pas pu allouer son image. Réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile disegnare la scheda del riepilogo: il sistema non è riuscito ad allocare la sua immagine. Riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "振り返りカードを描画できませんでした。システムが画像用のメモリを確保できませんでした。もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "회고 카드를 그릴 수 없습니다. 시스템이 이미지를 할당하지 못했습니다. 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się narysować karty podsumowania — system nie mógł przydzielić dla niej obrazu. Spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível desenhar o cartão do resumo: o sistema não conseguiu alocar a imagem. Tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法绘制回顾卡片——系统无法为其分配图像。请重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法繪製回顧卡片——系統無法為其配置圖像。請再試一次。"
+          }
+        }
+      }
+    },
+    "Couldn't export the slide — it couldn't be encoded as a PNG. Try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Folie konnte nicht exportiert werden – sie ließ sich nicht als PNG kodieren. Versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo exportar la diapositiva: no se pudo codificar como PNG. Inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’exporter la diapositive : elle n’a pas pu être encodée en PNG. Réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile esportare la diapositiva: non è stato possibile codificarla come PNG. Riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スライドを書き出せませんでした。PNGにエンコードできませんでした。もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "슬라이드를 내보낼 수 없습니다. PNG로 인코딩할 수 없었습니다. 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się wyeksportować slajdu — nie można go zakodować jako PNG. Spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível exportar o slide: ele não pôde ser codificado como PNG. Tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法导出幻灯片——无法编码为 PNG。请重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法匯出投影片——無法編碼為 PNG。請再試一次。"
           }
         }
       }
@@ -27525,6 +27909,198 @@
         }
       }
     },
+    "Couldn't open the Last.fm sign-in page. Close any other sign-in sheet and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Last.fm-Anmeldeseite konnte nicht geöffnet werden. Schließe andere Anmeldefenster und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo abrir la página de inicio de sesión de Last.fm. Cierra cualquier otra ventana de inicio de sesión e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’ouvrir la page de connexion à Last.fm. Fermez les autres fenêtres de connexion et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile aprire la pagina di accesso a Last.fm. Chiudi le altre finestre di accesso e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmのサインインページを開けませんでした。ほかのサインイン画面を閉じてから、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 로그인 페이지를 열 수 없습니다. 다른 로그인 시트를 닫고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się otworzyć strony logowania Last.fm. Zamknij inne okno logowania i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível abrir a página de login do Last.fm. Feche qualquer outra janela de login e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法打开 Last.fm 登录页面。请关闭其他登录窗口后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法開啟 Last.fm 登入頁面。請關閉其他登入視窗後再試一次。"
+          }
+        }
+      }
+    },
+    "Couldn't reach Apple Music. Check your connection and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Music konnte nicht erreicht werden. Prüfe deine Verbindung und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con Apple Music. Revisa tu conexión e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre Apple Music. Vérifiez votre connexion et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere Apple Music. Controlla la connessione e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Musicに接続できませんでした。接続を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Music에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć z Apple Music. Sprawdź połączenie i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível acessar o Apple Music. Verifique sua conexão e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 Apple Music。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至 Apple Music。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
+    "Couldn't reach Songlink. Check your connection and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink konnte nicht erreicht werden. Prüfe deine Verbindung und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con Songlink. Revisa tu conexión e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre Songlink. Vérifiez votre connexion et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere Songlink. Controlla la connessione e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlinkに接続できませんでした。接続を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć z Songlink. Sprawdź połączenie i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível acessar o Songlink. Verifique sua conexão e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接 Songlink。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至 Songlink。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
     "Couldn't reach lrclib.net": {
       "localizations": {
         "de": {
@@ -27723,6 +28299,262 @@
         }
       }
     },
+    "Couldn't reach the metadata sources for “%@”. Check your connection and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Metadatenquellen für „%@“ konnten nicht erreicht werden. Prüfe deine Verbindung und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con las fuentes de metadatos de “%@”. Revisa tu conexión e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre les sources de métadonnées pour « %@ ». Vérifiez votre connexion et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere le fonti dei metadati per “%@”. Controlla la connessione e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」のメタデータソースに接続できませんでした。接続を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”의 메타데이터 소스에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć ze źródłami metadanych dla „%@”. Sprawdź połączenie i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível acessar as fontes de metadados de “%@”. Verifique sua conexão e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接“%@”的元数据来源。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至「%@」的中繼資料來源。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
+    "Couldn't reach the metadata sources. Year and genre will load once you're online.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Metadatenquellen konnten nicht erreicht werden. Jahr und Genre werden geladen, sobald du online bist."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con las fuentes de metadatos. El año y el género se cargarán cuando tengas conexión."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre les sources de métadonnées. L’année et le genre se chargeront dès que vous serez en ligne."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere le fonti dei metadati. Anno e genere verranno caricati appena sarai online."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メタデータソースに接続できませんでした。オンラインになると、年とジャンルを読み込みます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메타데이터 소스에 연결할 수 없습니다. 온라인 상태가 되면 연도와 장르를 불러옵니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć ze źródłami metadanych. Rok i gatunek wczytają się po połączeniu z internetem."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível acessar as fontes de metadados. Ano e gênero serão carregados quando você estiver online."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接元数据来源。联网后将加载年份和流派。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至中繼資料來源。連上網路後會載入年份與風格。"
+          }
+        }
+      }
+    },
+    "Couldn't reach the sample music server — check your connection": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Server für Beispielmusik ist nicht erreichbar – prüfe deine Verbindung"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con el servidor de música de muestra: revisa tu conexión"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre le serveur de musique d’exemple : vérifiez votre connexion"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere il server della musica di esempio: controlla la connessione"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプル音楽のサーバに接続できません — 接続を確認してください"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "샘플 음악 서버에 연결할 수 없음 — 연결 상태를 확인하세요"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie można połączyć z serwerem muzyki przykładowej — sprawdź połączenie"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível acessar o servidor de música de exemplo — verifique sua conexão"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接示例音乐服务器——请检查网络连接"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至範例音樂伺服器——請檢查網路連線"
+          }
+        }
+      }
+    },
+    "Couldn't reach the sample music server. Check your connection and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Server für Beispielmusik ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo conectar con el servidor de música de muestra. Revisa tu conexión e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre le serveur de musique d’exemple. Vérifiez votre connexion et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile raggiungere il server della musica di esempio. Controlla la connessione e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプル音楽のサーバに接続できませんでした。接続を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "샘플 음악 서버에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się połączyć z serwerem muzyki przykładowej. Sprawdź połączenie i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível acessar o servidor de música de exemplo. Verifique sua conexão e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接示例音乐服务器。请检查网络连接后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至範例音樂伺服器。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
     "Couldn't reach the server — check your connection": {
       "localizations": {
         "de": {
@@ -27783,6 +28615,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法連接伺服器——請檢查網路連線"
+          }
+        }
+      }
+    },
+    "Couldn't read that file as UTF-8 text. Equalizer APO and AutoEq profiles are plain text files.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Datei konnte nicht als UTF-8-Text gelesen werden. Equalizer APO- und AutoEq-Profile sind reine Textdateien."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo leer ese archivo como texto UTF-8. Los perfiles de Equalizer APO y AutoEq son archivos de texto sin formato."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de lire ce fichier en texte UTF-8. Les profils Equalizer APO et AutoEq sont des fichiers texte brut."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile leggere il file come testo UTF-8. I profili Equalizer APO e AutoEq sono file di testo semplice."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "そのファイルはUTF-8のテキストとして読めませんでした。Equalizer APOとAutoEqのプロファイルはプレーンテキストのファイルです。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "해당 파일을 UTF-8 텍스트로 읽을 수 없습니다. Equalizer APO와 AutoEq 프로파일은 일반 텍스트 파일입니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się odczytać tego pliku jako tekstu UTF-8. Profile Equalizer APO i AutoEq to zwykłe pliki tekstowe."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível ler esse arquivo como texto UTF-8. Os perfis do Equalizer APO e do AutoEq são arquivos de texto simples."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将该文件作为 UTF-8 文本读取。Equalizer APO 和 AutoEq 配置文件都是纯文本文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法將該檔案讀取為 UTF-8 文字。Equalizer APO 與 AutoEq 設定檔都是純文字檔。"
           }
         }
       }
@@ -27851,6 +28747,70 @@
         }
       }
     },
+    "Couldn't rename “%@” — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ konnte nicht umbenannt werden – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo cambiar el nombre de “%@”: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de renommer « %@ » : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile rinominare “%@”: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」の名前を変更できませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”의 이름을 바꿀 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zmienić nazwy „%@” — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível renomear “%@”: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法重命名“%@”——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法重新命名「%@」——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
+          }
+        }
+      }
+    },
     "Couldn't render the share card.": {
       "localizations": {
         "de": {
@@ -27911,6 +28871,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法產生分享卡片。"
+          }
+        }
+      }
+    },
+    "Couldn't restore the automatic cover — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das automatische Cover konnte nicht wiederhergestellt werden – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo restaurar la portada automática: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de restaurer la pochette automatique : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile ripristinare la copertina automatica: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動カバーを元に戻せませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 커버를 복원할 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się przywrócić automatycznej okładki — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível restaurar a capa automática: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法恢复自动封面——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法還原自動封面——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
           }
         }
       }
@@ -27985,6 +29009,70 @@
         }
       }
     },
+    "Couldn't restore the original artwork — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Original-Artwork konnte nicht wiederhergestellt werden – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo restaurar la carátula original: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de restaurer la pochette d’origine : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile ripristinare l’immagine originale: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元のアートワークを復元できませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "원본 아트워크를 복원할 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się przywrócić oryginalnej grafiki — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível restaurar a arte original: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法恢复原始封面——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法還原原始封面——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
+          }
+        }
+      }
+    },
     "Couldn't restore the original artwork. Try again.": {
       "localizations": {
         "de": {
@@ -28051,6 +29139,134 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法還原原始封面，請再試一次。"
+          }
+        }
+      }
+    },
+    "Couldn't save the artwork — the framed picture couldn't be rendered. Choose a different image.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Artwork konnte nicht gespeichert werden – das eingerahmte Bild ließ sich nicht rendern. Wähle ein anderes Bild."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo guardar la carátula: la imagen recortada no se pudo generar. Elige otra imagen."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’enregistrer la pochette : l’image recadrée n’a pas pu être générée. Choisissez une autre image."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile salvare la copertina: non è stato possibile generare l’immagine ritagliata. Scegli un’altra immagine."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アートワークを保存できませんでした。切り抜いた画像を描画できませんでした。別の画像を選んでください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아트워크를 저장할 수 없습니다. 프레임에 맞춘 이미지를 렌더링할 수 없었습니다. 다른 이미지를 선택하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zapisać grafiki — nie można wyrenderować kadrowanego obrazu. Wybierz inny obraz."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível salvar a arte: a imagem enquadrada não pôde ser renderizada. Escolha outra imagem."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存封面——无法渲染裁剪后的图片。请选择其他图片。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法儲存封面——無法轉譯裁切後的圖片。請選擇其他圖片。"
+          }
+        }
+      }
+    },
+    "Couldn't save the artwork — the library database couldn't be written. Check free disk space and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Artwork konnte nicht gespeichert werden – die Mediathek-Datenbank ließ sich nicht schreiben. Prüfe den freien Speicherplatz und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo guardar la carátula: la base de datos de la biblioteca no se pudo escribir. Revisa el espacio libre del disco e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’enregistrer la pochette : la base de données de la bibliothèque n’a pas pu être écrite. Vérifiez l’espace disque disponible et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile salvare la copertina: impossibile scrivere il database della libreria. Controlla lo spazio libero su disco e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アートワークを保存できませんでした。ライブラリのデータベースに書き込めませんでした。空き容量を確認して、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아트워크를 저장할 수 없습니다. 보관함 데이터베이스에 쓸 수 없었습니다. 디스크 여유 공간을 확인하고 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zapisać grafiki — nie można zapisać bazy danych biblioteki. Sprawdź wolne miejsce na dysku i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível salvar a arte: o banco de dados da biblioteca não pôde ser gravado. Verifique o espaço livre em disco e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存封面——资料库数据库无法写入。请检查可用磁盘空间后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法儲存封面——資料庫無法寫入。請檢查可用磁碟空間後再試一次。"
           }
         }
       }
@@ -28125,6 +29341,134 @@
         }
       }
     },
+    "Couldn't save “%@”: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ konnte nicht gespeichert werden: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo guardar “%@”: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’enregistrer « %@ » : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile salvare “%@”: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を保存できませんでした: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”을(를) 저장할 수 없음: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zapisać „%@”: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível salvar “%@”: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存“%@”：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法儲存「%@」：%@"
+          }
+        }
+      }
+    },
+    "Couldn't send to Apple Watch. Tap to retry.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senden an die Apple Watch fehlgeschlagen. Tippe zum erneuten Versuch."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo enviar al Apple Watch. Toca para reintentar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec de l’envoi à l’Apple Watch. Touchez pour réessayer."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile inviare all’Apple Watch. Tocca per riprovare."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Watchに送信できませんでした。タップして再試行してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Watch로 보낼 수 없습니다. 탭하여 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się wysłać na Apple Watch. Stuknij, aby spróbować ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível enviar para o Apple Watch. Toque para tentar novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法发送到 Apple Watch。点按重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法傳送至 Apple Watch。輕點即可重試。"
+          }
+        }
+      }
+    },
     "Couldn't update metadata.": {
       "localizations": {
         "de": {
@@ -28185,6 +29529,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法更新中繼資料。"
+          }
+        }
+      }
+    },
+    "Couldn't use “%@” as your music folder — macOS wouldn't grant Flaccy lasting access: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ kann nicht als dein Musikordner verwendet werden – macOS hat Flaccy keinen dauerhaften Zugriff gewährt: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se puede usar “%@” como carpeta de música: macOS no concedió a Flaccy acceso permanente: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’utiliser « %@ » comme dossier de musique : macOS n’a pas accordé à Flaccy un accès durable : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile usare “%@” come cartella della musica: macOS non ha concesso a Flaccy un accesso duraturo: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を音楽フォルダとして使用できません。macOSがFlaccyに永続的なアクセスを許可しませんでした: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”을(를) 음악 폴더로 사용할 수 없습니다. macOS가 Flaccy에 지속적인 접근 권한을 부여하지 않았습니다: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie można użyć „%@” jako folderu muzyki — macOS nie przyznał Flaccy trwałego dostępu: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível usar “%@” como sua pasta de música: o macOS não concedeu ao Flaccy acesso permanente: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法将“%@”用作音乐文件夹——macOS 未授予 Flaccy 持久访问权限：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法將「%@」用作音樂資料夾——macOS 未授予 Flaccy 持續存取權限：%@"
           }
         }
       }
@@ -30941,6 +32349,70 @@
         }
       }
     },
+    "Disc": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disque"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ディスク"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "디스크"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dysk"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disco"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "碟片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "碟片"
+          }
+        }
+      }
+    },
     "Discard Changes": {
       "localizations": {
         "de": {
@@ -32363,6 +33835,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "拖移控制點或輸入數值。曲線會經過每一個控制點。"
+          }
+        }
+      }
+    },
+    "Drag rows to reorder · right-click to remove": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeilen zum Sortieren ziehen · mit rechts klicken zum Entfernen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrastra las filas para reordenar · clic derecho para quitar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faites glisser les lignes pour les réordonner · clic droit pour supprimer"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trascina le righe per riordinare · clic destro per rimuovere"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "行をドラッグして並べ替え · 右クリックで削除"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "행을 끌어서 순서 변경 · 우클릭으로 제거"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przeciągnij wiersze, by zmienić kolejność · kliknij prawym, by usunąć"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arraste as linhas para reordenar · clique com o botão direito para remover"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖动行以重新排序 · 右键点按即可移除"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖移列以重新排序 · 按右鍵即可移除"
           }
         }
       }
@@ -35551,6 +37087,134 @@
         }
       }
     },
+    "Filter this album": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Album filtern"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtrar este álbum"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtrer cet album"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtra questo album"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアルバムを絞り込む"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 앨범 필터링"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtruj ten album"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtrar este álbum"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "筛选此专辑"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "篩選此專輯"
+          }
+        }
+      }
+    },
+    "Filter this playlist": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Playlist filtern"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtrar esta playlist"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtrer cette playlist"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtra questa playlist"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このプレイリストを絞り込む"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 재생목록 필터링"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtruj tę playlistę"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filtrar esta playlist"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "筛选此播放列表"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "篩選此播放列表"
+          }
+        }
+      }
+    },
     "Filter: %@": {
       "localizations": {
         "de": {
@@ -36907,6 +38571,70 @@
         }
       }
     },
+    "Flaccy built an invalid Last.fm request address, so nothing was sent.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy hat eine ungültige Last.fm-Anfrageadresse erstellt, daher wurde nichts gesendet."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy creó una dirección de solicitud de Last.fm no válida, así que no se envió nada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy a créé une adresse de requête Last.fm non valide ; rien n’a donc été envoyé."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy ha creato un indirizzo di richiesta Last.fm non valido, quindi non è stato inviato nulla."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccyが無効なLast.fmリクエストのアドレスを作成したため、何も送信されませんでした。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy가 잘못된 Last.fm 요청 주소를 만들었으므로 아무것도 전송되지 않았습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy utworzyło nieprawidłowy adres żądania Last.fm, więc nic nie zostało wysłane."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Flaccy criou um endereço de solicitação do Last.fm inválido, então nada foi enviado."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy 生成的 Last.fm 请求地址无效，因此未发送任何内容。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy 產生的 Last.fm 請求網址無效，因此未傳送任何內容。"
+          }
+        }
+      }
+    },
     "Flaccy can send three notifications: two days before your trial ends, on the last day, and once if a welcome-back price on Lifetime becomes available. Nothing else. You can turn them off any time in Settings.": {
       "localizations": {
         "de": {
@@ -36967,6 +38695,134 @@
           "stringUnit": {
             "state": "translated",
             "value": "Flaccy 最多會發送三次通知：試用結束前兩天、最後一天，以及永久版的歡迎回歸價可用時各一次。僅此而已。你可以隨時在設定中關閉。"
+          }
+        }
+      }
+    },
+    "Flaccy checked the file's own tags, looked for a .lrc or .elrc file next to the song, and asked lrclib.net. None of them have words for it. lrclib is written by its community, so Flaccy asks again in 30 days. A .lrc file saved next to the song shows up straight away.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy hat die Tags der Datei geprüft, nach einer .lrc- oder .elrc-Datei neben dem Titel gesucht und lrclib.net gefragt. Keine davon hat dafür einen Text. lrclib wird von der Community gepflegt, deshalb fragt Flaccy in 30 Tagen erneut. Eine .lrc-Datei, die neben dem Titel gespeichert wird, erscheint sofort."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy revisó las etiquetas del archivo, buscó un archivo .lrc o .elrc junto a la canción y consultó a lrclib.net. Ninguna tiene la letra. lrclib lo mantiene su comunidad, así que Flaccy volverá a consultar dentro de 30 días. Un archivo .lrc guardado junto a la canción aparece al instante."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy a examiné les balises du fichier, cherché un fichier .lrc ou .elrc à côté du morceau et interrogé lrclib.net. Aucune source n’en contient les paroles. lrclib est alimenté par sa communauté, donc Flaccy réessaiera dans 30 jours. Un fichier .lrc enregistré à côté du morceau apparaît aussitôt."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy ha controllato i tag del file, cercato un file .lrc o .elrc accanto al brano e interrogato lrclib.net. Nessuno ha il testo. lrclib è curato dalla sua comunità, quindi Flaccy riprova tra 30 giorni. Un file .lrc salvato accanto al brano compare subito."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccyはファイル自身のタグを確認し、曲のそばの.lrcまたは.elrcファイルを探し、lrclib.netに問い合わせました。どれにも歌詞はありませんでした。lrclibはコミュニティが管理しているため、Flaccyは30日後に再度確認します。曲のそばに保存された.lrcファイルはすぐに表示されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy는 파일 자체의 태그를 확인하고, 곡 옆의 .lrc 또는 .elrc 파일을 찾고, lrclib.net에 물어봤습니다. 어디에도 가사가 없었습니다. lrclib은 커뮤니티가 관리하므로 Flaccy는 30일 후에 다시 확인합니다. 곡 옆에 저장한 .lrc 파일은 바로 표시됩니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy sprawdziło tagi pliku, poszukało pliku .lrc lub .elrc obok utworu i zapytało lrclib.net. Żadne z nich nie ma do niego tekstu. lrclib prowadzi społeczność, więc Flaccy zapyta ponownie za 30 dni. Plik .lrc zapisany obok utworu pojawi się od razu."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Flaccy verificou as tags do próprio arquivo, procurou um arquivo .lrc ou .elrc ao lado da música e consultou o lrclib.net. Nenhum deles tem a letra. O lrclib é mantido pela comunidade, então o Flaccy consulta de novo em 30 dias. Um arquivo .lrc salvo ao lado da música aparece imediatamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy 检查了文件自身的标签，查找了歌曲旁边的 .lrc 或 .elrc 文件，并询问了 lrclib.net。这些来源都没有这首歌的歌词。lrclib 由社区维护，因此 Flaccy 将在 30 天后再次查询。保存在歌曲旁边的 .lrc 文件会立即显示。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy 檢查了檔案本身的標籤、尋找歌曲旁的 .lrc 或 .elrc 檔案，並詢問了 lrclib.net。這些來源都沒有這首歌的歌詞。lrclib 由社群維護，因此 Flaccy 會在 30 天後再次查詢。儲存在歌曲旁的 .lrc 檔案會立即顯示。"
+          }
+        }
+      }
+    },
+    "Flaccy couldn't open a connection. Check that you're online; lyrics load as soon as you are.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy konnte keine Verbindung herstellen. Prüfe, ob du online bist; der Songtext lädt, sobald du es bist."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy no pudo abrir una conexión. Comprueba que tienes conexión; la letra se carga en cuanto la tengas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy n’a pas pu ouvrir de connexion. Vérifiez que vous êtes en ligne ; les paroles se chargent dès que c’est le cas."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy non è riuscito ad aprire una connessione. Controlla di essere online; il testo si carica appena lo sei."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccyは接続を開けませんでした。オンラインか確認してください。オンラインになれば歌詞はすぐに読み込まれます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy가 연결을 열 수 없었습니다. 온라인 상태인지 확인하세요. 온라인이 되면 가사를 바로 불러옵니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy nie mogło otworzyć połączenia. Sprawdź, czy masz dostęp do internetu; teksty wczytają się, gdy tylko go będziesz mieć."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Flaccy não conseguiu abrir uma conexão. Verifique se você está online; a letra carrega assim que estiver."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy 无法建立连接。请检查是否已联网；一旦联网，歌词就会加载。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flaccy 無法建立連線。請確認已連上網路；一連上就會載入歌詞。"
           }
         }
       }
@@ -45511,6 +47367,198 @@
         }
       }
     },
+    "Last.fm didn't confirm the sign-in, so you're not signed in. Try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm hat die Anmeldung nicht bestätigt, du bist also nicht angemeldet. Versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm no confirmó el inicio de sesión, así que no has iniciado sesión. Inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm n’a pas confirmé la connexion, vous n’êtes donc pas connecté. Réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm non ha confermato l’accesso, quindi non hai effettuato l’accesso. Riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmがサインインを確認しなかったため、サインインされていません。もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm이 로그인을 확인하지 않아 로그인되지 않았습니다. 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm nie potwierdziło logowania, więc nie jesteś zalogowany. Spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Last.fm não confirmou o login, então você não está conectado. Tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 未确认登录，因此你尚未登录。请重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 未確認登入，因此你尚未登入。請再試一次。"
+          }
+        }
+      }
+    },
+    "Last.fm or Flaccy's signing service sent a reply Flaccy couldn't read. Try again later.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm oder der Signaturdienst von Flaccy hat eine Antwort gesendet, die Flaccy nicht lesen konnte. Versuche es später erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm o el servicio de firma de Flaccy envió una respuesta que Flaccy no pudo leer. Inténtalo más tarde."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm ou le service de signature de Flaccy a envoyé une réponse que Flaccy n’a pas pu lire. Réessayez plus tard."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm o il servizio di firma di Flaccy ha inviato una risposta che Flaccy non è riuscito a leggere. Riprova più tardi."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmまたはFlaccyの署名サービスが、Flaccyで読み取れない応答を返しました。後でもう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 또는 Flaccy의 서명 서비스가 Flaccy가 읽을 수 없는 응답을 보냈습니다. 나중에 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm lub usługa podpisywania Flaccy wysłała odpowiedź, której Flaccy nie mogło odczytać. Spróbuj ponownie później."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Last.fm ou o serviço de assinatura do Flaccy enviou uma resposta que o Flaccy não conseguiu ler. Tente novamente mais tarde."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 或 Flaccy 的签名服务返回了 Flaccy 无法读取的响应。请稍后重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 或 Flaccy 的簽章服務回傳了 Flaccy 無法讀取的回應。請稍後再試一次。"
+          }
+        }
+      }
+    },
+    "Last.fm returned to Flaccy without a sign-in token, so you're not signed in. Try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm hat Flaccy ohne Anmeldetoken zurückgegeben, du bist also nicht angemeldet. Versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm devolvió a Flaccy sin un token de inicio de sesión, así que no has iniciado sesión. Inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm a renvoyé Flaccy sans jeton de connexion ; vous n’êtes donc pas connecté. Réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm ha riportato a Flaccy senza un token di accesso, quindi non hai effettuato l’accesso. Riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmからサインイン用トークンなしで戻ってきたため、サインインされていません。もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm이 로그인 토큰 없이 Flaccy로 돌아와서 로그인되지 않았습니다. 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm wróciło do Flaccy bez tokenu logowania, więc nie jesteś zalogowany. Spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Last.fm voltou ao Flaccy sem um token de login, então você não está conectado. Tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 返回 Flaccy 时没有登录令牌，因此你尚未登录。请重试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 回到 Flaccy 時沒有登入權杖，因此你尚未登入。請再試一次。"
+          }
+        }
+      }
+    },
     "Last.fm scrobbling": {
       "localizations": {
         "de": {
@@ -45635,6 +47683,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "Last.fm 登入未完成。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
+    "Last.fm sign-in didn't complete: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Last.fm-Anmeldung wurde nicht abgeschlossen: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El inicio de sesión en Last.fm no se completó: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connexion à Last.fm n’a pas abouti : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accesso a Last.fm non completato: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fmのサインインが完了しませんでした: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 로그인을 완료하지 못했습니다: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Logowanie do Last.fm nie zostało ukończone: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O login no Last.fm não foi concluído: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 登录未完成：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 登入未完成：%@"
           }
         }
       }
@@ -46595,6 +48707,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "列表"
+          }
+        }
+      }
+    },
+    "List layout": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listenlayout"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diseño de lista"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disposition en liste"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout a elenco"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リスト表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "목록 레이아웃"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Układ listy"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout de lista"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表布局"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表版面"
           }
         }
       }
@@ -47599,6 +49775,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "最長連續：%lld 天"
+          }
+        }
+      }
+    },
+    "Looking Up Lyrics…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songtext wird gesucht…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscando letra…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherche des paroles…"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ricerca del testo…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞を検索中…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가사 찾는 중…"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyszukiwanie tekstu…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscando letra…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在查找歌词…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在尋找歌詞…"
           }
         }
       }
@@ -53023,6 +55263,70 @@
         }
       }
     },
+    "No Lyrics for “%@”": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Songtexte für „%@“"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin letra para “%@”"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas de paroles pour « %@ »"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun testo per “%@”"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」の歌詞はありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”의 가사 없음"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak tekstu dla „%@”"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem letra para “%@”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”没有歌词"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」沒有歌詞"
+          }
+        }
+      }
+    },
     "No Playlists Yet": {
       "localizations": {
         "de": {
@@ -54577,6 +56881,70 @@
         }
       }
     },
+    "No songs match": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Titel gefunden"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ninguna canción coincide"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun morceau ne correspond"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun brano corrisponde"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一致する曲がありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일치하는 곡 없음"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brak pasujących utworów"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma música corresponde"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配的歌曲"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有符合的歌曲"
+          }
+        }
+      }
+    },
     "No songs match “%@” yet.": {
       "localizations": {
         "de": {
@@ -54637,6 +57005,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "尚無符合「%@」的歌曲。"
+          }
+        }
+      }
+    },
+    "No songs yet. Right-click any song and choose Add to Playlist.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Titel. Klicke mit rechts auf einen Titel und wähle „Zur Playlist hinzufügen“."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todavía no hay canciones. Haz clic derecho en cualquier canción y elige “Añadir a una playlist”."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun morceau pour l’instant. Faites un clic droit sur un morceau et choisissez « Ajouter à une playlist »."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun brano per ora. Fai clic destro su un brano e scegli “Aggiungi a playlist”."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだ曲がありません。曲を右クリックして「プレイリストに追加」を選んでください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아직 곡이 없습니다. 곡을 마우스 오른쪽 버튼으로 클릭하고 “재생목록에 추가”를 선택하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie ma jeszcze utworów. Kliknij dowolny utwór prawym przyciskiem i wybierz Dodaj do playlisty."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma música ainda. Clique com o botão direito em qualquer música e escolha “Adicionar à playlist”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有歌曲。右键点按任意歌曲并选择“添加到播放列表”。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有歌曲。在任一首歌曲上按右鍵並選擇「加入播放列表」。"
           }
         }
       }
@@ -55789,6 +58221,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "不複製也不移動任何檔案——Flaccy 就在原處讀取你的檔案。"
+          }
+        }
+      }
+    },
+    "Nothing is playing": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nichts wird abgespielt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No hay nada reproduciéndose"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune lecture en cours"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessuna riproduzione in corso"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再生中のものはありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "재생 중인 곡 없음"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nic nie jest odtwarzane"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada está tocando"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有播放"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前沒有播放"
           }
         }
       }
@@ -61365,6 +63861,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "播放預覽"
+          }
+        }
+      }
+    },
+    "Play a song and its lyrics show up here.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spiele einen Titel ab, dann erscheint hier sein Songtext."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reproduce una canción y su letra aparecerá aquí."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lancez un morceau, et ses paroles s’affichent ici."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riproduci un brano e il suo testo comparirà qui."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲を再生すると、ここに歌詞が表示されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "곡을 재생하면 여기에 가사가 표시됩니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odtwórz utwór, a jego tekst pojawi się tutaj."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque uma música e a letra aparecerá aqui."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放一首歌曲，歌词就会显示在这里。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播放一首歌曲，歌詞就會顯示在這裡。"
           }
         }
       }
@@ -73449,6 +76009,70 @@
         }
       }
     },
+    "Send failed": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senden fehlgeschlagen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Error al enviar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Échec de l’envoi"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invio non riuscito"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信に失敗しました"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전송 실패"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się wysłać"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Falha no envio"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送失败"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "傳送失敗"
+          }
+        }
+      }
+    },
     "Sending": {
       "localizations": {
         "de": {
@@ -75243,6 +77867,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "在 Finder 中顯示"
+          }
+        }
+      }
+    },
+    "Show the playing song": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den laufenden Titel zeigen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar la canción en reproducción"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher le morceau en cours"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostra il brano in riproduzione"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再生中の曲を表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "재생 중인 곡 표시"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pokaż odtwarzany utwór"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar a música que está tocando"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示正在播放的歌曲"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示正在播放的歌曲"
           }
         }
       }
@@ -77369,6 +80057,70 @@
           "stringUnit": {
             "state": "translated",
             "value": "已拷貝 Songlink"
+          }
+        }
+      }
+    },
+    "Songlink has no streaming links for “%@”.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Für „%@“ gibt es keine Streaming-Links bei Songlink."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink no tiene enlaces de streaming para “%@”."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink n’a aucun lien de streaming pour « %@ »."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink non ha link di streaming per “%@”."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlinkに「%@」のストリーミングリンクがありません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink에 “%@”의 스트리밍 링크가 없습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink nie ma linków do streamingu dla „%@”."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Songlink não tem links de streaming para “%@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink 没有“%@”的流媒体链接。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Songlink 沒有「%@」的串流連結。"
           }
         }
       }
@@ -80687,6 +83439,70 @@
         }
       }
     },
+    "Table layout": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tabellenlayout"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diseño de tabla"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disposition en tableau"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout a tabella"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テーブル表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "테이블 레이아웃"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Układ tabeli"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Layout de tabela"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表格布局"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表格版面"
+          }
+        }
+      }
+    },
     "Tag cleanup is powered by Flaccy AI — included in Flaccy Lifetime.": {
       "localizations": {
         "de": {
@@ -81985,6 +84801,70 @@
         }
       }
     },
+    "The connection works, but the lyrics server didn't answer within 10 seconds. Try again in a moment.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Verbindung funktioniert, aber der Songtext-Server hat nicht innerhalb von 10 Sekunden geantwortet. Versuche es gleich noch einmal."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La conexión funciona, pero el servidor de letras no respondió en 10 segundos. Inténtalo de nuevo en un momento."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connexion fonctionne, mais le serveur de paroles n’a pas répondu dans les 10 secondes. Réessayez dans un instant."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connessione funziona, ma il server dei testi non ha risposto entro 10 secondi. Riprova tra poco."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続は有効ですが、歌詞サーバが10秒以内に応答しませんでした。少し待ってから、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결은 되었지만 가사 서버가 10초 안에 응답하지 않았습니다. 잠시 후 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Połączenie działa, ale serwer tekstów nie odpowiedział w ciągu 10 sekund. Spróbuj ponownie za chwilę."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A conexão funciona, mas o servidor de letras não respondeu em 10 segundos. Tente novamente em instantes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络连接正常，但歌词服务器未在 10 秒内响应。请稍后再试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "網路連線正常，但歌詞伺服器未在 10 秒內回應。請稍後再試一次。"
+          }
+        }
+      }
+    },
     "The cover you framed has not been saved.": {
       "localizations": {
         "de": {
@@ -82119,6 +84999,198 @@
         }
       }
     },
+    "The lyrics server answered HTTP %lld instead of lyrics. Trying again is harmless, but this one may need an update to Flaccy.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Songtext-Server hat mit HTTP %lld statt mit Songtext geantwortet. Ein erneuter Versuch schadet nicht, dieser Fehler könnte aber ein Update für Flaccy erfordern."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El servidor de letras respondió HTTP %lld en lugar de la letra. Volver a intentarlo no hace daño, pero este caso puede requerir una actualización de Flaccy."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le serveur de paroles a répondu HTTP %lld au lieu des paroles. Réessayer ne pose aucun problème, mais ce cas peut nécessiter une mise à jour de Flaccy."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server dei testi ha risposto HTTP %lld invece del testo. Riprovare non causa problemi, ma questo caso potrebbe richiedere un aggiornamento di Flaccy."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞サーバがHTTP %lldを返し、歌詞は返されませんでした。再試行しても問題ありませんが、Flaccyのアップデートが必要な場合があります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가사 서버가 가사 대신 HTTP %lld를 응답했습니다. 다시 시도해도 괜찮지만, Flaccy 업데이트가 필요할 수도 있습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serwer tekstów odpowiedział kodem HTTP %lld zamiast tekstem. Ponowna próba nie zaszkodzi, ale ten przypadek może wymagać aktualizacji Flaccy."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor de letras respondeu HTTP %lld em vez da letra. Tentar de novo não faz mal, mas este caso pode exigir uma atualização do Flaccy."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌词服务器返回了 HTTP %lld 而不是歌词。再试一次没有坏处，但此问题可能需要更新 Flaccy 才能解决。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞伺服器回傳了 HTTP %lld 而非歌詞。再試一次不會有影響，但此問題可能需要更新 Flaccy 才能解決。"
+          }
+        }
+      }
+    },
+    "The lyrics server answered with an error (HTTP %lld). These usually clear up within a few minutes.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Songtext-Server hat mit einem Fehler geantwortet (HTTP %lld). Das legt sich meist innerhalb weniger Minuten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El servidor de letras respondió con un error (HTTP %lld). Normalmente se resuelve en unos minutos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le serveur de paroles a répondu par une erreur (HTTP %lld). Cela se résout généralement en quelques minutes."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server dei testi ha risposto con un errore (HTTP %lld). Di solito si risolve in pochi minuti."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞サーバがエラー（HTTP %lld）を返しました。通常は数分以内に解消します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가사 서버가 오류(HTTP %lld)로 응답했습니다. 보통 몇 분 안에 해결됩니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serwer tekstów odpowiedział błędem (HTTP %lld). Zwykle problem znika w ciągu kilku minut."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor de letras respondeu com um erro (HTTP %lld). Isso costuma se resolver em alguns minutos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌词服务器返回了错误（HTTP %lld）。这类问题通常几分钟内会恢复。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞伺服器回傳了錯誤（HTTP %lld）。這類問題通常幾分鐘內就會恢復。"
+          }
+        }
+      }
+    },
+    "The lyrics server asked Flaccy to slow down and still hadn't room after a retry. Give it a minute and try again.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Songtext-Server hat Flaccy gebeten, langsamer zu werden, und nach einem erneuten Versuch war immer noch kein Platz frei. Warte eine Minute und versuche es erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El servidor de letras pidió a Flaccy que bajara el ritmo y, tras reintentar, seguía sin capacidad. Espera un minuto e inténtalo de nuevo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le serveur de paroles a demandé à Flaccy de ralentir, et après un nouvel essai il n’avait toujours pas de capacité. Attendez une minute et réessayez."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il server dei testi ha chiesto a Flaccy di rallentare e, dopo un nuovo tentativo, non aveva ancora capacità. Attendi un minuto e riprova."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞サーバがFlaccyに速度を落とすよう求め、再試行後もまだ余裕がありませんでした。1分ほど待ってから、もう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가사 서버가 Flaccy에 속도를 줄이라고 요청했고, 재시도 후에도 여유가 없었습니다. 1분 기다렸다가 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serwer tekstów poprosił Flaccy o zwolnienie, a po ponownej próbie nadal nie miał wolnych zasobów. Odczekaj minutę i spróbuj ponownie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O servidor de letras pediu ao Flaccy que desacelerasse e, depois de uma nova tentativa, ainda não tinha capacidade. Aguarde um minuto e tente novamente."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌词服务器要求 Flaccy 放慢速度，重试后仍然没有余量。请等待一分钟后再试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "歌詞伺服器要求 Flaccy 放慢速度，重試後仍然沒有餘裕。請等待一分鐘後再試一次。"
+          }
+        }
+      }
+    },
     "The menu bar player shows the current track with transport and love controls.": {
       "localizations": {
         "de": {
@@ -82179,6 +85251,134 @@
           "stringUnit": {
             "state": "translated",
             "value": "選單列播放器會顯示目前的曲目，並提供播放控制和喜愛按鈕。"
+          }
+        }
+      }
+    },
+    "The metadata sources are busy. Try “%@” again in a few minutes.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Metadatenquellen sind ausgelastet. Versuche „%@“ in ein paar Minuten erneut."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las fuentes de metadatos están ocupadas. Vuelve a intentar “%@” dentro de unos minutos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les sources de métadonnées sont occupées. Réessayez « %@ » dans quelques minutes."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le fonti dei metadati sono occupate. Riprova “%@” tra qualche minuto."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メタデータソースが混み合っています。数分後に「%@」をもう一度お試しください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메타데이터 소스가 바쁩니다. 몇 분 후에 “%@”을(를) 다시 시도하세요."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Źródła metadanych są zajęte. Spróbuj ponownie „%@” za kilka minut."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As fontes de metadados estão ocupadas. Tente “%@” novamente em alguns minutos."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据来源繁忙。请几分钟后再次尝试“%@”。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中繼資料來源忙碌中。請幾分鐘後再次嘗試「%@」。"
+          }
+        }
+      }
+    },
+    "The metadata sources have nothing new for “%@”.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Metadatenquellen haben für „%@“ nichts Neues."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las fuentes de metadatos no tienen nada nuevo para “%@”."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les sources de métadonnées n’ont rien de nouveau pour « %@ »."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le fonti dei metadati non hanno nulla di nuovo per “%@”."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メタデータソースに「%@」の新しい情報はありません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "메타데이터 소스에 “%@”에 대한 새 정보가 없습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Źródła metadanych nie mają nic nowego dla „%@”."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As fontes de metadados não têm nada novo para “%@”."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据来源中没有“%@”的新信息。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中繼資料來源中沒有「%@」的新資訊。"
           }
         }
       }
@@ -82371,6 +85571,134 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法完成購買。請檢查網路連線後再試一次。"
+          }
+        }
+      }
+    },
+    "The purchase couldn't be completed: %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Kauf konnte nicht abgeschlossen werden: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se pudo completar la compra: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’achat n’a pas pu être finalisé : %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile completare l’acquisto: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "購入を完了できませんでした: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "구매를 완료할 수 없습니다: %@"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udało się zakończyć zakupu: %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível concluir a compra: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法完成购买：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法完成購買：%@"
+          }
+        }
+      }
+    },
+    "The sample album download was interrupted. Try again to pick up where it stopped.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Download des Beispielalbums wurde unterbrochen. Versuche es erneut, um dort weiterzumachen, wo er stehen blieb."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La descarga del álbum de muestra se interrumpió. Inténtalo de nuevo para continuar donde se detuvo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le téléchargement de l’album d’exemple a été interrompu. Réessayez pour reprendre là où il s’était arrêté."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Il download dell’album di esempio è stato interrotto. Riprova per riprendere da dove si era fermato."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプルアルバムのダウンロードが中断されました。もう一度試すと、中断した場所から再開します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "샘플 앨범 다운로드가 중단되었습니다. 다시 시도하면 중단된 곳부터 이어받습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pobieranie albumu przykładowego zostało przerwane. Spróbuj ponownie, aby wznowić od miejsca przerwania."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O download do álbum de exemplo foi interrompido. Tente novamente para continuar de onde parou."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "示例专辑的下载已中断。请重试以从中断处继续。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "範例專輯的下載已中斷。請再試一次，從中斷處繼續。"
           }
         }
       }
@@ -94221,6 +97549,326 @@
         }
       }
     },
+    "lrclib.net Is Busy": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net ist ausgelastet"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net está ocupado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net est occupé"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net è occupato"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.netは混雑しています"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net이 바쁩니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net jest zajęty"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O lrclib.net está ocupado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 繁忙"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 忙碌中"
+          }
+        }
+      }
+    },
+    "lrclib.net Is Having Trouble": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net hat Probleme"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net tiene problemas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net rencontre des problèmes"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net ha dei problemi"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.netに問題が発生しています"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net에 문제가 있습니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net ma problemy"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O lrclib.net está com problemas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 出现问题"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 發生問題"
+          }
+        }
+      }
+    },
+    "lrclib.net Took Too Long": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net hat zu lange gebraucht"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net tardó demasiado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net a mis trop de temps"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net ha impiegato troppo tempo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.netの応答が遅すぎます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 응답이 너무 늦습니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net odpowiadał zbyt długo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O lrclib.net demorou demais"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 响应超时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 回應逾時"
+          }
+        }
+      }
+    },
+    "lrclib.net Turned the Request Down": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net hat die Anfrage abgelehnt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net rechazó la solicitud"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net a refusé la requête"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net ha rifiutato la richiesta"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.netがリクエストを拒否しました"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net이 요청을 거부했습니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net odrzucił żądanie"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O lrclib.net recusou a solicitação"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 拒绝了请求"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 拒絕了請求"
+          }
+        }
+      }
+    },
+    "lrclib.net lists this track as an instrumental, so there are no words to follow.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net führt diesen Titel als Instrumental, es gibt also keinen Text zum Mitlesen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net indica que esta pista es instrumental, así que no hay letra que seguir."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net indique que ce morceau est instrumental, il n’y a donc pas de paroles à suivre."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net indica questo brano come strumentale, quindi non ci sono parole da seguire."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.netではこの曲はインストゥルメンタルとして登録されているため、追う歌詞はありません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net은 이 트랙을 연주곡으로 등록해 두었으므로 따라 부를 가사가 없습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net oznacza ten utwór jako instrumentalny, więc nie ma słów do śledzenia."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O lrclib.net lista esta faixa como instrumental, então não há letra para acompanhar."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 将此曲目列为纯音乐，因此没有可跟唱的歌词。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "lrclib.net 將此曲目列為純音樂，因此沒有可跟唱的歌詞。"
+          }
+        }
+      }
+    },
     "measuring…": {
       "localizations": {
         "de": {
@@ -94607,6 +98255,198 @@
           "stringUnit": {
             "state": "translated",
             "value": "「%@」已不在你的資料庫中。"
+          }
+        }
+      }
+    },
+    "“%@” isn't in the Apple Music catalog.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ ist nicht im Apple-Music-Katalog enthalten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” no está en el catálogo de Apple Music."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« %@ » ne figure pas dans le catalogue Apple Music."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” non è nel catalogo di Apple Music."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」はApple Musicのカタログにありません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”은(는) Apple Music 카탈로그에 없습니다."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@” nie ma w katalogu Apple Music."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” não está no catálogo do Apple Music."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”不在 Apple Music 目录中。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」不在 Apple Music 目錄中。"
+          }
+        }
+      }
+    },
+    "“%@” isn't in this playlist": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ ist nicht in dieser Playlist"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” no está en esta playlist"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« %@ » n’est pas dans cette playlist"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” non è in questa playlist"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」はこのプレイリストにありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”은(는) 이 재생목록에 없습니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@” nie znajduje się w tej playliście"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” não está nesta playlist"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”不在此播放列表中"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」不在此播放列表中"
+          }
+        }
+      }
+    },
+    "“%@” isn't on %@": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ ist nicht auf %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” no está en %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« %@ » n’est pas sur %@"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” non è su %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」は%@にありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”은(는) %@에 없습니다"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@” nie znajduje się na %@"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” não está em %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”不在%@上"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」不在%@上"
           }
         }
       }
