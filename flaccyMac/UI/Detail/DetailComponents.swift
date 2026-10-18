@@ -49,6 +49,7 @@ final class DetailTrackRowView: NSView {
     private let numberLabel = NSTextField(labelWithString: "")
     private let playingIcon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
+    private let subtitleLabel = NSTextField(labelWithString: "")
     private let heartButton = NSButton()
     private let durationLabel = NSTextField(labelWithString: "")
     private var isHovered = false
@@ -74,6 +75,12 @@ final class DetailTrackRowView: NSView {
         titleLabel.textColor = MacColors.primaryLabel
         titleLabel.lineBreakMode = .byTruncatingTail
 
+        subtitleLabel.font = .systemFont(ofSize: 12)
+        subtitleLabel.textColor = MacColors.tertiaryLabel
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        subtitleLabel.isHidden = true
+        subtitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         heartButton.isBordered = false
         heartButton.imagePosition = .imageOnly
         heartButton.target = self
@@ -82,7 +89,7 @@ final class DetailTrackRowView: NSView {
         durationLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         durationLabel.textColor = MacColors.secondaryLabel
 
-        for view in [numberLabel, playingIcon, titleLabel, heartButton, durationLabel] {
+        for view in [numberLabel, playingIcon, titleLabel, subtitleLabel, heartButton, durationLabel] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -96,6 +103,9 @@ final class DetailTrackRowView: NSView {
             titleLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 12),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: heartButton.leadingAnchor, constant: -8),
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 10),
+            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: heartButton.leadingAnchor, constant: -8),
+            subtitleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             heartButton.trailingAnchor.constraint(equalTo: durationLabel.leadingAnchor, constant: -12),
             heartButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             durationLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
@@ -105,8 +115,17 @@ final class DetailTrackRowView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(number: Int, title: String, duration: TimeInterval, loved: Bool, isPlaying: Bool) {
+    func configure(
+        number: Int,
+        title: String,
+        duration: TimeInterval,
+        loved: Bool,
+        isPlaying: Bool,
+        subtitle: String? = nil
+    ) {
         numberLabel.stringValue = "\(number)"
+        subtitleLabel.stringValue = subtitle ?? ""
+        subtitleLabel.isHidden = subtitle?.isEmpty ?? true
         numberLabel.isHidden = isPlaying
         playingIcon.isHidden = !isPlaying
         titleLabel.stringValue = title
@@ -190,6 +209,88 @@ final class DetailTrackRowView: NSView {
     }
 }
 
+/// The line over a disc's or vinyl side's songs: its name, in small capitals
+/// tinted with the accent, and how many songs and minutes it holds.
+final class DiscHeaderView: NSView {
+
+    init(label: String, count: Int, duration: TimeInterval) {
+        super.init(frame: .zero)
+        let icon = NSImageView(image: NSImage(
+            systemSymbolName: "opticaldisc", accessibilityDescription: nil
+        ) ?? NSImage())
+        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+        icon.contentTintColor = .controlAccentColor
+
+        let name = NSTextField(labelWithString: label.uppercased())
+        name.font = .systemFont(ofSize: 11, weight: .bold)
+        name.textColor = .controlAccentColor
+
+        let minutes = max(Int((duration / 60).rounded()), 1)
+        let meta = NSTextField(labelWithString: count == 1
+            ? String(localized: "1 song · \(minutes) min")
+            : String(localized: "\(count) songs · \(minutes) min"))
+        meta.font = .systemFont(ofSize: 11)
+        meta.textColor = MacColors.tertiaryLabel
+        meta.setContentHuggingPriority(.required, for: .horizontal)
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        let stack = NSStackView(views: [icon, name, spacer, meta])
+        stack.orientation = .horizontal
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: 26),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
+/// A rounded surface behind a run of song rows, the Columns layout's block.
+final class RoundedRowsView: NSView {
+
+    let stack = NSStackView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.cornerCurve = .continuous
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        refreshFill()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshFill()
+    }
+
+    private func refreshFill() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = MacColors.fill(0.06, light: 0.04).cgColor
+        }
+    }
+}
+
 /// Horizontal shelf of circular similar-artist bubbles that exist in the
 /// local library, shared by both detail screens.
 final class SimilarArtistsRowView: NSView {
@@ -198,6 +299,16 @@ final class SimilarArtistsRowView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: String(localized: "Similar Artists in Your Library"))
     private let stack = NSStackView()
+    private var titleLeading: NSLayoutConstraint?
+    private var stackLeading: NSLayoutConstraint?
+
+    /// How far the shelf's content sits in from its leading edge.
+    var contentInset: CGFloat = 0 {
+        didSet {
+            titleLeading?.constant = contentInset
+            stackLeading?.constant = contentInset
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -214,11 +325,15 @@ final class SimilarArtistsRowView: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
+        let titleLeading = titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor)
+        let stackLeading = stack.leadingAnchor.constraint(equalTo: leadingAnchor)
+        self.titleLeading = titleLeading
+        self.stackLeading = stackLeading
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: topAnchor),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            titleLeading,
             stack.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackLeading,
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])

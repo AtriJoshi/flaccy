@@ -10,6 +10,9 @@ import FlaccyCore
 enum DebugDrive {
 
     static func runIfRequested(window: NSWindow?) {
+        if let layout = value(after: "--detail-layout") {
+            UserDefaults.standard.set(layout, forKey: TrackPageSongs.layoutKey)
+        }
         DebugStatsDrive.runIfRequested()
         DebugArtworkDrive.runIfRequested(window: window)
         if let target = value(after: "--dump-log") {
@@ -172,6 +175,7 @@ enum DebugDrive {
             } else {
                 AppLogger.error("DebugDrive: album not found: \(title)", category: .general)
             }
+            await driveDetailPage(window: window)
             name = "flaccy-shot-album"
         case .artist(let artist):
             startHeroPlayback()
@@ -196,6 +200,7 @@ enum DebugDrive {
             } else {
                 AppLogger.error("DebugDrive: playlist not found: \(playlistName)", category: .general)
             }
+            await driveDetailPage(window: window)
             name = "flaccy-shot-playlist-detail"
         case .nowPlaying:
             startHeroPlayback()
@@ -301,6 +306,129 @@ enum DebugDrive {
         reassertWindowSizeIfRequested(window)
         try? await Task.sleep(for: .seconds(1))
         capture(window: window, name: name)
+        if let size = value(after: "--resize-after") {
+            resize(window, to: size)
+            try? await Task.sleep(for: .seconds(3))
+            capture(window: window, name: name + "-resized")
+        }
+    }
+
+    private static func resize(_ window: NSWindow?, to size: String) {
+        let parts = size.lowercased().split(separator: "x")
+        guard let window, parts.count == 2, let width = Double(parts[0]), let height = Double(parts[1]) else { return }
+        window.setContentSize(NSSize(width: width, height: height))
+    }
+
+    /// Applies the `--detail-*` arguments to the album or playlist page that is
+    /// on screen: a filter, a table sort, a song playing from the page, a jump
+    /// to the playing song and a timing of every layout switch.
+    private static func driveDetailPage(window: NSWindow?) async {
+        try? await Task.sleep(for: .seconds(2))
+        let root = window?.contentViewController
+        let album: AlbumDetailViewController? = findController(in: root)
+        let playlist: PlaylistDetailViewController? = findController(in: root)
+        guard let songs = album?.debugSongs ?? playlist?.debugSongs else {
+            AppLogger.error("DebugDrive: no song page on screen", category: .general)
+            return
+        }
+        if let index = value(after: "--detail-play").flatMap(Int.init), songs.model.entries.indices.contains(index) {
+            AudioPlayer.shared.volume = 0.02
+            AudioPlayer.shared.play(songs.model.entries.map(\.track), startingAt: index)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        if let text = value(after: "--detail-filter") {
+            songs.debugFilter(text)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        if let sort = value(after: "--detail-sort") {
+            let parts = sort.split(separator: ":").map(String.init)
+            songs.debugSort(column: parts[0], ascending: parts.count < 2 || parts[1] != "desc")
+            try? await Task.sleep(for: .seconds(1))
+        }
+        if CommandLine.arguments.contains("--detail-exercise-layouts") {
+            await exerciseLayoutSwitching(songs)
+        }
+        if CommandLine.arguments.contains("--detail-exercise-playlist") {
+            await exercisePlaylistEditing(songs)
+        }
+        if CommandLine.arguments.contains("--detail-bench") {
+            await benchmarkLayouts(songs, window: window)
+        }
+        if CommandLine.arguments.contains("--detail-locate") {
+            window?.contentView?.layoutSubtreeIfNeeded()
+            songs.locatePlaying()
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    /// Switches layouts through the segmented control's own action and logs
+    /// whether the choice is remembered, shared across kinds, resolved for a
+    /// playlist without being overwritten, and snaps the page to the top.
+    private static func exerciseLayoutSwitching(_ songs: TrackPageSongs) async {
+        func report(_ expectation: String, _ passed: Bool) {
+            AppLogger.info("DetailExercise \(passed ? "PASS" : "FAIL"): \(expectation)", category: .general)
+        }
+        let key = TrackPageSongs.layoutKey
+        for layout in TrackPageLayout.Layout.allCases where layout.isOffered(on: songs.model.kind) {
+            let changes = songs.layout != layout
+            songs.debugScroll(to: 300)
+            try? await Task.sleep(for: .milliseconds(300))
+            songs.debugPick(layout)
+            try? await Task.sleep(for: .milliseconds(600))
+            report("picking \(layout.id) stores it (stored \(UserDefaults.standard.string(forKey: key) ?? "nil"))",
+                   UserDefaults.standard.string(forKey: key) == layout.id && songs.layout == layout)
+            report("picking \(layout.id) \(changes ? "scrolls to the top" : "again leaves the page alone") (offset \(songs.debugScrollOffset ?? -1))",
+                   changes ? abs(songs.debugScrollOffset ?? -1) < 1 : (songs.debugScrollOffset ?? 0) > 1)
+        }
+        UserDefaults.standard.set("columns", forKey: key)
+        let resolved = TrackPageSongs.savedLayout(for: .playlist)
+        report("a remembered columns resolves to list for a playlist (got \(resolved.id)) and stays stored",
+               resolved == .list && UserDefaults.standard.string(forKey: key) == "columns")
+        report("a remembered columns stays columns for an album",
+               TrackPageSongs.savedLayout(for: .album) == .columns)
+    }
+
+    /// Reorders and removes rows through the same closures a drag and the
+    /// context menu call, then reads the page back from the database it
+    /// reloads from, and logs PASS or FAIL for each.
+    private static func exercisePlaylistEditing(_ songs: TrackPageSongs) async {
+        func titles() -> [String] { songs.model.entries.prefix(4).map(\.track.title) }
+        func report(_ expectation: String, _ passed: Bool) {
+            AppLogger.info("DetailExercise \(passed ? "PASS" : "FAIL"): \(expectation)", category: .general)
+        }
+        let before = titles()
+        let count = songs.model.entries.count
+        songs.model.reorder?(IndexSet(integer: 0), 3)
+        try? await Task.sleep(for: .seconds(1))
+        let expected = [before[1], before[2], before[0], before[3]]
+        report("moving row 1 below row 3 gives \(expected) (got \(titles()))", titles() == expected)
+        songs.model.reorder?(IndexSet([1, 2]), 0)
+        try? await Task.sleep(for: .seconds(1))
+        let both = [expected[1], expected[2], expected[0], expected[3]]
+        report("moving rows 2 and 3 to the top gives \(both) (got \(titles()))", titles() == both)
+        if let first = songs.model.entries.first {
+            songs.model.remove?([first])
+            try? await Task.sleep(for: .seconds(1))
+            report("removing the first row leaves \(count - 1) rows (got \(songs.model.entries.count))",
+                   songs.model.entries.count == count - 1 && songs.model.entries.first?.track.title == both[1])
+        }
+    }
+
+    private static func benchmarkLayouts(_ songs: TrackPageSongs, window: NSWindow?) async {
+        func milliseconds(_ label: String, _ work: () -> Void) {
+            let start = CFAbsoluteTimeGetCurrent()
+            work()
+            window?.contentView?.layoutSubtreeIfNeeded()
+            window?.contentView?.displayIfNeeded()
+            let elapsed = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+            AppLogger.info("DebugDrive: \(label) took \(elapsed) ms for \(songs.model.entries.count) songs", category: .general)
+        }
+        for layout in TrackPageLayout.Layout.allCases where layout.isOffered(on: songs.model.kind) {
+            milliseconds("layout \(layout.id)") { songs.debugChoose(layout) }
+            milliseconds("filter on \(layout.id)") { songs.debugFilter("song 99") }
+            milliseconds("filter cleared on \(layout.id)") { songs.debugFilter("") }
+        }
+        milliseconds("sort by title") { songs.debugChoose(.table); songs.debugSort(column: "title", ascending: false) }
     }
 
     /// Section switches can shrink the window below the requested capture
