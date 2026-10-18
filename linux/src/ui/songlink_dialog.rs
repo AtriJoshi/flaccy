@@ -10,6 +10,7 @@ use std::rc::Rc;
 pub fn share(ui: &Rc<Ui>, title: String, artist: String, album: bool) {
     ui.core.toast("Finding links…");
     let ui_ref = Rc::clone(ui);
+    let wanted = title.clone();
     songlink::lookup(
         &ui.core,
         title,
@@ -17,7 +18,7 @@ pub fn share(ui: &Rc<Ui>, title: String, artist: String, album: bool) {
         album,
         move |core, result| match result {
             Ok(found) => present(&ui_ref, &found),
-            Err(_) => core.toast(songlink::failure_message(album)),
+            Err(error) => core.toast(&songlink::failure_message(&error, &wanted)),
         },
     );
 }

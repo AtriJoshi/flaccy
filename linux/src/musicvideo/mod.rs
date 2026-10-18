@@ -59,7 +59,7 @@ pub enum VideoState {
     Off,
     Searching,
     Ready(VideoMatch),
-    Missing,
+    Missing(String),
     Failed(String),
 }
 
@@ -509,7 +509,9 @@ fn request_resolve(core: &Rc<AppCore>, force: bool) {
     if !available() {
         publish(
             core,
-            VideoState::Failed("Video playback is unavailable".into()),
+            VideoState::Failed(
+                "Video playback is unavailable — GStreamer's playbin3 element is missing".into(),
+            ),
         );
         return;
     }
@@ -579,7 +581,7 @@ fn apply_response(core: &Rc<AppCore>, response: Response) {
             let Some(stream) = stream else {
                 publish(
                     core,
-                    VideoState::Failed("This video's stream expired".into()),
+                    VideoState::Failed("This video's stream expired and couldn't be renewed".into()),
                 );
                 return;
             };
@@ -630,7 +632,7 @@ fn ensure_stage(core: &Rc<AppCore>) -> Option<Rc<VideoStage>> {
             crate::logger::error("musicvideo", &format!("video sink unavailable: {err}"));
             publish(
                 core,
-                VideoState::Failed("Video playback is unavailable".into()),
+                VideoState::Failed(format!("Video playback is unavailable — {err}")),
             );
             return None;
         }
@@ -757,7 +759,9 @@ fn handle_resolve(
                 None if row.age_days <= MISS_TTL_DAYS => {
                     let _ = tx.send_blocking(Response::Resolved {
                         seq,
-                        state: VideoState::Missing,
+                        state: VideoState::Missing(
+                            "An earlier search found no matching video for this song.".to_string(),
+                        ),
                         stream: None,
                     });
                     return;
@@ -772,18 +776,18 @@ fn handle_resolve(
             db.save_music_video(&track.title, &track.artist, Some(&found), 1.0);
             deliver(db, root, seq, track, found, settings, tx);
         }
-        Pick::Nothing => {
+        Pick::Nothing(reason) => {
             db.save_music_video(&track.title, &track.artist, None, 0.0);
             let _ = tx.send_blocking(Response::Resolved {
                 seq,
-                state: VideoState::Missing,
+                state: VideoState::Missing(reason),
                 stream: None,
             });
         }
         Pick::Failed(err) => {
             let _ = tx.send_blocking(Response::Resolved {
                 seq,
-                state: VideoState::Failed(err),
+                state: VideoState::Failed(format!("Couldn't search YouTube: {err}")),
                 stream: None,
             });
         }
@@ -792,7 +796,7 @@ fn handle_resolve(
 
 enum Pick {
     Chosen(VideoMatch),
-    Nothing,
+    Nothing(String),
     Failed(String),
 }
 
@@ -801,12 +805,17 @@ enum Pick {
 fn pick(track: &Track, settings: &Settings) -> Pick {
     let candidates = match search::search(&track.title, &track.artist) {
         search::SearchOutcome::Found(found) => found,
-        search::SearchOutcome::Empty => return Pick::Nothing,
+        search::SearchOutcome::Empty => {
+            return Pick::Nothing("YouTube returned no results for this song.".to_string())
+        }
         search::SearchOutcome::Failed(err) => return Pick::Failed(err),
     };
     let ranked = score::rank(&track.title, &track.artist, track.duration, &candidates);
     if ranked.is_empty() {
-        return Pick::Nothing;
+        return Pick::Nothing(format!(
+            "None of YouTube's {} results looked like this song or ran about as long.",
+            candidates.len()
+        ));
     }
     if score::decisive(&ranked) {
         return Pick::Chosen(build_match(
@@ -841,7 +850,10 @@ fn pick(track: &Track, settings: &Settings) -> Pick {
                         return Pick::Chosen(build_match(shortlist[index], &reason));
                     }
                 }
-                return Pick::Nothing;
+                return Pick::Nothing(format!(
+                    "{model} judged that none of the top {} results is this song's video.",
+                    shortlist.len()
+                ));
             }
         }
     }
@@ -852,7 +864,10 @@ fn pick(track: &Track, settings: &Settings) -> Pick {
             "Best match among close results",
         ))
     } else {
-        Pick::Nothing
+        Pick::Nothing(format!(
+            "None of YouTube's {} results matched this song's title, channel and length closely enough.",
+            candidates.len()
+        ))
     }
 }
 
@@ -917,7 +932,7 @@ fn deliver(
         Err(err) => {
             let _ = tx.send_blocking(Response::Resolved {
                 seq,
-                state: VideoState::Failed(err),
+                state: VideoState::Failed(format!("Couldn't load the video's stream: {err}")),
                 stream: None,
             });
         }
@@ -1016,7 +1031,7 @@ mod tests {
             reason: String::new(),
         };
         assert!(VideoState::Ready(found).matched().is_some());
-        assert!(VideoState::Missing.matched().is_none());
+        assert!(VideoState::Missing(String::new()).matched().is_none());
         assert!(VideoState::Searching.matched().is_none());
     }
 }

@@ -77,7 +77,7 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     let empty = adw::StatusPage::builder()
         .icon_name("starred-symbolic")
         .title("Nothing on the Wantlist")
-        .description("Suggestions build up from your library gaps, lossy albums, and — when Last.fm is connected — your charts and loved tracks.")
+        .description("Suggestions build up from your library gaps, lossy albums, and — when Last.fm is connected — your charts and loved tracks. Add music, or connect Last.fm in Preferences, to start them.")
         .build();
 
     let scroll = gtk::ScrolledWindow::builder()

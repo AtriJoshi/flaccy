@@ -194,7 +194,10 @@ impl Screen {
                 Ok(()) => screen.toast("Profile exported"),
                 Err(err) => {
                     crate::logger::warn("equalizer", &format!("export failed: {err}"));
-                    screen.toast("Could not write the file");
+                    screen.toast(&format!(
+                        "Couldn't export “{}” — {err}.",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("the file")
+                    ));
                 }
             }
         });

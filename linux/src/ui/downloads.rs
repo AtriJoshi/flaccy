@@ -569,7 +569,7 @@ fn subtitle_text(row: &DownloadRow) -> String {
         downloads::STATUS_FAILED => row
             .error
             .clone()
-            .unwrap_or_else(|| "Download failed".to_string()),
+            .unwrap_or_else(|| "The download failed and no reason was recorded — see the log".to_string()),
         downloads::STATUS_CANCELLED => "Cancelled".to_string(),
         other => other.to_string(),
     }

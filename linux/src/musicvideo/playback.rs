@@ -413,9 +413,24 @@ pub fn friendly_pipeline_error(raw: &str) -> String {
         return "This video\'s stream expired".to_string();
     }
     if lowered.contains("resolve") || lowered.contains("network") || lowered.contains("connect") {
-        return "Couldn\'t reach the video".to_string();
+        return "Couldn\'t reach the video's server — check your connection".to_string();
     }
-    "Video playback failed".to_string()
+    format!("Video playback failed: {}", first_line(raw))
+}
+
+/// The first non-empty line of a GStreamer message, cut to a length that fits
+/// the lens.
+fn first_line(raw: &str) -> String {
+    let line = raw
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("no details from GStreamer");
+    let mut shown: String = line.chars().take(90).collect();
+    if shown.len() < line.len() {
+        shown.push('…');
+    }
+    shown
 }
 
 /// Named because the resolver watches for it: this failure is fixable by
@@ -434,7 +449,7 @@ mod tests {
         );
         assert_eq!(
             friendly_pipeline_error("Could not resolve server name"),
-            "Couldn't reach the video"
+            "Couldn't reach the video's server — check your connection"
         );
         assert_eq!(
             friendly_pipeline_error("Your GStreamer installation is missing a decoder"),
@@ -442,7 +457,7 @@ mod tests {
         );
         assert_eq!(
             friendly_pipeline_error("Internal data stream error"),
-            "Video playback failed"
+            "Video playback failed: Internal data stream error"
         );
     }
 }

@@ -11,7 +11,7 @@ use std::rc::Rc;
 pub fn present(ui: &Rc<Ui>, years: Vec<i32>) {
     if years.is_empty() {
         ui.core
-            .toast("No listening history yet for a Year in Music");
+            .toast("Year in Music needs dated plays — listen for a while or import your Last.fm history in Stats.");
         return;
     }
 
@@ -269,7 +269,7 @@ fn export(ui: &Rc<Ui>, data: &Rc<RefCell<Option<Rc<YearData>>>>, story: bool) {
     glib::spawn_future_local(async move {
         match rx.recv().await {
             Ok(Some(bytes)) => save_card(&ui, bytes, &suggested),
-            _ => ui.core.toast("Couldn't render the card"),
+            _ => ui.core.toast("Couldn't draw the card — the image couldn't be created or encoded as a PNG. Try again."),
         }
     });
 }
@@ -295,7 +295,10 @@ pub fn save_card(ui: &Rc<Ui>, png: Vec<u8>, suggested_name: &str) {
             }
             Err(err) => {
                 crate::logger::error("ui", &format!("card export failed: {err}"));
-                ui.core.toast("Export failed");
+                ui.core.toast(&format!(
+                    "Couldn't save the card to “{}” — {err}.",
+                    path.file_name().and_then(|n| n.to_str()).unwrap_or("that location")
+                ));
             }
         }
     });

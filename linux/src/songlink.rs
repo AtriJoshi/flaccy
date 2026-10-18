@@ -24,6 +24,31 @@ pub struct SonglinkResult {
     pub artist: String,
 }
 
+/// Why a Songlink lookup produced nothing: the services could not be reached,
+/// or they answered and know no release matching the song.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LookupError {
+    Unreachable(String),
+    NoMatch(String),
+}
+
+impl std::fmt::Display for LookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LookupError::Unreachable(detail) | LookupError::NoMatch(detail) => f.write_str(detail),
+        }
+    }
+}
+
+/// Reads a failed request as a missing page (HTTP 404) or an unreachable
+/// service (no answer, or any other status).
+fn request_error(error: ureq::Error) -> LookupError {
+    match error {
+        ureq::Error::Status(404, _) => LookupError::NoMatch("HTTP 404".to_string()),
+        other => LookupError::Unreachable(format!("{other}")),
+    }
+}
+
 /// Display names and ordering shared with `SonglinkService.knownPlatforms`.
 const KNOWN_PLATFORMS: &[(&str, &str)] = &[
     ("spotify", "Spotify"),
@@ -47,15 +72,15 @@ const KNOWN_PLATFORMS: &[(&str, &str)] = &[
 ];
 
 /// Resolves a track or album off the main thread and hands the result back on
-/// it. The callback receives `Err(message)` when nothing could be found.
+/// it. The callback receives the `LookupError` when nothing could be found.
 pub fn lookup(
     core: &Rc<AppCore>,
     title: String,
     artist: String,
     album: bool,
-    on_done: impl FnOnce(&Rc<AppCore>, Result<SonglinkResult, String>) + 'static,
+    on_done: impl FnOnce(&Rc<AppCore>, Result<SonglinkResult, LookupError>) + 'static,
 ) {
-    let (tx, rx) = async_channel::bounded::<Result<SonglinkResult, String>>(1);
+    let (tx, rx) = async_channel::bounded::<Result<SonglinkResult, LookupError>>(1);
     std::thread::Builder::new()
         .name("flaccy-songlink".into())
         .spawn(move || {
@@ -67,14 +92,14 @@ pub fn lookup(
         let result = rx
             .recv()
             .await
-            .unwrap_or(Err("lookup cancelled".to_string()));
+            .unwrap_or(Err(LookupError::Unreachable("lookup cancelled".to_string())));
         let Some(core) = weak.upgrade() else { return };
         match &result {
             Ok(found) => crate::logger::info(
                 "songlink",
                 &format!("{} — {} platform links", found.page_url, found.links.len()),
             ),
-            Err(message) => crate::logger::warn("songlink", &format!("lookup failed: {message}")),
+            Err(error) => crate::logger::warn("songlink", &format!("lookup failed: {error}")),
         }
         on_done(&core, result);
     });
@@ -83,6 +108,7 @@ pub fn lookup(
 /// Copies the universal link to the clipboard once it resolves.
 pub fn copy_link(core: &Rc<AppCore>, title: String, artist: String, album: bool) {
     core.toast("Finding links…");
+    let wanted = title.clone();
     lookup(
         core,
         title,
@@ -93,16 +119,18 @@ pub fn copy_link(core: &Rc<AppCore>, title: String, artist: String, album: bool)
                 copy_to_clipboard(&found.page_url);
                 core.toast("Link copied");
             }
-            Err(_) => core.toast(failure_message(album)),
+            Err(error) => core.toast(&failure_message(&error, &wanted)),
         },
     );
 }
 
-pub fn failure_message(album: bool) -> &'static str {
-    if album {
-        "Couldn't find this album on streaming platforms"
-    } else {
-        "Couldn't find this track on streaming platforms"
+/// The toast for a failed lookup, worded the same as the Apple clients.
+pub fn failure_message(error: &LookupError, title: &str) -> String {
+    match error {
+        LookupError::Unreachable(_) => {
+            "Couldn't reach Songlink. Check your connection and try again.".to_string()
+        }
+        LookupError::NoMatch(_) => format!("Songlink has no streaming links for “{title}”."),
     }
 }
 
@@ -142,12 +170,14 @@ fn throttle() {
 /// straight onto `song.link/i/<id>` / `album.link/i/<id>`, and the page embeds
 /// its platform links as Next.js data. An unparseable page still yields the
 /// universal link, which is valid on its own.
-fn lookup_blocking(title: &str, artist: &str, album: bool) -> Result<SonglinkResult, String> {
+fn lookup_blocking(title: &str, artist: &str, album: bool) -> Result<SonglinkResult, LookupError> {
     let id = itunes_seed_id(title, artist, album)?;
     let page_url = page_url(id, album);
     throttle();
-    let response = agent().get(&page_url).call().map_err(|e| format!("{e}"))?;
-    let html = response.into_string().map_err(|e| format!("{e}"))?;
+    let response = agent().get(&page_url).call().map_err(request_error)?;
+    let html = response
+        .into_string()
+        .map_err(|e| LookupError::Unreachable(format!("{e}")))?;
     let parsed = parse_page(&html);
     Ok(SonglinkResult {
         page_url: parsed.page_url.unwrap_or(page_url),
@@ -243,7 +273,7 @@ fn display_name(key: &str) -> String {
 /// same here, with one more pass when the joined query finds nothing — long
 /// featured-artist strings and trailing ellipses defeat iTunes' term matcher,
 /// so retry on the bare title and prefer a result naming any of the artists.
-fn itunes_seed_id(title: &str, artist: &str, album: bool) -> Result<u64, String> {
+fn itunes_seed_id(title: &str, artist: &str, album: bool) -> Result<u64, LookupError> {
     let entity = if album { "album" } else { "song" };
     let id_key = if album { "collectionId" } else { "trackId" };
     let name_key = if album { "collectionName" } else { "trackName" };
@@ -282,17 +312,25 @@ fn itunes_seed_id(title: &str, artist: &str, album: bool) -> Result<u64, String>
             return Ok(id);
         }
     }
-    Err(format!("no iTunes match for {artist} — {title}"))
+    Err(LookupError::NoMatch(format!(
+        "no iTunes match for {artist} — {title}"
+    )))
 }
 
-fn itunes_search(term: &str, entity: &str) -> Result<Vec<serde_json::Value>, String> {
+fn itunes_search(term: &str, entity: &str) -> Result<Vec<serde_json::Value>, LookupError> {
     let url = format!(
         "https://itunes.apple.com/search?term={}&entity={entity}&limit=10",
         url_encode(term)
     );
-    let response = agent().get(&url).call().map_err(|e| format!("{e}"))?;
-    let text = response.into_string().map_err(|e| format!("{e}"))?;
-    let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{e}"))?;
+    let response = agent()
+        .get(&url)
+        .call()
+        .map_err(|e| LookupError::Unreachable(format!("{e}")))?;
+    let text = response
+        .into_string()
+        .map_err(|e| LookupError::Unreachable(format!("{e}")))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| LookupError::Unreachable(format!("iTunes sent an unreadable answer: {e}")))?;
     Ok(json["results"].as_array().cloned().unwrap_or_default())
 }
 

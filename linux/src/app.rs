@@ -895,6 +895,7 @@ impl AppCore {
     fn start_station(self: &Rc<Self>, seed_artist: String, seed_track: Option<Track>) {
         let library = self.library.borrow().clone();
         let pool = library.tracks.clone();
+        let library_songs = pool.len();
         let library_artists: Vec<String> = library.artists.iter().map(|a| a.name.clone()).collect();
         let db_path = self.db_path.clone();
         let session_key = self.session.borrow().as_ref().map(|s| s.key.clone());
@@ -939,7 +940,7 @@ impl AppCore {
             let Ok(station) = rx.recv().await else { return };
             let Some(core) = weak.upgrade() else { return };
             if station.is_empty() {
-                core.toast("Not enough music for a station");
+                core.toast(&no_station_message(&seed_artist, library_songs));
                 return;
             }
             crate::logger::info(
@@ -1121,6 +1122,17 @@ impl AppCore {
             true
         });
     }
+}
+
+/// Why a station came out empty: it needs a song by the seed artist or by an
+/// artist Last.fm calls similar that the library also holds, and none exists.
+fn no_station_message(seed_artist: &str, library_songs: usize) -> String {
+    if library_songs == 0 {
+        return "No station yet — the library has no songs. Add music and rescan first.".to_string();
+    }
+    format!(
+        "No station for “{seed_artist}” — none of the library’s {library_songs} songs are by them or a similar artist."
+    )
 }
 
 fn run_smoke(core: &Rc<AppCore>) {

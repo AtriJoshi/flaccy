@@ -683,7 +683,7 @@ fn actions_row(page: &Rc<Page>) -> gtk::Widget {
             glib::spawn_future_local(async move {
                 match rx.recv().await {
                     Ok(Some(bytes)) => present_share_options(&ui, bytes),
-                    _ => ui.core.toast("Couldn't render the card"),
+                    _ => ui.core.toast("Couldn't draw the card — the image couldn't be created or encoded as a PNG. Try again."),
                 }
             });
         });
@@ -749,7 +749,9 @@ fn present_share_options(ui: &Rc<Ui>, png: Vec<u8>) {
                 }
                 Err(err) => {
                     crate::logger::error("ui", &format!("clipboard copy failed: {err}"));
-                    ui.core.toast("Copy failed");
+                    ui.core.toast(&format!(
+                        "Couldn't copy the card — the clipboard rejected the image ({err}). Save it as a PNG instead."
+                    ));
                 }
             }
         }

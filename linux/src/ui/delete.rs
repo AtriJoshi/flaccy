@@ -78,7 +78,7 @@ fn apply(ui: &Rc<Ui>, tracks: Vec<Track>) {
     let total = rel_paths.len();
     let db_path = ui.core.db_path.clone();
     let root = ui.core.music_root();
-    let (tx, rx) = async_channel::bounded::<usize>(1);
+    let (tx, rx) = async_channel::bounded::<(usize, Option<String>)>(1);
     {
         let rel_paths = rel_paths.clone();
         std::thread::Builder::new()
@@ -90,7 +90,7 @@ fn apply(ui: &Rc<Ui>, tracks: Vec<Track>) {
     }
     let ui = Rc::clone(ui);
     glib::spawn_future_local(async move {
-        let Ok(trashed) = rx.recv().await else { return };
+        let Ok((trashed, first_failure)) = rx.recv().await else { return };
         crate::logger::info(
             "library",
             &format!("delete: {trashed} of {total} file(s) moved to trash"),
@@ -103,57 +103,82 @@ fn apply(ui: &Rc<Ui>, tracks: Vec<Track>) {
             ui.core.toast("Moved to Trash");
         } else {
             ui.core
-                .toast(&format!("Removed {trashed} of {total} — see log"));
+                .toast(&partial_removal_message(trashed, total, first_failure.as_deref()));
         }
     });
+}
+
+/// The toast for a removal that moved only some files to the Trash, naming the
+/// first reason a file stayed behind when the log has one.
+fn partial_removal_message(trashed: usize, total: usize, first_failure: Option<&str>) -> String {
+    let kept = total - trashed;
+    let cause = first_failure
+        .map(|reason| format!(": {reason}"))
+        .unwrap_or_default();
+    format!("Moved {trashed} of {total} to the Trash; {kept} stayed on disk{cause}. The library will show them again.")
 }
 
 /// Rows are dropped before files: if a trash call fails, the follow-up rescan
 /// finds the file still on disk and restores its row, so the library never
 /// points at ghosts and never loses a real file silently.
-fn apply_blocking(db_path: &Path, root: &Path, rel_paths: &[String]) -> usize {
+fn apply_blocking(db_path: &Path, root: &Path, rel_paths: &[String]) -> (usize, Option<String>) {
     let Ok(db) = Db::open(db_path) else {
         crate::logger::error("library", "delete: database open failed");
-        return 0;
+        return (0, Some("the library database couldn't be opened".to_string()));
     };
     let mut trashed = 0;
+    let mut first_failure: Option<String> = None;
     for rel_path in rel_paths {
         if let Err(err) = db.delete_track_by_rel_path(rel_path) {
             crate::logger::error(
                 "database",
                 &format!("delete row failed for {rel_path}: {err}"),
             );
+            first_failure.get_or_insert_with(|| format!("the library database refused the change ({err})"));
             continue;
         }
-        if trash_file(&root.join(rel_path)) {
-            trashed += 1;
+        match try_trash(&root.join(rel_path)) {
+            Ok(()) => trashed += 1,
+            Err(reason) => {
+                first_failure.get_or_insert(reason);
+            }
         }
     }
-    trashed
+    (trashed, first_failure)
 }
 
 /// Sends a file to the desktop trash so a mistaken removal stays recoverable,
 /// unlike an unlink.
 pub(crate) fn trash_file(path: &PathBuf) -> bool {
-    match std::process::Command::new("gio")
-        .arg("trash")
-        .arg(path)
-        .status()
-    {
-        Ok(status) if status.success() => true,
-        Ok(status) => {
+    match try_trash(path) {
+        Ok(()) => true,
+        Err(reason) => {
             crate::logger::warn(
                 "library",
-                &format!("gio trash exited {status} for {}", path.display()),
-            );
-            false
-        }
-        Err(err) => {
-            crate::logger::error(
-                "library",
-                &format!("gio trash failed for {}: {err}", path.display()),
+                &format!("gio trash failed for {}: {reason}", path.display()),
             );
             false
         }
     }
+}
+
+/// Runs `gio trash`, returning why it refused: gio's own message when it
+/// printed one, else its exit status or the spawn error.
+fn try_trash(path: &PathBuf) -> Result<(), String> {
+    let output = std::process::Command::new("gio")
+        .arg("trash")
+        .arg(path)
+        .output()
+        .map_err(|err| format!("gio couldn't be started ({err})"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = stderr
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.trim_start_matches("gio: ").to_string());
+    Err(message.unwrap_or_else(|| format!("gio trash exited {}", output.status)))
 }

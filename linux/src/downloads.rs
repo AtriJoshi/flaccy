@@ -197,7 +197,9 @@ pub fn enqueue(core: &Rc<AppCore>, raw: &str) {
         }
         Err(err) => {
             crate::logger::error("downloads", &format!("enqueue failed: {err}"));
-            core.toast("Could not add the download");
+            core.toast(&format!(
+                "Couldn't add the download — the queue couldn't be written ({err}). Check free disk space and try again."
+            ));
         }
     }
 }
@@ -319,7 +321,7 @@ fn probe(
     }
     let _ = tx.send_blocking(WorkerEvent::Changed);
     let Some(yt_dlp) = resolve_tool("yt-dlp") else {
-        db.set_download_status(row.id, STATUS_FAILED, Some("yt-dlp is not installed"));
+        db.set_download_status(row.id, STATUS_FAILED, Some("yt-dlp is not installed — install it and press Retry"));
         let _ = tx.send_blocking(WorkerEvent::Changed);
         return;
     };
@@ -369,7 +371,7 @@ fn probe(
             db.set_download_status(
                 row.id,
                 STATUS_FAILED,
-                Some("Nothing to download at this link"),
+                Some("yt-dlp found no downloadable items at this link — the playlist may be empty or private"),
             );
             let _ = tx.send_blocking(WorkerEvent::Changed);
             return;
@@ -394,7 +396,13 @@ fn probe(
             .collect();
         if let Err(err) = db.expand_playlist(row.id, &queued, &playlist_title) {
             crate::logger::error("downloads", &format!("playlist expand failed: {err}"));
-            db.set_download_status(row.id, STATUS_FAILED, Some("Could not queue playlist"));
+            db.set_download_status(
+                row.id,
+                STATUS_FAILED,
+                Some(&format!(
+                    "Couldn't queue the {total} playlist items — the library database couldn't be written ({err})"
+                )),
+            );
             let _ = tx.send_blocking(WorkerEvent::Changed);
             return;
         }
@@ -433,7 +441,7 @@ fn download(
     }
     let _ = tx.send_blocking(WorkerEvent::Changed);
     let Some(yt_dlp) = resolve_tool("yt-dlp") else {
-        db.set_download_status(row.id, STATUS_FAILED, Some("yt-dlp is not installed"));
+        db.set_download_status(row.id, STATUS_FAILED, Some("yt-dlp is not installed — install it and press Retry"));
         let _ = tx.send_blocking(WorkerEvent::Changed);
         return;
     };
@@ -1025,7 +1033,7 @@ pub fn friendly_error(stderr: &str) -> String {
         .rev()
         .find_map(|line| line.trim().strip_prefix("ERROR: "))
         .map(strip_extractor_prefix)
-        .unwrap_or_else(|| "Download failed".to_string());
+        .unwrap_or_else(|| "yt-dlp stopped without saying why — see the log".to_string());
     if raw.contains("Sign in to confirm")
         || raw.contains("not a bot")
         || raw.contains("HTTP Error 403")
@@ -1091,7 +1099,10 @@ mod tests {
             friendly_error("ERROR: [youtube] 00000000000: Video unavailable"),
             "Video unavailable"
         );
-        assert_eq!(friendly_error(""), "Download failed");
+        assert_eq!(
+            friendly_error(""),
+            "yt-dlp stopped without saying why — see the log"
+        );
     }
 
     #[test]

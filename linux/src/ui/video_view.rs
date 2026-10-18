@@ -252,11 +252,11 @@ fn describe(state: &VideoState, stage: &StageState, exhausted: bool) -> Descript
             None,
             None,
         ),
-        VideoState::Missing => (
+        VideoState::Missing(reason) => (
             false,
             Some("video-display-symbolic"),
             Some("No music video for this song".to_string()),
-            Some("Nothing convincing turned up. Your audio keeps playing.".to_string()),
+            Some(format!("{reason} Your audio keeps playing.")),
             Some("Search Again"),
         ),
         VideoState::Failed(message) => (
@@ -817,14 +817,14 @@ mod tests {
         let (busy, _, headline, _, _) = describe(&VideoState::Searching, &StageState::Idle, false);
         assert!(busy && headline.is_some());
         let (_, _, headline, detail, action) =
-            describe(&VideoState::Missing, &StageState::Idle, false);
+            describe(&VideoState::Missing("No results.".into()), &StageState::Idle, false);
         assert!(headline.is_some() && detail.is_some() && action.is_some());
         let (_, _, headline, _, action) = describe(
-            &VideoState::Failed("Couldn't reach the video".into()),
+            &VideoState::Failed("Couldn't reach the video's server".into()),
             &StageState::Idle,
             false,
         );
-        assert_eq!(headline.as_deref(), Some("Couldn't reach the video"));
+        assert_eq!(headline.as_deref(), Some("Couldn't reach the video's server"));
         assert_eq!(action, Some("Try Again"));
         let ready = VideoState::Ready(found(0.0, true, "", "x"));
         let (busy, _, headline, _, _) = describe(&ready, &StageState::Playing, false);
@@ -841,7 +841,7 @@ mod tests {
         assert!(!busy);
         assert_eq!(headline.as_deref(), Some("The video ended before the song"));
         assert!(detail.is_some());
-        let (_, _, headline, _, _) = describe(&VideoState::Missing, &StageState::Idle, true);
+        let (_, _, headline, _, _) = describe(&VideoState::Missing("No results.".into()), &StageState::Idle, true);
         assert_eq!(headline.as_deref(), Some("No music video for this song"));
     }
 }

@@ -390,7 +390,7 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     let empty = adw::StatusPage::builder()
         .icon_name("audio-x-generic-symbolic")
         .title("No Songs")
-        .description("Your library is empty. Add music to your music folder and rescan.")
+        .description("Flaccy found no audio files in your music folder. Add music there, then choose Rescan Library in Preferences.")
         .build();
 
     let stack = gtk::Stack::new();
@@ -545,10 +545,27 @@ impl View {
             .play_list(self.visible_tracks(), true, self.mode.filter.get().label());
     }
 
+    /// Why Save as Playlist has no songs to save: the search, the filter chip
+    /// or an empty library, whichever is actually responsible.
+    fn empty_list_message(&self) -> String {
+        let query = self.ui.query.borrow().clone();
+        let filter = self.mode.filter.get();
+        if !query.is_empty() {
+            format!("Nothing to save — no song matches the search “{query}”. Clear the search and try again.")
+        } else if filter != LibraryFilter::All {
+            format!(
+                "Nothing to save — no songs fit the {} filter. Choose All to include everything.",
+                filter.label()
+            )
+        } else {
+            "Nothing to save — the library has no songs yet.".to_string()
+        }
+    }
+
     fn save_list(self: &Rc<Self>) {
         let tracks = self.visible_tracks();
         if tracks.is_empty() {
-            self.ui.core.toast("Nothing in this list to save");
+            self.ui.core.toast(&self.empty_list_message());
             return;
         }
         let name = match self.mode.filter.get() {
@@ -787,9 +804,13 @@ impl View {
             position = self.position_of(&current.rel_path);
         }
         let Some(position) = position else {
-            self.ui
-                .core
-                .toast("The playing song is hidden by the current search");
+            let query = self.ui.query.borrow().clone();
+            let message = if query.is_empty() {
+                "The playing song isn't in the Songs list — its file may have left the library.".to_string()
+            } else {
+                format!("The playing song doesn't match the search “{query}”. Clear the search to find it.")
+            };
+            self.ui.core.toast(&message);
             return;
         };
         let column_view = self.column_view.clone();

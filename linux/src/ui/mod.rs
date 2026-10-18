@@ -160,7 +160,9 @@ pub fn goto_artist(ui: &Rc<Ui>, artist: &str) {
             .any(|entry| crate::hygiene::artist_key(&entry.name) == key)
     };
     if !known {
-        ui.core.toast(&format!("{lead} isn't in your library"));
+        ui.core.toast(&format!(
+            "“{lead}” has no songs in your library, so there is no artist page to open."
+        ));
         return;
     }
     leave_now_playing(ui);
@@ -191,6 +193,8 @@ pub fn goto_album_of_track(ui: &Rc<Ui>, rel_path: &str) {
             leave_now_playing(ui);
             albums::push_album_detail(ui, &album);
         }
-        None => ui.core.toast("Album isn't in your library"),
+        None => ui.core.toast(
+            "No album found for that song — its file is no longer in the library. Rescan to refresh the list.",
+        ),
     }
 }

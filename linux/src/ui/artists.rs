@@ -157,7 +157,7 @@ pub fn build(ui: &Rc<Ui>) -> gtk::Widget {
     let empty = adw::StatusPage::builder()
         .icon_name("system-users-symbolic")
         .title("No Artists")
-        .description("Artists appear here once your library has music.")
+        .description("Flaccy lists artists from the audio files in your music folder. Add music there, then choose Rescan Library in Preferences.")
         .build();
 
     let scroll = gtk::ScrolledWindow::builder()
