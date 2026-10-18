@@ -1,3 +1,4 @@
+pub mod album_layouts;
 pub mod albums;
 pub mod artists;
 pub mod artwork;
@@ -31,6 +32,7 @@ pub mod songlink_dialog;
 pub mod songs;
 pub mod stats;
 pub mod suggested_shelf;
+pub mod track_page;
 pub mod transport;
 pub mod ui_scale;
 pub mod video_view;

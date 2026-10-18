@@ -1725,7 +1725,8 @@ fn restore_side_panel(core: &Rc<AppCore>) {
 
 /// Demo mode helper: FLACCY_DEMO_DETAIL pushes the named album's detail page
 /// once the library is loaded, so marketing screenshots can show album detail
-/// without input automation.
+/// without input automation; FLACCY_DEMO_PLAYLIST_PAGE does the same for the
+/// named playlist.
 fn schedule_demo_detail(ui: &Rc<Ui>) {
     if !config::demo_mode() {
         return;
@@ -1738,6 +1739,23 @@ fn schedule_demo_detail(ui: &Rc<Ui>) {
                 return glib::ControlFlow::Continue;
             };
             crate::ui::albums::push_album_detail(&ui, &album);
+            glib::ControlFlow::Break
+        });
+    }
+    if let Some(wanted) = std::env::var("FLACCY_DEMO_PLAYLIST_PAGE").ok() {
+        let ui = Rc::clone(ui);
+        glib::timeout_add_local(std::time::Duration::from_millis(700), move || {
+            let Some(id) = ui
+                .core
+                .db
+                .fetch_playlists()
+                .into_iter()
+                .find(|row| row.name == wanted)
+                .map(|row| row.id)
+            else {
+                return glib::ControlFlow::Continue;
+            };
+            crate::ui::playlists::push_playlist_detail(&ui, id);
             glib::ControlFlow::Break
         });
     }

@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-type MenuHandler = dyn Fn(&Track, &gtk::Widget, f64, f64);
+pub(crate) type MenuHandler = dyn Fn(&Track, &gtk::Widget, f64, f64);
 
 /// Drop secondary columns as the songs table loses width so Title (and
 /// eventually Artist) stay readable instead of crushing into ellipsis soup.
@@ -1028,7 +1028,7 @@ fn format_date_added(unix: i64) -> String {
 /// The songs table's leading column: the track number, replaced by the live
 /// equalizer on whichever row the player is on — the same marker the album and
 /// playlist lists use.
-fn track_number_column(ui: &Rc<Ui>) -> gtk::ColumnViewColumn {
+pub(crate) fn track_number_column(ui: &Rc<Ui>) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     {
         let ui = Rc::clone(ui);
@@ -1076,7 +1076,7 @@ fn track_number_column(ui: &Rc<Ui>) -> gtk::ColumnViewColumn {
 /// Paints one songs-table cell for the now-playing row. Cells recycle, so the
 /// check always resolves the list item's *current* track rather than whatever
 /// was bound when the widget was created.
-fn apply_now_playing_cell(ui: &Rc<Ui>, widget: &gtk::Widget, item: &gtk::ListItem) {
+pub(crate) fn apply_now_playing_cell(ui: &Rc<Ui>, widget: &gtk::Widget, item: &gtk::ListItem) {
     let current = ui.core.player.current_track();
     let is_current = item
         .item()
@@ -1095,7 +1095,7 @@ fn apply_now_playing_cell(ui: &Rc<Ui>, widget: &gtk::Widget, item: &gtk::ListIte
 }
 
 /// Keeps a recycled cell following the player for as long as the widget lives.
-fn watch_now_playing_cell(ui: &Rc<Ui>, widget: &gtk::Widget, item: &gtk::ListItem) {
+pub(crate) fn watch_now_playing_cell(ui: &Rc<Ui>, widget: &gtk::Widget, item: &gtk::ListItem) {
     let ui_ref = Rc::clone(ui);
     let item_weak = item.downgrade();
     ui.core.hub.subscribe_widget(widget, move |widget, event| {
@@ -1136,7 +1136,7 @@ fn watch_cell_text(
     });
 }
 
-fn track_sorter(compare: impl Fn(&Track, &Track) -> Ordering + 'static) -> gtk::CustomSorter {
+pub(crate) fn track_sorter(compare: impl Fn(&Track, &Track) -> Ordering + 'static) -> gtk::CustomSorter {
     gtk::CustomSorter::new(move |a, b| {
         let (Some(a), Some(b)) = (
             a.downcast_ref::<BoxedAnyObject>(),
@@ -1152,7 +1152,7 @@ fn track_sorter(compare: impl Fn(&Track, &Track) -> Ordering + 'static) -> gtk::
     })
 }
 
-fn string_column(
+pub(crate) fn string_column(
     ui: &Rc<Ui>,
     title: &str,
     expand: bool,

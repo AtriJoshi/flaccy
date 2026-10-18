@@ -29,6 +29,8 @@ pub struct Config {
     pub songs_sort: String,
     pub songs_sort_descending: bool,
     pub np_swap_sides: bool,
+    /// How album and playlist pages draw their songs (`TrackLayout::id`).
+    pub detail_layout: String,
     /// The size the equalizer window was last left at.
     pub eq_window_width: i32,
     pub eq_window_height: i32,
@@ -103,6 +105,7 @@ impl Default for Config {
             songs_sort: "title".to_string(),
             songs_sort_descending: false,
             np_swap_sides: false,
+            detail_layout: "list".to_string(),
             eq_window_width: 1080,
             eq_window_height: 720,
             eq_hover_preview: true,

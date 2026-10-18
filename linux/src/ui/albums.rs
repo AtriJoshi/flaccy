@@ -1,7 +1,9 @@
 use crate::events::AppEvent;
 use crate::filters::{self, LibraryFilter};
-use crate::library::{format_time, Album, Track};
+use crate::library::Album;
+use crate::ui::album_layouts::AlbumBody;
 use crate::ui::filter_chips::ChipBar;
+use crate::ui::track_page::PageMode;
 use crate::ui::{context, debut, Ui};
 use adw::prelude::*;
 use gtk::glib::BoxedAnyObject;
@@ -9,6 +11,10 @@ use gtk::{gdk, gio, glib, pango};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+
+/// The edge, in pixels, of the cover bitmap an album page asks the artwork
+/// cache for: enough for the largest hero without a visible upscale.
+const COVER_REQUEST_PX: u32 = 320;
 
 /// Mirrors LibraryViewModel.AlbumSort on the Apple clients — same options,
 /// same semantics, same order.
@@ -609,122 +615,6 @@ fn build_album_cell() -> gtk::Box {
     cell
 }
 
-/// A section header announcing a physical disc or vinyl side, e.g.
-/// "Side A · 4 songs · 18 min", evoking the divider between records in a set.
-fn disc_header(label: &str, count: usize, duration: f64) -> gtk::Box {
-    let row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(8)
-        .margin_top(10)
-        .margin_start(4)
-        .margin_end(6)
-        .build();
-    row.add_css_class("disc-header");
-    let icon = gtk::Image::from_icon_name("media-optical-symbolic");
-    icon.add_css_class("disc-header-icon");
-    row.append(&icon);
-    let name = gtk::Label::builder().label(label).xalign(0.0).build();
-    name.add_css_class("disc-header-label");
-    row.append(&name);
-    let songs = if count == 1 {
-        "1 song".to_string()
-    } else {
-        format!("{count} songs")
-    };
-    let meta = gtk::Label::builder()
-        .label(format!(
-            "{songs} · {} min",
-            (duration / 60.0).round().max(1.0) as i64
-        ))
-        .hexpand(true)
-        .xalign(1.0)
-        .build();
-    meta.add_css_class("disc-header-meta");
-    row.append(&meta);
-    row
-}
-
-/// Builds one boxed track list for a slice of an album's tracks. `base` is the
-/// slice's offset within `all_tracks` so activating a row queues the whole
-/// album from the correct position regardless of which disc section it sits in.
-fn build_track_list(
-    ui: &Rc<Ui>,
-    all_tracks: &Rc<Vec<Track>>,
-    base: usize,
-    tracks: &[Track],
-) -> gtk::ListBox {
-    let list = gtk::ListBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .build();
-    list.add_css_class("boxed-list");
-    for track in tracks {
-        let row_box = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
-            .margin_top(10)
-            .margin_bottom(10)
-            .margin_start(12)
-            .margin_end(12)
-            .build();
-        let index_cell = crate::ui::controls::track_index_cell(&if track.track_number > 0 {
-            track.track_number.to_string()
-        } else {
-            "·".to_string()
-        });
-        row_box.append(&index_cell.widget);
-        let track_title = gtk::Label::builder()
-            .label(&track.title)
-            .xalign(0.0)
-            .hexpand(true)
-            .ellipsize(pango::EllipsizeMode::End)
-            .tooltip_text(&track.title)
-            .build();
-        row_box.append(&track_title);
-        let heart = gtk::Image::from_icon_name("emote-love-symbolic");
-        heart.add_css_class("loved-heart");
-        heart.set_visible(track.loved);
-        row_box.append(&heart);
-        if let Some(badge_text) = track.quality_badge() {
-            let badge = gtk::Label::new(Some(&badge_text));
-            badge.add_css_class("quality-badge");
-            row_box.append(&badge);
-        }
-        let duration = gtk::Label::new(Some(&format_time(track.duration)));
-        duration.add_css_class("duration-label");
-        row_box.append(&duration);
-
-        let row = gtk::ListBoxRow::builder().child(&row_box).build();
-        context::attach_track_context_menu(&row, &ui.core, track.rel_path.clone());
-        crate::ui::controls::attach_now_playing_row(
-            ui,
-            &row,
-            &index_cell,
-            &track_title,
-            track.rel_path.clone(),
-        );
-        {
-            let rel = track.rel_path.clone();
-            ui.core.hub.subscribe_widget(&heart, move |heart, event| {
-                if let AppEvent::LovedChanged { rel_path, loved } = event {
-                    if rel_path == &rel {
-                        heart.set_visible(*loved);
-                    }
-                }
-            });
-        }
-        list.append(&row);
-    }
-    {
-        let all_tracks = Rc::clone(all_tracks);
-        let ui = Rc::clone(ui);
-        list.connect_row_activated(move |_, row| {
-            let index = base + row.index().max(0) as usize;
-            ui.core.play_tracks((*all_tracks).clone(), index);
-        });
-    }
-    list
-}
-
 pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
     let dominant: Rc<RefCell<Option<(u8, u8, u8)>>> = Rc::new(RefCell::new(None));
 
@@ -753,7 +643,7 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
         let dominant = Rc::clone(&dominant);
         ui.core
             .artwork
-            .request(&album.title, &album.artist, 232, move |texture, color| {
+            .request(&album.title, &album.artist, COVER_REQUEST_PX, move |texture, color| {
                 if let (Some(picture), Some(texture)) = (weak.upgrade(), texture) {
                     picture.set_paintable(Some(texture));
                 }
@@ -870,7 +760,7 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
             ui_ref
                 .core
                 .artwork
-                .request(title, artist, 232, move |texture, color| {
+                .request(title, artist, COVER_REQUEST_PX, move |texture, color| {
                     if let (Some(picture), Some(texture)) = (picture_weak.upgrade(), texture) {
                         picture.set_paintable(Some(texture));
                     }
@@ -911,67 +801,41 @@ pub fn push_album_detail(ui: &Rc<Ui>, album: &Album) {
     meta.append(&buttons);
     header.append(&meta);
 
-    let content = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(24)
-        .margin_top(32)
-        .margin_bottom(32)
-        .margin_start(32)
-        .margin_end(32)
-        .build();
-    content.add_css_class("album-detail-content");
-    content.append(&header);
-
-    let all_tracks = Rc::new(album.tracks.clone());
-    match crate::library::disc_sections(&album.tracks) {
-        Some(sections) => {
-            let mut base = 0usize;
-            for section in &sections {
-                content.append(&disc_header(
-                    &section.label,
-                    section.tracks.len(),
-                    section.duration(),
-                ));
-                content.append(&build_track_list(ui, &all_tracks, base, &section.tracks));
-                base += section.tracks.len();
-            }
-        }
-        None => content.append(&build_track_list(ui, &all_tracks, 0, &album.tracks)),
-    }
-
-    let clamp = adw::Clamp::builder()
-        .maximum_size(920)
-        .child(&content)
-        .build();
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .child(&clamp)
-        .build();
-    ui.register_scroller(&scroll);
-
-    let detail_bin = adw::BreakpointBin::new();
-    detail_bin.set_size_request(320, 200);
-    detail_bin.set_child(Some(&scroll));
-    install_album_detail_breakpoints(&detail_bin, &header, &cover_host, &content);
+    let frame = {
+        let cover_host = cover_host.clone();
+        let picture = picture.clone();
+        crate::ui::track_page::Frame::new(ui, &header, move |mode| {
+            let side = match mode {
+                PageMode::Wide => 288,
+                PageMode::Regular => 200,
+                PageMode::Compact => 148,
+            };
+            cover_host.set_size_request(side, side);
+            picture.set_size_request(side, side);
+            cover_host.set_halign(if mode == PageMode::Compact {
+                gtk::Align::Center
+            } else {
+                gtk::Align::Start
+            });
+        })
+    };
+    let body = AlbumBody::new(ui, album, &frame);
+    frame.body.append(&body.widget);
 
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&backdrop));
-    overlay.add_overlay(&detail_bin);
+    overlay.add_overlay(&frame.root);
 
     let page = adw::NavigationPage::builder()
         .title(album.title.clone())
         .child(&overlay)
         .build();
+    unsafe {
+        page.set_data("album-body", body);
+    }
     ui.nav.push(&page);
 }
 
-/// Stack the album hero vertically and shrink the cover once the detail page
-/// no longer has room for the side-by-side desktop layout. The bin must wrap
-/// the scroller rather than the scrolled content: a breakpoint bin reports no
-/// minimum size of its own, and a viewport sizes its adjustment from the
-/// child's minimum, so a bin inside the scroller leaves `upper == page_size`
-/// and the page silently clips instead of scrolling.
 /// The album page's cover with the pencil that fades in on hover or focus,
 /// the album menu on right-click, and a drop target: an image dropped on the
 /// cover opens the artwork editor with that image already framed.
@@ -1011,52 +875,6 @@ fn cover_host_with_pencil(ui: &Rc<Ui>, album: &Album, picture: &gtk::Picture) ->
         });
     }
     host
-}
-
-fn install_album_detail_breakpoints(
-    bin: &adw::BreakpointBin,
-    header: &gtk::Box,
-    picture: &gtk::Overlay,
-    content: &gtk::Box,
-) {
-    let compact = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
-        adw::BreakpointConditionLengthType::MaxWidth,
-        560.0,
-        adw::LengthUnit::Px,
-    ));
-    {
-        let header = header.clone();
-        let picture = picture.clone();
-        let content = content.clone();
-        compact.connect_apply(move |_| {
-            header.set_orientation(gtk::Orientation::Vertical);
-            header.set_spacing(16);
-            picture.set_size_request(148, 148);
-            picture.set_halign(gtk::Align::Center);
-            content.set_margin_start(16);
-            content.set_margin_end(16);
-            content.set_margin_top(20);
-            content.set_margin_bottom(20);
-            content.set_spacing(16);
-        });
-    }
-    {
-        let header = header.clone();
-        let picture = picture.clone();
-        let content = content.clone();
-        compact.connect_unapply(move |_| {
-            header.set_orientation(gtk::Orientation::Horizontal);
-            header.set_spacing(24);
-            picture.set_size_request(200, 200);
-            picture.set_halign(gtk::Align::Start);
-            content.set_margin_start(32);
-            content.set_margin_end(32);
-            content.set_margin_top(32);
-            content.set_margin_bottom(32);
-            content.set_spacing(24);
-        });
-    }
-    bin.add_breakpoint(compact);
 }
 
 /// Personal Last.fm play count for this album ("You've played this N times"),

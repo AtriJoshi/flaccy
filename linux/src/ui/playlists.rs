@@ -2,6 +2,10 @@ use crate::events::AppEvent;
 use crate::library::{format_time, Library, Track};
 use crate::ui::mosaic::{AlbumRef, Mosaic};
 use crate::ui::playlist_cover::PlaylistArt;
+use crate::ui::track_page::{
+    matches, reveal, reveal_row, ControlBar, Frame, PageKind, PageMode, TableOptions, TrackLayout,
+    TrackTable, FILTER_THRESHOLD,
+};
 use crate::ui::{artwork_editor, context, Ui};
 use adw::prelude::*;
 use flaccy_shared::playlist_cover;
@@ -15,7 +19,8 @@ const PICKER_COVER_SIDE: i32 = 48;
 const THUMB_PX: i32 = 40;
 const DETAIL_COVER_SIDE: i32 = 200;
 const DETAIL_COVER_COMPACT_SIDE: i32 = 148;
-const FILTER_THRESHOLD: usize = 8;
+const DETAIL_COVER_WIDE_SIDE: i32 = 288;
+const ALBUM_COLUMN_MIN_WIDTH: i32 = 640;
 const DETAIL_KEY: &str = "flaccy-playlist-detail";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -937,39 +942,170 @@ struct DetailView {
     title: gtk::Label,
     info: gtk::Label,
     art: PlaylistArt,
-    cover_host: gtk::Overlay,
     backdrop: gtk::DrawingArea,
     dominant: Rc<RefCell<Option<(u8, u8, u8)>>>,
     play: gtk::Button,
     shuffle: gtk::Button,
-    filter_entry: gtk::SearchEntry,
-    filter_status: gtk::Label,
+    frame: Rc<Frame>,
+    bar: ControlBar,
+    stack: gtk::Stack,
+    layout: Cell<TrackLayout>,
+    table: RefCell<Option<Rc<TrackTable>>>,
     empty: adw::StatusPage,
     hint: gtk::Label,
     entries: Rc<RefCell<Vec<(i64, Track)>>>,
     query: Rc<RefCell<String>>,
     album_labels: RefCell<Vec<gtk::Label>>,
-    squeeze: Cell<u8>,
+    show_albums: Cell<bool>,
     applied: Cell<u64>,
 }
 
 impl DetailView {
-    const SQUEEZE_NARROW: u8 = 1;
-    const SQUEEZE_COMPACT: u8 = 2;
-
-    /// Records which breakpoints are active and shows the album column only
-    /// when none is, so it works whether the bin applies one breakpoint at a
-    /// time or several.
-    fn set_squeeze(&self, flag: u8, on: bool) {
-        let bits = if on {
-            self.squeeze.get() | flag
-        } else {
-            self.squeeze.get() & !flag
-        };
-        self.squeeze.set(bits);
+    /// Shows the album column in the list rows only while the pane has room
+    /// for it beside the titles.
+    fn set_show_albums(&self, shown: bool) {
+        self.show_albums.set(shown);
         for label in self.album_labels.borrow().iter() {
-            label.set_visible(bits == 0);
+            label.set_visible(shown);
         }
+    }
+
+    fn choose_layout(self: &Rc<Self>, layout: TrackLayout) {
+        if self.layout.get() == layout {
+            return;
+        }
+        self.ui.core.config.borrow_mut().detail_layout = layout.id().to_string();
+        self.ui.core.save_config();
+        self.show_layout(layout);
+        self.frame.scroll_to_top();
+    }
+
+    fn show_layout(self: &Rc<Self>, layout: TrackLayout) {
+        self.layout.set(layout);
+        self.bar.set_layout(layout);
+        if layout == TrackLayout::Table {
+            self.ensure_table();
+            self.stack.set_visible_child_name("table");
+            self.hint
+                .set_label("A table is a view of the playlist: switch to List to reorder · right-click to remove");
+        } else {
+            self.stack.set_visible_child_name("list");
+            self.hint
+                .set_label("Drag rows to reorder · right-click to remove");
+        }
+        self.apply_query();
+    }
+
+    fn ensure_table(self: &Rc<Self>) {
+        if self.table.borrow().is_some() {
+            return;
+        }
+        let options = TableOptions {
+            kind: Some(PageKind::Playlist),
+            disc_of: None,
+            artists_vary: true,
+        };
+        let menu: Rc<crate::ui::songs::MenuHandler> = {
+            let view = Rc::downgrade(self);
+            Rc::new(move |track, anchor, x, y| {
+                let Some(view) = view.upgrade() else { return };
+                let row_id = view
+                    .entries
+                    .borrow()
+                    .get((track.track_number.max(1) - 1) as usize)
+                    .map(|(row_id, _)| *row_id);
+                let menu = context::track_menu(&track.rel_path, track.loved);
+                if let Some(row_id) = row_id {
+                    let remove_section = gio::Menu::new();
+                    let remove_item = gio::MenuItem::new(Some("Remove from Playlist"), None);
+                    remove_item.set_action_and_target_value(
+                        Some("win.playlist-remove-row"),
+                        Some(&(view.playlist_id, row_id).to_variant()),
+                    );
+                    remove_section.append_item(&remove_item);
+                    menu.append_section(None, &remove_section);
+                }
+                context::popup_menu_at(anchor, &menu, x, y);
+            })
+        };
+        let table = {
+            let ui = Rc::clone(&self.ui);
+            let frame = Rc::clone(&self.frame);
+            TrackTable::new(
+                &self.ui,
+                options,
+                menu,
+                move |tracks, index| ui.core.play_tracks(tracks, index),
+                move || frame.scroll_to_top(),
+            )
+        };
+        table.set_tracks(&self.numbered_tracks());
+        self.stack.add_named(&table.widget, Some("table"));
+        *self.table.borrow_mut() = Some(Rc::new(table));
+    }
+
+    /// The playlist's songs with their place in it standing in for the track
+    /// number, which is what the table's first column shows and sorts by.
+    fn numbered_tracks(&self) -> Vec<Track> {
+        self.entries
+            .borrow()
+            .iter()
+            .enumerate()
+            .map(|(index, (_, track))| {
+                let mut track = track.clone();
+                track.track_number = index as i32 + 1;
+                track
+            })
+            .collect()
+    }
+
+    fn apply_query(&self) {
+        self.list.invalidate_filter();
+        if let Some(table) = self.table.borrow().as_ref() {
+            table.set_query(&self.query.borrow());
+        }
+        self.update_filter_status();
+    }
+
+    fn locate_playing(&self) {
+        let Some(current) = self.ui.core.player.current_track() else {
+            self.ui.core.toast("Nothing is playing");
+            return;
+        };
+        let index = self
+            .entries
+            .borrow()
+            .iter()
+            .position(|(_, track)| track.rel_path == current.rel_path);
+        let Some(index) = index else {
+            self.ui.core.toast(&format!(
+                "“{}” isn't in this playlist",
+                current.title
+            ));
+            return;
+        };
+        if !self.query.borrow().is_empty() {
+            self.query.borrow_mut().clear();
+            self.apply_query();
+            self.bar.clear_filter();
+        }
+        let scroll = self.frame.scroll.clone();
+        let table = self.table.borrow().clone();
+        let layout = self.layout.get();
+        let row = self.list.row_at_index(index as i32);
+        let rel_path = current.rel_path.clone();
+        glib::idle_add_local_once(move || match (layout, table) {
+            (TrackLayout::Table, Some(table)) => {
+                if let Some(position) = table.position_of(&rel_path) {
+                    reveal_row(&scroll, &table, position);
+                }
+            }
+            _ => {
+                if let Some(row) = row {
+                    reveal(&scroll, &row);
+                }
+            }
+        });
     }
 
     /// Drops this page from the navigation stack, for a playlist that was
@@ -1061,42 +1197,37 @@ impl DetailView {
         let has_tracks = !self.entries.borrow().is_empty();
         self.play.set_sensitive(has_tracks);
         self.shuffle.set_sensitive(has_tracks);
-        self.list.set_visible(has_tracks);
+        self.stack.set_visible(has_tracks);
         self.empty.set_visible(!has_tracks);
         self.hint.set_visible(has_tracks);
-        self.filter_entry
-            .set_visible(self.entries.borrow().len() >= FILTER_THRESHOLD);
-        self.list.invalidate_filter();
-        self.update_filter_status();
+        self.bar
+            .show_filter(self.entries.borrow().len() >= FILTER_THRESHOLD);
+        if let Some(table) = self.table.borrow().as_ref() {
+            table.set_tracks(&self.numbered_tracks());
+        }
+        self.apply_query();
         if saved > 0.0 {
             let adj = self.scroll.vadjustment();
             glib::idle_add_local_once(move || adj.set_value(saved));
         }
     }
 
-    fn matches(track: &Track, needle: &str) -> bool {
-        track.title.to_lowercase().contains(needle)
-            || track.artist.to_lowercase().contains(needle)
-            || track.album.to_lowercase().contains(needle)
-    }
-
     fn update_filter_status(&self) {
         let query = self.query.borrow();
         if query.is_empty() {
-            self.filter_status.set_visible(false);
+            self.bar.set_status(None);
             return;
         }
         let entries = self.entries.borrow();
         let shown = entries
             .iter()
-            .filter(|(_, track)| Self::matches(track, &query))
+            .filter(|(_, track)| matches(track, &query))
             .count();
-        self.filter_status.set_visible(true);
-        self.filter_status.set_label(&if shown == 0 {
+        self.bar.set_status(Some(&if shown == 0 {
             "No songs match".to_string()
         } else {
             format!("{shown} of {}", entries.len())
-        });
+        }));
     }
 
     fn build_row(
@@ -1175,7 +1306,7 @@ impl DetailView {
             .max_width_chars(22)
             .width_chars(22)
             .tooltip_text(&track.album)
-            .visible(self.squeeze.get() == 0)
+            .visible(self.show_albums.get())
             .build();
         album_label.add_css_class("dim");
         album_label.add_css_class("caption");
@@ -1399,26 +1530,16 @@ pub(crate) fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
     header.append(&cover_host);
     header.append(&meta);
 
-    let filter_entry = gtk::SearchEntry::builder()
-        .placeholder_text("Filter this playlist")
-        .hexpand(true)
-        .visible(false)
-        .build();
-    let filter_status = gtk::Label::builder().visible(false).build();
-    filter_status.add_css_class("dim");
-    filter_status.add_css_class("caption");
-    let filter_bar = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(12)
-        .build();
-    filter_bar.append(&filter_entry);
-    filter_bar.append(&filter_status);
-
     let list = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .valign(gtk::Align::Start)
         .build();
     list.add_css_class("boxed-list");
+
+    let stack = gtk::Stack::new();
+    stack.set_hhomogeneous(false);
+    stack.set_vhomogeneous(false);
+    stack.add_named(&list, Some("list"));
 
     let empty = adw::StatusPage::builder()
         .icon_name("audio-x-generic-symbolic")
@@ -1433,39 +1554,64 @@ pub(crate) fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
     hint.add_css_class("caption");
     hint.set_xalign(0.0);
 
-    let content = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(24)
-        .margin_top(32)
-        .margin_bottom(32)
-        .margin_start(32)
-        .margin_end(32)
-        .build();
-    content.add_css_class("album-detail-content");
-    content.append(&header);
-    content.append(&filter_bar);
-    content.append(&list);
-    content.append(&empty);
-    content.append(&hint);
+    let frame = {
+        let art = art.clone();
+        let cover_host = cover_host.clone();
+        Frame::new(ui, &header, move |mode| {
+            let side = match mode {
+                PageMode::Wide => DETAIL_COVER_WIDE_SIDE,
+                PageMode::Regular => DETAIL_COVER_SIDE,
+                PageMode::Compact => DETAIL_COVER_COMPACT_SIDE,
+            };
+            art.set_side(side);
+            cover_host.set_halign(if mode == PageMode::Compact {
+                gtk::Align::Center
+            } else {
+                gtk::Align::Start
+            });
+        })
+    };
 
-    let clamp = adw::Clamp::builder()
-        .maximum_size(920)
-        .child(&content)
-        .build();
-    let scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .child(&clamp)
-        .build();
-    ui.register_scroller(&scroll);
-
-    let detail_bin = adw::BreakpointBin::new();
-    detail_bin.set_size_request(320, 200);
-    detail_bin.set_child(Some(&scroll));
+    let saved = TrackLayout::from_id(&ui.core.config.borrow().detail_layout)
+        .resolved_for(PageKind::Playlist);
+    let slot: Rc<RefCell<Option<std::rc::Weak<DetailView>>>> = Rc::new(RefCell::new(None));
+    let with_view = |slot: &Rc<RefCell<Option<std::rc::Weak<DetailView>>>>| {
+        let slot = Rc::clone(slot);
+        move || slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+    };
+    let bar = {
+        let on_layout = with_view(&slot);
+        let on_filter = with_view(&slot);
+        let on_jump = with_view(&slot);
+        ControlBar::new(
+            PageKind::Playlist,
+            saved,
+            move |layout| {
+                if let Some(view) = on_layout() {
+                    view.choose_layout(layout);
+                }
+            },
+            move |needle| {
+                if let Some(view) = on_filter() {
+                    *view.query.borrow_mut() = needle.to_string();
+                    view.apply_query();
+                }
+            },
+            move || {
+                if let Some(view) = on_jump() {
+                    view.locate_playing();
+                }
+            },
+        )
+    };
+    frame.body.append(&bar.widget);
+    frame.body.append(&stack);
+    frame.body.append(&empty);
+    frame.body.append(&hint);
 
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&backdrop));
-    overlay.add_overlay(&detail_bin);
+    overlay.add_overlay(&frame.root);
 
     let page = adw::NavigationPage::builder()
         .title(&name)
@@ -1477,26 +1623,29 @@ pub(crate) fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
         playlist_id,
         created_at,
         page: page.downgrade(),
-        scroll: scroll.clone(),
+        scroll: frame.scroll.clone(),
         list: list.clone(),
         title,
         info,
         art,
-        cover_host,
         backdrop,
         dominant,
         play,
         shuffle,
-        filter_entry: filter_entry.clone(),
-        filter_status,
+        frame: Rc::clone(&frame),
+        bar,
+        stack: stack.clone(),
+        layout: Cell::new(saved),
+        table: RefCell::new(None),
         empty,
         hint: hint.clone(),
         entries: Rc::new(RefCell::new(Vec::new())),
         query: Rc::new(RefCell::new(String::new())),
         album_labels: RefCell::new(Vec::new()),
-        squeeze: Cell::new(0),
+        show_albums: Cell::new(true),
         applied: Cell::new(0),
     });
+    *slot.borrow_mut() = Some(Rc::downgrade(&view));
 
     {
         let view = Rc::downgrade(&view);
@@ -1509,19 +1658,9 @@ pub(crate) fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
                 return true;
             }
             let entries = view.entries.borrow();
-            let visible = entries
+            entries
                 .get(row.index().max(0) as usize)
-                .is_none_or(|(_, track)| DetailView::matches(track, &query));
-            visible
-        });
-    }
-    {
-        let view = Rc::downgrade(&view);
-        filter_entry.connect_search_changed(move |entry| {
-            let Some(view) = view.upgrade() else { return };
-            *view.query.borrow_mut() = entry.text().to_lowercase();
-            view.list.invalidate_filter();
-            view.update_filter_status();
+                .is_none_or(|(_, track)| matches(track, &query))
         });
     }
     {
@@ -1541,107 +1680,33 @@ pub(crate) fn push_playlist_detail(ui: &Rc<Ui>, playlist_id: i64) {
             }
         });
     }
+    {
+        let view = Rc::downgrade(&view);
+        crate::ui::resize::watch_width(&stack, move |width, _| {
+            if let Some(view) = view.upgrade() {
+                view.set_show_albums(width >= ALBUM_COLUMN_MIN_WIDTH);
+            }
+        });
+    }
 
-    install_detail_breakpoints(&detail_bin, &view, &header, &content);
     view.refresh();
+    view.show_layout(saved);
 
     {
         let view = Rc::downgrade(&view);
-        ui.core.hub.subscribe_widget(&scroll, move |_, event| {
-            if let (AppEvent::LibraryReloaded, Some(view)) = (event, view.upgrade()) {
-                view.refresh();
-            }
-        });
+        ui.core
+            .hub
+            .subscribe_widget(&frame.scroll, move |_, event| {
+                if let (AppEvent::LibraryReloaded, Some(view)) = (event, view.upgrade()) {
+                    view.refresh();
+                }
+            });
     }
 
     unsafe {
         page.set_data(DETAIL_KEY, Rc::clone(&view));
     }
     ui.nav.push(&page);
-}
-
-/// Two steps of squeeze: below 760px the album column drops out of the rows,
-/// below 560px the hero stacks over a smaller cover. The bin must wrap the
-/// scroller rather than the scrolled content, for the same reason the album
-/// detail's does: a breakpoint bin reports no minimum size of its own, and a
-/// viewport sizes its adjustment from the child's minimum.
-fn install_detail_breakpoints(
-    bin: &adw::BreakpointBin,
-    view: &Rc<DetailView>,
-    header: &gtk::Box,
-    content: &gtk::Box,
-) {
-    let narrow = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
-        adw::BreakpointConditionLengthType::MaxWidth,
-        760.0,
-        adw::LengthUnit::Px,
-    ));
-    {
-        let view = Rc::downgrade(view);
-        narrow.connect_apply(move |_| {
-            if let Some(view) = view.upgrade() {
-                view.set_squeeze(DetailView::SQUEEZE_NARROW, true);
-            }
-        });
-    }
-    {
-        let view = Rc::downgrade(view);
-        narrow.connect_unapply(move |_| {
-            if let Some(view) = view.upgrade() {
-                view.set_squeeze(DetailView::SQUEEZE_NARROW, false);
-            }
-        });
-    }
-    bin.add_breakpoint(narrow);
-
-    let compact = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
-        adw::BreakpointConditionLengthType::MaxWidth,
-        560.0,
-        adw::LengthUnit::Px,
-    ));
-    {
-        let art = view.art.clone();
-        let cover_host = view.cover_host.clone();
-        let view = Rc::downgrade(view);
-        let header = header.clone();
-        let content = content.clone();
-        compact.connect_apply(move |_| {
-            if let Some(view) = view.upgrade() {
-                view.set_squeeze(DetailView::SQUEEZE_COMPACT, true);
-            }
-            header.set_orientation(gtk::Orientation::Vertical);
-            header.set_spacing(16);
-            art.set_side(DETAIL_COVER_COMPACT_SIDE);
-            cover_host.set_halign(gtk::Align::Center);
-            content.set_margin_start(16);
-            content.set_margin_end(16);
-            content.set_margin_top(20);
-            content.set_margin_bottom(20);
-            content.set_spacing(16);
-        });
-    }
-    {
-        let art = view.art.clone();
-        let cover_host = view.cover_host.clone();
-        let view = Rc::downgrade(view);
-        let header = header.clone();
-        let content = content.clone();
-        compact.connect_unapply(move |_| {
-            if let Some(view) = view.upgrade() {
-                view.set_squeeze(DetailView::SQUEEZE_COMPACT, false);
-            }
-            header.set_orientation(gtk::Orientation::Horizontal);
-            header.set_spacing(24);
-            art.set_side(DETAIL_COVER_SIDE);
-            cover_host.set_halign(gtk::Align::Start);
-            content.set_margin_start(32);
-            content.set_margin_end(32);
-            content.set_margin_top(32);
-            content.set_margin_bottom(32);
-            content.set_spacing(24);
-        });
-    }
-    bin.add_breakpoint(compact);
 }
 
 fn attach_playlist_list_menu(row: &impl IsA<gtk::Widget>, ui: &Rc<Ui>, playlist_id: i64) {
