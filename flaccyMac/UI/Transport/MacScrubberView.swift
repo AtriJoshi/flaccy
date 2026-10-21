@@ -6,20 +6,42 @@ import AppKit
 /// while the user is scrubbing so the knob never fights the pointer.
 final class MacScrubberView: NSView {
 
+    /// The compact variant sits in the main transport bar; the prominent one is
+    /// the Now Playing timeline, with a thicker track, a visible playhead dot
+    /// and a taller hit area so it reads as the hero control of the immersive
+    /// view rather than a hairline progress indicator.
+    enum Style {
+        case compact
+        case prominent
+    }
+
     var onScrub: ((TimeInterval) -> Void)?
     var onCommit: ((TimeInterval) -> Void)?
+
+    var style: Style = .compact {
+        didSet {
+            guard style != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            needsLayout = true
+        }
+    }
 
     private(set) var isScrubbing = false
 
     private let trackLayer = CALayer()
     private let fillLayer = CALayer()
+    private let thumbLayer = CALayer()
     private let hoverTimeLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var fraction: Double = 0
     private var duration: TimeInterval = 0
 
-    private static let idleThickness: CGFloat = 4
-    private static let hoverThickness: CGFloat = 7
+    private var idleThickness: CGFloat { style == .prominent ? 5 : 4 }
+    private var hoverThickness: CGFloat { style == .prominent ? 9 : 7 }
+    private var thumbRadius: CGFloat {
+        guard style == .prominent else { return 0 }
+        return isHovered || isScrubbing ? 6.5 : 4.5
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -27,6 +49,11 @@ final class MacScrubberView: NSView {
 
         layer?.addSublayer(trackLayer)
         layer?.addSublayer(fillLayer)
+        layer?.addSublayer(thumbLayer)
+        thumbLayer.shadowColor = NSColor.black.cgColor
+        thumbLayer.shadowOpacity = 0.28
+        thumbLayer.shadowRadius = 2.5
+        thumbLayer.shadowOffset = CGSize(width: 0, height: -1)
         applyTrackColors()
 
         hoverTimeLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
@@ -51,6 +78,7 @@ final class MacScrubberView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             trackLayer.backgroundColor = NSColor.labelColor.withAlphaComponent(0.28).cgColor
             fillLayer.backgroundColor = NSColor.labelColor.withAlphaComponent(0.9).cgColor
+            thumbLayer.backgroundColor = NSColor.labelColor.cgColor
         }
     }
 
@@ -60,11 +88,12 @@ final class MacScrubberView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: 18)
+        NSSize(width: NSView.noIntrinsicMetric, height: style == .prominent ? 26 : 18)
     }
 
     func setProgress(current: TimeInterval, duration: TimeInterval) {
         self.duration = duration
+        setAccessibilityValue(Self.format(current))
         guard !isScrubbing else { return }
         fraction = duration > 0 ? min(1, max(0, current / duration)) : 0
         needsLayout = true
@@ -72,18 +101,27 @@ final class MacScrubberView: NSView {
 
     override func layout() {
         super.layout()
-        let thickness = isHovered || isScrubbing ? Self.hoverThickness : Self.idleThickness
+        let thickness = isHovered || isScrubbing ? hoverThickness : idleThickness
+        let radius = thumbRadius
+        let trackWidth = max(0, bounds.width - radius * 2)
         let trackRect = NSRect(
-            x: 0, y: (bounds.height - thickness) / 2, width: bounds.width, height: thickness
+            x: radius, y: (bounds.height - thickness) / 2, width: trackWidth, height: thickness
         )
+        let fillWidth = trackWidth * CGFloat(fraction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         trackLayer.frame = trackRect
         trackLayer.cornerRadius = thickness / 2
         fillLayer.frame = NSRect(
-            x: 0, y: trackRect.minY, width: bounds.width * CGFloat(fraction), height: thickness
+            x: radius, y: trackRect.minY, width: fillWidth, height: thickness
         )
         fillLayer.cornerRadius = thickness / 2
+        thumbLayer.frame = NSRect(
+            x: fillWidth, y: (bounds.height - radius * 2) / 2,
+            width: radius * 2, height: radius * 2
+        )
+        thumbLayer.cornerRadius = radius
+        thumbLayer.isHidden = radius == 0 || duration <= 0
         CATransaction.commit()
     }
 

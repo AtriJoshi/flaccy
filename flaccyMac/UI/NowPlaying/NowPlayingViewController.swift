@@ -145,12 +145,13 @@ final class NowPlayingViewController: NSViewController {
             body.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 14),
             body.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
             body.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
-            body.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -118),
+            body.bottomAnchor.constraint(equalTo: dock.topAnchor, constant: -18),
 
-            dock.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
-            dock.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
-            dock.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22),
-            dock.topAnchor.constraint(greaterThanOrEqualTo: body.bottomAnchor, constant: 8),
+            dock.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            dock.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+            dock.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor, constant: -64),
+            dock.widthAnchor.constraint(lessThanOrEqualToConstant: 920),
+            dock.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -64).with(priority: .defaultHigh),
         ])
 
         view = root
@@ -220,38 +221,60 @@ final class NowPlayingViewController: NSViewController {
     private func buildTransportDock() -> NSView {
         buildTransportButtons()
         configureScrubber()
+        scrubber.style = .prominent
 
         let timeline = NSStackView(views: [elapsedLabel, scrubber, remainingLabel])
         timeline.orientation = .horizontal
-        timeline.spacing = 10
+        timeline.spacing = 14
         timeline.alignment = .centerY
+        timeline.distribution = .fill
 
         let transportRow = NSStackView(views: [
             shuffleButton, backFifteenButton, previousButton, playPauseButton,
             nextButton, forwardFifteenButton, repeatButton,
         ])
         transportRow.orientation = .horizontal
-        transportRow.spacing = 12
+        transportRow.spacing = 16
         transportRow.alignment = .centerY
+        transportRow.setCustomSpacing(30, after: shuffleButton)
+        transportRow.setCustomSpacing(30, after: forwardFifteenButton)
 
         let stack = NSStackView(views: [timeline, transportRow])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.spacing = 14
+        stack.setHuggingPriority(.defaultLow, for: .horizontal)
+        let stackHeight = stack.fittingSize.height
+        let padding = NSEdgeInsets(top: 18, left: 28, bottom: 18, right: 28)
 
-        let clamp = NSView()
-        clamp.addSubview(stack)
+        let pad = NSView()
+        pad.translatesAutoresizingMaskIntoConstraints = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        pad.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: clamp.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: clamp.bottomAnchor),
-            stack.centerXAnchor.constraint(equalTo: clamp.centerXAnchor),
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
-            stack.widthAnchor.constraint(equalTo: clamp.widthAnchor).with(priority: .defaultHigh),
+            stack.topAnchor.constraint(equalTo: pad.topAnchor, constant: padding.top),
+            stack.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: padding.left),
+            stack.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -padding.right),
+            stack.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -padding.bottom),
             timeline.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scrubber.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+            scrubber.widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
+            scrubber.heightAnchor.constraint(equalToConstant: 26),
         ])
-        return clamp
+
+        let glass = MacLiquidGlass.surface(hosting: pad, cornerRadius: 26)
+        glass.translatesAutoresizingMaskIntoConstraints = false
+
+        let dock = NSView()
+        dock.translatesAutoresizingMaskIntoConstraints = false
+        dock.addSubview(glass)
+        NSLayoutConstraint.activate([
+            glass.topAnchor.constraint(equalTo: dock.topAnchor),
+            glass.leadingAnchor.constraint(equalTo: dock.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: dock.trailingAnchor),
+            glass.bottomAnchor.constraint(equalTo: dock.bottomAnchor),
+            dock.heightAnchor.constraint(equalToConstant: stackHeight + padding.top + padding.bottom),
+        ])
+        return dock
     }
 
     private weak var scrimViewRef: NSView?
@@ -440,21 +463,21 @@ final class NowPlayingViewController: NSViewController {
 
         let slot = NSView()
         slot.addSubview(content)
-        let artwork = artworkContainer.widthAnchor.constraint(equalToConstant: 340)
+        let artwork = artworkContainer.widthAnchor.constraint(equalToConstant: 380)
         artwork.priority = .defaultHigh
         NSLayoutConstraint.activate([
             content.centerXAnchor.constraint(equalTo: slot.centerXAnchor),
             content.centerYAnchor.constraint(equalTo: slot.centerYAnchor),
             content.topAnchor.constraint(greaterThanOrEqualTo: slot.topAnchor),
             content.bottomAnchor.constraint(lessThanOrEqualTo: slot.bottomAnchor),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            content.widthAnchor.constraint(lessThanOrEqualToConstant: 600),
             content.widthAnchor.constraint(lessThanOrEqualTo: slot.widthAnchor),
             artwork,
-            artworkContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 340),
+            artworkContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 430),
             artworkContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 170),
             artworkContainer.widthAnchor.constraint(lessThanOrEqualTo: content.widthAnchor),
             artworkContainer.heightAnchor.constraint(equalTo: artworkContainer.widthAnchor),
-            titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 380),
+            titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 460),
         ])
         return slot
     }
@@ -518,16 +541,19 @@ final class NowPlayingViewController: NSViewController {
         titleLabel.alignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         artistButton.font = .systemFont(ofSize: 15, weight: .medium)
         artistButton.contentTintColor = MacColors.primaryLabel
         artistButton.target = self
         artistButton.action = #selector(artistTapped)
+        artistButton.setContentCompressionResistancePriority(.required, for: .vertical)
 
         albumLabel.font = .systemFont(ofSize: 12)
         albumLabel.textColor = MacColors.tertiaryLabel
         albumLabel.lineBreakMode = .byTruncatingTail
         albumLabel.alignment = .center
+        albumLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         badgeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         badgeLabel.textColor = NSColor(red: 0.45, green: 0.86, blue: 0.92, alpha: 1)
@@ -551,8 +577,12 @@ final class NowPlayingViewController: NSViewController {
         )
 
         for label in [elapsedLabel, remainingLabel] {
-            label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
             label.textColor = MacColors.secondaryLabel
+            label.alignment = label === elapsedLabel ? .right : .left
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
+            label.widthAnchor.constraint(equalToConstant: 52).isActive = true
         }
     }
 
