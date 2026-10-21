@@ -45,6 +45,10 @@ final class NowPlayingViewController: NSViewController {
     private let scrubber = MacScrubberView()
     private let elapsedLabel = NSTextField(labelWithString: "0:00")
     private let remainingLabel = NSTextField(labelWithString: "-0:00")
+    private var volumeButton: TransportButton!
+    private let volumeSlider = NSSlider()
+    private let volumeLabel = NSTextField(labelWithString: "")
+    private var volumeBeforeMute: Float?
 
     private var sleepCapsule: CapsuleButton!
     private var shareCapsule: CapsuleButton!
@@ -234,15 +238,18 @@ final class NowPlayingViewController: NSViewController {
             nextButton, forwardFifteenButton, repeatButton,
         ])
         transportRow.orientation = .horizontal
-        transportRow.spacing = 16
+        transportRow.spacing = 14
         transportRow.alignment = .centerY
-        transportRow.setCustomSpacing(30, after: shuffleButton)
-        transportRow.setCustomSpacing(30, after: forwardFifteenButton)
+        transportRow.setCustomSpacing(28, after: shuffleButton)
+        transportRow.setCustomSpacing(28, after: forwardFifteenButton)
 
-        let stack = NSStackView(views: [timeline, transportRow])
+        let transportContainer = centeredRow(transportRow)
+        let volumeContainer = centeredRow(buildVolumeRow())
+
+        let stack = NSStackView(views: [timeline, transportContainer, volumeContainer])
         stack.orientation = .vertical
         stack.alignment = .centerX
-        stack.spacing = 14
+        stack.spacing = 12
         stack.setHuggingPriority(.defaultLow, for: .horizontal)
         let stackHeight = stack.fittingSize.height
         let padding = NSEdgeInsets(top: 18, left: 28, bottom: 18, right: 28)
@@ -257,6 +264,8 @@ final class NowPlayingViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -padding.right),
             stack.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -padding.bottom),
             timeline.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            transportContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            volumeContainer.widthAnchor.constraint(equalTo: stack.widthAnchor),
             scrubber.widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
             scrubber.heightAnchor.constraint(equalToConstant: 26),
         ])
@@ -275,6 +284,54 @@ final class NowPlayingViewController: NSViewController {
             dock.heightAnchor.constraint(equalToConstant: stackHeight + padding.top + padding.bottom),
         ])
         return dock
+    }
+
+    private func centeredRow(_ content: NSView) -> NSView {
+        let container = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: container.topAnchor),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            content.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+        ])
+        return container
+    }
+
+    private func buildVolumeRow() -> NSView {
+        volumeButton = TransportButton(
+            symbolName: "speaker.wave.2.fill", pointSize: 13,
+            accessibilityLabel: String(localized: "Mute"), target: self, action: #selector(toggleMute)
+        )
+        volumeButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        volumeButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
+
+        volumeSlider.minValue = 0
+        volumeSlider.maxValue = 1
+        volumeSlider.controlSize = .small
+        volumeSlider.isContinuous = true
+        volumeSlider.target = self
+        volumeSlider.action = #selector(volumeChanged)
+        volumeSlider.toolTip = String(localized: "Volume")
+        volumeSlider.setAccessibilityLabel(String(localized: "Volume"))
+        volumeSlider.translatesAutoresizingMaskIntoConstraints = false
+        volumeSlider.widthAnchor.constraint(equalToConstant: 170).isActive = true
+
+        volumeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        volumeLabel.textColor = MacColors.tertiaryLabel
+        volumeLabel.alignment = .right
+        volumeLabel.setContentHuggingPriority(.required, for: .horizontal)
+        volumeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        volumeLabel.widthAnchor.constraint(equalToConstant: 34).isActive = true
+
+        let row = NSStackView(views: [volumeButton, volumeSlider, volumeLabel])
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.alignment = .centerY
+        refreshVolume()
+        return row
     }
 
     private weak var scrimViewRef: NSView?
@@ -311,6 +368,9 @@ final class NowPlayingViewController: NSViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(trackChangedForCount), name: AudioPlayer.trackDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(volumeDidChangeExternally), name: AudioPlayer.volumeDidChange, object: nil
+        )
         // Restored from the reader's last session, not reset to closed.
         lyricsPanel.setActive(lyricsShown)
         queuePanel.setActive(queueShown)
@@ -320,6 +380,7 @@ final class NowPlayingViewController: NSViewController {
         modesChanged()
         sleepTimerChanged()
         queueChanged()
+        refreshVolume()
         prefetchLyrics()
     }
 
@@ -617,6 +678,54 @@ final class NowPlayingViewController: NSViewController {
         repeatButton = TransportButton(
             symbolName: "repeat", pointSize: 15, accessibilityLabel: String(localized: "Repeat"),
             target: self, action: #selector(cycleRepeat)
+        )
+        let secondaryButtons: [TransportButton] = [
+            shuffleButton, backFifteenButton, previousButton, nextButton, forwardFifteenButton, repeatButton
+        ]
+        for button in secondaryButtons {
+            button.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        }
+    }
+
+    @objc private func volumeChanged() {
+        player.volume = Float(volumeSlider.doubleValue)
+        refreshVolume()
+    }
+
+    @objc private func volumeDidChangeExternally() {
+        refreshVolume()
+    }
+
+    @objc private func toggleMute() {
+        if player.volume > 0 {
+            volumeBeforeMute = player.volume
+            player.volume = 0
+        } else {
+            player.volume = volumeBeforeMute ?? 0.8
+            volumeBeforeMute = nil
+        }
+        refreshVolume()
+    }
+
+    private func refreshVolume() {
+        let volume = player.volume
+        volumeSlider.doubleValue = Double(volume)
+        volumeLabel.stringValue = "\(Int((volume * 100).rounded()))%"
+        let symbol: String
+        if volume == 0 {
+            symbol = "speaker.slash.fill"
+        } else if volume < 0.34 {
+            symbol = "speaker.wave.1.fill"
+        } else if volume < 0.67 {
+            symbol = "speaker.wave.2.fill"
+        } else {
+            symbol = "speaker.wave.3.fill"
+        }
+        volumeButton.setSymbol(symbol, pointSize: 13)
+        volumeButton.isActiveToggle = volume == 0
+        volumeButton.setAccessibilityLabel(
+            volume == 0 ? String(localized: "Unmute") : String(localized: "Mute")
         )
     }
 
