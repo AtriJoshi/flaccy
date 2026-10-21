@@ -16,7 +16,10 @@ final class MainSplitViewController: NSSplitViewController {
     private var sidebarItem: NSSplitViewItem?
     private var nowPlayingController: NowPlayingViewController?
     private var sidebarWasCollapsed = false
+    private var savedToolbar: NSToolbar?
     private var toolbarWasVisible = true
+    private var titlebarWasTransparent = false
+    private var titlebarSeparatorStyle: NSTitlebarSeparatorStyle = .automatic
     private var windowBackgroundColor: NSColor?
     private var titlebarAccessories: [(controller: NSTitlebarAccessoryViewController, hidden: Bool)] = []
 
@@ -171,10 +174,15 @@ final class MainSplitViewController: NSSplitViewController {
             accessory.isHidden = true
             accessory.view.isHidden = true
         }
+        savedToolbar = window.toolbar
         toolbarWasVisible = window.toolbar?.isVisible ?? false
+        titlebarWasTransparent = window.titlebarAppearsTransparent
+        titlebarSeparatorStyle = window.titlebarSeparatorStyle
         windowBackgroundColor = window.backgroundColor
         window.backgroundColor = .black
-        window.toolbar?.isVisible = false
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.toolbar = nil
     }
 
     private func restoreNowPlayingChrome() {
@@ -190,6 +198,9 @@ final class MainSplitViewController: NSSplitViewController {
         if let windowBackgroundColor {
             window.backgroundColor = windowBackgroundColor
         }
+        window.titlebarAppearsTransparent = titlebarWasTransparent
+        window.titlebarSeparatorStyle = titlebarSeparatorStyle
+        window.toolbar = savedToolbar
         window.toolbar?.isVisible = toolbarWasVisible
     }
 }
