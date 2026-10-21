@@ -582,6 +582,11 @@ private enum TrialClock {
     }
 
     static func lookup(_ account: Account) -> Lookup {
+        #if DEBUG
+        if CommandLine.arguments.contains("--memory-audit") || CommandLine.arguments.contains("--skip-keychain") {
+            return .absent
+        }
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

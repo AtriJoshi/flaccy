@@ -2,17 +2,28 @@ import AppKit
 
 /// The standard macOS Settings window (⌘,): toolbar-style tabs hosting the
 /// General, Last.fm, Recap & Notifications, Library, and About panes.
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+
+    var onClose: (() -> Void)?
 
     convenience init() {
-        let tabController = SettingsTabViewController()
-        let window = NSWindow(contentViewController: tabController)
+        self.init(contentController: SettingsTabViewController())
+    }
+
+    convenience init(contentController: NSViewController) {
+        let window = NSWindow(contentViewController: contentController)
         window.styleMask = [.titled, .closable]
         window.title = String(localized: "General")
         window.isReleasedWhenClosed = false
         self.init(window: window)
+        window.delegate = self
         window.center()
         window.setFrameAutosaveName("FlaccySettingsWindow")
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose?()
+        onClose = nil
     }
 
     func show() {
@@ -43,7 +54,7 @@ final class SettingsTabViewController: NSTabViewController {
     private func addPane(_ controller: NSViewController, title: String, symbol: String) {
         let item = NSTabViewItem(viewController: controller)
         item.label = title
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        item.image = MacSymbolImage.image(symbol, accessibilityDescription: title)
         addTabViewItem(item)
     }
 

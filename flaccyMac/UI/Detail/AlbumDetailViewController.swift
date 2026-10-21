@@ -80,9 +80,7 @@ final class AlbumDetailViewController: NSViewController {
         playButton.onClick = { [weak self] in self?.play(shuffled: false) }
         let shuffleButton = GlassCapsuleButton(title: String(localized: "Shuffle"), symbolName: "shuffle")
         shuffleButton.onClick = { [weak self] in self?.play(shuffled: true) }
-        let actions = NSStackView(views: [playButton, shuffleButton])
-        actions.orientation = .horizontal
-        actions.spacing = 10
+        let actions = MacLiquidGlass.buttonGroup([playButton, shuffleButton], spacing: 10)
 
         let headerText = NSStackView(views: [titleLabel, artistButton, metaLabel, metaPlaceholder, chipsRow, actions])
         headerText.orientation = .vertical
@@ -244,12 +242,12 @@ final class AlbumDetailViewController: NSViewController {
         artworkTile.showPlaceholder(seed: album.id, shimmering: true)
         applyPaletteFromImage(nil, animated: false)
         let expected = album.id
-        if let cached = AlbumArtworkCache.shared.artwork(forAlbum: album.title, artist: album.artist) {
+        if let cached = AlbumArtworkCache.shared.nowPlayingArtwork(forAlbum: album.title, artist: album.artist) {
             artworkTile.showImage(cached)
             applyPaletteFromImage(cached, animated: false)
             return
         }
-        AlbumArtworkCache.shared.loadArtwork(forAlbum: album.title, artist: album.artist) { [weak self] image in
+        AlbumArtworkCache.shared.loadNowPlayingArtwork(forAlbum: album.title, artist: album.artist) { [weak self] image in
             guard let self, self.album.id == expected else { return }
             if let image {
                 self.artworkTile.showImage(image)
@@ -285,7 +283,7 @@ final class AlbumDetailViewController: NSViewController {
     /// the header never flashes its placeholder.
     private func refreshArtwork() {
         let expected = album.id
-        AlbumArtworkCache.shared.loadArtwork(forAlbum: album.title, artist: album.artist) { [weak self] image in
+        AlbumArtworkCache.shared.loadNowPlayingArtwork(forAlbum: album.title, artist: album.artist) { [weak self] image in
             guard let self, self.album.id == expected else { return }
             if let image {
                 self.artworkTile.showImage(image)

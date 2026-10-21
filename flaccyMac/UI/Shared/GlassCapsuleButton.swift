@@ -32,7 +32,7 @@ final class GlassCapsuleButton: NSControl {
 
         var views: [NSView] = []
         if let symbolName {
-            iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+            iconView.image = MacSymbolImage.image(symbolName, accessibilityDescription: title)
             iconView.symbolConfiguration = .init(pointSize: 12, weight: .semibold)
             iconView.contentTintColor = .labelColor
             views.append(iconView)

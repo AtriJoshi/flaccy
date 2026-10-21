@@ -60,9 +60,7 @@ final class PlaylistDetailViewController: NSViewController {
         playButton.onClick = { [weak self] in self?.play(shuffled: false) }
         let shuffleButton = GlassCapsuleButton(title: String(localized: "Shuffle"), symbolName: "shuffle")
         shuffleButton.onClick = { [weak self] in self?.play(shuffled: true) }
-        let actions = NSStackView(views: [playButton, shuffleButton])
-        actions.orientation = .horizontal
-        actions.spacing = 10
+        let actions = MacLiquidGlass.buttonGroup([playButton, shuffleButton], spacing: 10)
 
         let meta = NSStackView(views: [nameLabel, summaryLabel, actions])
         meta.orientation = .vertical

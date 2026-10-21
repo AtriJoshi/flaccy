@@ -6,11 +6,11 @@ import UIKit
 import AppKit
 #endif
 
-/// Two-tier artwork cache. List and grid cells use the thumbnail tier, decoded
+/// Three-tier artwork cache. List and grid cells use the thumbnail tier, decoded
 /// straight from the source bytes at a small pixel size via ImageIO so a
 /// 3000×3000 embedded FLAC cover never gets fully decoded just to fill a 44pt
-/// row. The full tier serves Now Playing and album headers, capped at a size
-/// that still fills any screen edge-to-edge.
+/// row. The now-playing tier feeds the system media panel and palette
+/// extraction, and the full tier serves album headers and the artwork editor.
 nonisolated final class AlbumArtworkCache: @unchecked Sendable {
 
     static let shared = AlbumArtworkCache()
@@ -18,6 +18,7 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
     static let didChangeNotification = Notification.Name("AlbumArtworkDidChange")
 
     private static let thumbnailMaxPixelSize: CGFloat = 480
+    private static let nowPlayingMaxPixelSize: CGFloat = 800
     private static let fullMaxPixelSize: CGFloat = 1600
 
     private let memoryCache = NSCache<NSString, PlatformImage>()
@@ -40,8 +41,16 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
         memoryCache.object(forKey: cacheKey(title: title, artist: artist, tier: .thumbnail) as NSString)
     }
 
+    func nowPlayingArtwork(forAlbum title: String, artist: String) -> PlatformImage? {
+        memoryCache.object(forKey: cacheKey(title: title, artist: artist, tier: .nowPlaying) as NSString)
+    }
+
     func loadArtwork(forAlbum title: String, artist: String, completion: @escaping (PlatformImage?) -> Void) {
         load(title: title, artist: artist, tier: .full, completion: completion)
+    }
+
+    func loadNowPlayingArtwork(forAlbum title: String, artist: String, completion: @escaping (PlatformImage?) -> Void) {
+        load(title: title, artist: artist, tier: .nowPlaying, completion: completion)
     }
 
     func loadThumbnail(forAlbum title: String, artist: String, completion: @escaping (PlatformImage?) -> Void) {
@@ -64,7 +73,7 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
         epoch += 1
         pendingLock.unlock()
         for key in keys {
-            for tier in [Tier.thumbnail, Tier.full] {
+            for tier in Tier.allCases {
                 memoryCache.removeObject(forKey: cacheKey(title: key.title, artist: key.artist, tier: tier) as NSString)
             }
         }
@@ -80,12 +89,25 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
         return epoch
     }
 
-    private enum Tier {
+    private enum Tier: CaseIterable {
         case thumbnail
+        case nowPlaying
         case full
 
         var maxPixelSize: CGFloat {
-            self == .thumbnail ? AlbumArtworkCache.thumbnailMaxPixelSize : AlbumArtworkCache.fullMaxPixelSize
+            switch self {
+            case .thumbnail: AlbumArtworkCache.thumbnailMaxPixelSize
+            case .nowPlaying: AlbumArtworkCache.nowPlayingMaxPixelSize
+            case .full: AlbumArtworkCache.fullMaxPixelSize
+            }
+        }
+
+        var cachePrefix: String {
+            switch self {
+            case .thumbnail: "t"
+            case .nowPlaying: "n"
+            case .full: "f"
+            }
         }
     }
 
@@ -152,13 +174,19 @@ nonisolated final class AlbumArtworkCache: @unchecked Sendable {
     }
 
     private func cacheKey(title: String, artist: String, tier: Tier) -> String {
-        "\(tier == .thumbnail ? "t" : "f")\0\(title)\0\(artist)"
+        "\(tier.cachePrefix)\0\(title)\0\(artist)"
     }
 }
 
 nonisolated private extension PlatformImage {
     var memoryCost: Int {
-        guard let cgImage else { return 0 }
-        return cgImage.bytesPerRow * cgImage.height
+        if let cgImage { return cgImage.bytesPerRow * cgImage.height }
+        #if canImport(UIKit)
+        let pixels = Int(size.width * scale) * Int(size.height * scale)
+        #else
+        let pixels = representations.map { $0.pixelsWide * $0.pixelsHigh }.max()
+            ?? Int(size.width * size.height)
+        #endif
+        return max(1, pixels) * 4
     }
 }

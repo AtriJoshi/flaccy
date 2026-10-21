@@ -55,7 +55,7 @@ final class MacArtistImageService {
 
     nonisolated private static func resolve(artist: String) async -> NSImage? {
         if let data = await MusicKitService.shared.fetchArtistImage(artist: artist),
-           let image = NSImage(data: data) {
+           let image = ImageCache.shared.imageFromData(data) {
             return image
         }
         return await fetchLastFMImage(artist: artist)
@@ -71,7 +71,7 @@ final class MacArtistImageService {
         do {
             let (data, response) = try await downloadSession.data(from: url)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let image = NSImage(data: data)
+                  let image = ImageCache.shared.imageFromData(data)
             else { return nil }
             return image
         } catch {

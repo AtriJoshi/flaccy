@@ -281,9 +281,7 @@ final class OnboardingPanelView: NSView {
             NSApp.sendAction(#selector(MacAppDelegate.chooseMusicFolder(_:)), to: nil, from: nil)
         }
 
-        let buttons = NSStackView(views: [chooseButton, sampleButton])
-        buttons.orientation = .horizontal
-        buttons.spacing = 12
+        let buttons = MacLiquidGlass.buttonGroup([chooseButton, sampleButton], spacing: 12)
 
         spinner.style = .spinning
         spinner.controlSize = .small

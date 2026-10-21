@@ -121,7 +121,8 @@ final class SongsTableViewController: NSViewController {
         shuffleButton.onClick = { [weak self] in self?.playVisible(shuffled: true) }
         saveButton.onClick = { [weak self] in self?.saveVisibleAsPlaylist() }
 
-        let bar = NSStackView(views: [chipsBar, playButton, shuffleButton, saveButton])
+        let actions = MacLiquidGlass.buttonGroup([playButton, shuffleButton, saveButton])
+        let bar = NSStackView(views: [chipsBar, actions])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.alignment = .centerY

@@ -68,9 +68,7 @@ final class ArtistDetailViewController: NSViewController {
         shuffleButton.onClick = { [weak self] in self?.playAll(shuffled: true) }
         let stationButton = GlassCapsuleButton(title: String(localized: "Start Station"), symbolName: "dot.radiowaves.left.and.right")
         stationButton.onClick = { [weak self] in self?.startStation() }
-        let actions = NSStackView(views: [playButton, shuffleButton, stationButton])
-        actions.orientation = .horizontal
-        actions.spacing = 10
+        let actions = MacLiquidGlass.buttonGroup([playButton, shuffleButton, stationButton], spacing: 10)
 
         let headerText = NSStackView(views: [nameLabel, statsLabel, chipsRow, actions])
         headerText.orientation = .vertical

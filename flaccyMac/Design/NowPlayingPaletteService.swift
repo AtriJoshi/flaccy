@@ -50,7 +50,7 @@ final class NowPlayingPaletteService: NSObject {
             ?? AlbumArtworkCache.shared.thumbnail(forAlbum: track.albumTitle, artist: track.artist) {
             extract(image: image, key: key, seed: seed)
         } else {
-            AlbumArtworkCache.shared.loadArtwork(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
+            AlbumArtworkCache.shared.loadThumbnail(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
                 self?.extract(image: image, key: key, seed: seed)
             }
         }

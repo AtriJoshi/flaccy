@@ -308,6 +308,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .flaccyShowSettings, object: nil)
         let controller = settingsWindowController ?? SettingsWindowController()
         settingsWindowController = controller
+        controller.onClose = { [weak self] in self?.settingsWindowController = nil }
         controller.show()
     }
 

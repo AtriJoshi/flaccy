@@ -91,7 +91,7 @@ final class RemoteArtworkView: NSView {
             if image == nil,
                let (data, response) = try? await URLSession.shared.data(from: url),
                (response as? HTTPURLResponse)?.statusCode == 200,
-               let fetched = NSImage(data: data) {
+               let fetched = ImageCache.shared.imageFromData(data) {
                 ImageCache.shared.store(fetched, forKey: urlString)
                 image = fetched
             }

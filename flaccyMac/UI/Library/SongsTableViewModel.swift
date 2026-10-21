@@ -12,7 +12,7 @@ final class SongsTableViewModel {
         var track: Track
         let dateAdded: Date
         var plays: Int
-        let lastPlayed: Date?
+        var lastPlayed: Date?
 
         nonisolated var id: String { track.fileURL.path }
     }
@@ -107,7 +107,21 @@ final class SongsTableViewModel {
     private var searchQuery = LibrarySearchState.query
     private var loadGeneration = 0
     private var publishGeneration = 0
+    private var loadTask: Task<Void, Never>?
+    private var publishTask: Task<Void, Never>?
+    private var trackUpdateTask: Task<Void, Never>?
+    private var searchDebounceTask: Task<Void, Never>?
     private let derived = SongsDerivedData()
+
+    #if DEBUG
+    private(set) var debugReloadCount = 0
+    private(set) var debugTrackUpdateCount = 0
+
+    var debugCurrentTrackIsIndexed: Bool {
+        guard let track = AudioPlayer.shared.currentTrack else { return false }
+        return (try? DatabaseManager.shared.fetchTrack(byRelativePath: relativePath(for: track.fileURL))) != nil
+    }
+    #endif
 
     private(set) var filter: Filter
     private(set) var mostPlayedRange: ChartPeriod
@@ -132,7 +146,7 @@ final class SongsTableViewModel {
             self, selector: #selector(lovedDidChange(_:)), name: LovedTracksService.didChange, object: nil
         )
         NotificationCenter.default.addObserver(
-            self, selector: #selector(reload), name: AudioPlayer.trackDidChange, object: nil
+            self, selector: #selector(trackChanged), name: AudioPlayer.trackDidChange, object: nil
         )
         NotificationCenter.default.addObserver(
             self, selector: #selector(searchChanged(_:)), name: .flaccySearchQueryChanged, object: nil
@@ -220,11 +234,17 @@ final class SongsTableViewModel {
     }
 
     @objc private func reload() {
+        #if DEBUG
+        debugReloadCount += 1
+        #endif
         loadGeneration += 1
         let generation = loadGeneration
+        loadTask?.cancel()
         let derived = self.derived
-        Task.detached(priority: .userInitiated) { [weak self] in
+        loadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else { return }
             let records = (try? DatabaseManager.shared.fetchAllTracks()) ?? []
+            guard !Task.isCancelled else { return }
             let counts = derived.scrobbleCounts(for: .allTime)
             let rows = records.map { record in
                 Row(
@@ -242,6 +262,52 @@ final class SongsTableViewModel {
         }
     }
 
+    @objc private func trackChanged() {
+        guard let track = AudioPlayer.shared.currentTrack else { return }
+        let path = track.fileURL.path
+        let relativePath = relativePath(for: track.fileURL)
+        trackUpdateTask?.cancel()
+        trackUpdateTask = Task.detached(priority: .utility) {
+            let record = try? DatabaseManager.shared.fetchTrack(byRelativePath: relativePath)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                self?.applyTrackUpdate(path: path, record: record)
+            }
+        }
+    }
+
+    private func applyTrackUpdate(path: String, record: TrackRecord?) {
+        guard let record else { return }
+        #if DEBUG
+        debugTrackUpdateCount += 1
+        #endif
+        let counts = derived.scrobbleCounts(for: .allTime)
+        let plays = counts[LastFMStatsService.trackKey(record.title, record.artist)] ?? record.playCount
+        if let index = allRows.firstIndex(where: { $0.id == path }) {
+            allRows[index].plays = plays
+            allRows[index].lastPlayed = record.lastPlayed
+        }
+        let needsReorder = filter == .mostPlayed || filter == .recentlyPlayed || filter == .rediscover
+            || sortTiers.contains { $0.column == .plays || $0.column == .lastPlayed }
+        guard !needsReorder else {
+            publish()
+            return
+        }
+        var rows = rowsPublisher.value
+        guard let index = rows.firstIndex(where: { $0.id == path }) else { return }
+        rows[index].plays = plays
+        rows[index].lastPlayed = record.lastPlayed
+        rowsPublisher.send(rows)
+    }
+
+    private func relativePath(for url: URL) -> String {
+        let root = LibraryPaths.root.path
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(root) else { return url.lastPathComponent }
+        let relative = String(path.dropFirst(root.count))
+        return relative.hasPrefix("/") ? String(relative.dropFirst()) : relative
+    }
+
     @objc private func lovedDidChange(_ notification: Notification) {
         for index in allRows.indices {
             allRows[index].track.loved = LovedTracksService.shared.isLoved(track: allRows[index].track)
@@ -251,12 +317,17 @@ final class SongsTableViewModel {
 
     @objc private func searchChanged(_ notification: Notification) {
         searchQuery = notification.userInfo?[LibraryNavigator.Key.query] as? String ?? ""
-        publish()
+        searchDebounceTask?.cancel()
+        searchDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            self?.publish()
+        }
     }
 
     /// Filtering and localized sorting of the full library happen off the
-    /// main actor (they run on every track change, love toggle, and search
-    /// keystroke); a generation token drops stale results.
+    /// main actor; each new pass cancels the previous one, and a generation
+    /// token drops results that raced a newer request.
     private func publish() {
         publishGeneration += 1
         let generation = publishGeneration
@@ -266,9 +337,13 @@ final class SongsTableViewModel {
         let filter = self.filter
         let range = mostPlayedRange
         let derived = self.derived
-        Task.detached(priority: .userInitiated) { [weak self] in
+        publishTask?.cancel()
+        publishTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else { return }
             let pivot = Self.pivoted(rows, by: filter, range: range, derived: derived, now: Date())
+            guard !Task.isCancelled else { return }
             let result = Self.sorted(Self.filtered(pivot, query: query), tiers: tiers)
+            guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self, self.publishGeneration == generation else { return }
                 self.displayedPlaysRange = filter == .mostPlayed ? range : nil

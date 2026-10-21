@@ -316,9 +316,7 @@ final class ChartsViewController: NSViewController {
         play.onClick = { [weak self] in self?.play(list, shuffled: false) }
         let shuffle = GlassCapsuleButton(title: String(localized: "Shuffle"), symbolName: "shuffle")
         shuffle.onClick = { [weak self] in self?.play(list, shuffled: true) }
-        let actions = NSStackView(views: [play, shuffle])
-        actions.orientation = .horizontal
-        actions.spacing = 8
+        let actions = MacLiquidGlass.buttonGroup([play, shuffle])
         actions.isHidden = true
         listActions[list] = actions
         return actions

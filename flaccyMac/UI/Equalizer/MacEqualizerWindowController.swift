@@ -55,9 +55,17 @@ final class MacEqualizerWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func show() {
+        if contentViewController == nil {
+            contentViewController = MacEqualizerViewController()
+        }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        contentViewController = nil
+        undo.removeAllActions()
     }
 
     func toggle() {

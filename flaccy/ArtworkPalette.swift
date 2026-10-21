@@ -30,7 +30,12 @@ struct ArtworkPalette: Equatable {
 
 enum ArtworkPaletteExtractor {
 
-    private static let cache = NSCache<NSString, Box>()
+    private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 256
+        cache.totalCostLimit = 1024 * 1024
+        return cache
+    }()
     private static let queue = DispatchQueue(label: "com.flaccy.palette", qos: .utility)
 
     private final class Box {

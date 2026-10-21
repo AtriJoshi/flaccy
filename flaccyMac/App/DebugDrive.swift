@@ -10,6 +10,9 @@ import FlaccyCore
 enum DebugDrive {
 
     static func runIfRequested(window: NSWindow?) {
+        if CommandLine.arguments.contains("--memory-audit") {
+            Task { await MemoryAudit.run(window: window) }
+        }
         if let layout = value(after: "--detail-layout") {
             UserDefaults.standard.set(layout, forKey: TrackPageSongs.layoutKey)
         }

@@ -1,4 +1,5 @@
 import CryptoKit
+import ImageIO
 
 #if canImport(UIKit)
 import UIKit
@@ -12,6 +13,11 @@ final class ImageCache {
 
     nonisolated private static let maxDiskCacheBytes = 100 * 1024 * 1024
     nonisolated private static let maxDiskCacheAge: TimeInterval = 90 * 24 * 60 * 60
+    #if os(macOS)
+    nonisolated private static let maxPixelSize: CGFloat = 1024
+    #else
+    nonisolated private static let maxPixelSize: CGFloat = 1600
+    #endif
 
     private let memoryCache = NSCache<NSString, PlatformImage>()
     private let diskCacheURL: URL
@@ -51,11 +57,12 @@ final class ImageCache {
 
         let filePath = diskPath(forKey: key)
         guard let data = try? Data(contentsOf: filePath),
-              let diskImage = PlatformImage(data: data)
+              let decoded = PlatformImage(data: data)
         else {
             return nil
         }
 
+        let diskImage = Self.downsampled(decoded)
         let cost = estimateCost(of: diskImage)
         memoryCache.setObject(diskImage, forKey: cacheKey, cost: cost)
         touchDiskFile(filePath)
@@ -80,7 +87,8 @@ final class ImageCache {
                     continuation.resume(returning: nil)
                     return
                 }
-                continuation.resume(returning: image.preparingForDisplay() ?? image)
+                let prepared = Self.downsampled(image)
+                continuation.resume(returning: prepared.preparingForDisplay() ?? prepared)
             }
         }
 
@@ -103,12 +111,13 @@ final class ImageCache {
     }
 
     func store(_ image: PlatformImage, forKey key: String) {
-        let cost = estimateCost(of: image)
-        memoryCache.setObject(image, forKey: key as NSString, cost: cost)
+        let stored = Self.downsampled(image)
+        let cost = estimateCost(of: stored)
+        memoryCache.setObject(stored, forKey: key as NSString, cost: cost)
 
         let filePath = diskPath(forKey: key)
         ioQueue.async { [fileManager] in
-            guard let data = image.jpegData(compressionQuality: 0.85) else { return }
+            guard let data = stored.jpegData(compressionQuality: 0.85) else { return }
             do {
                 try data.write(to: filePath, options: .atomic)
             } catch {
@@ -127,15 +136,16 @@ final class ImageCache {
     }
 
     func store(data: Data, forKey key: String) {
-        guard let image = PlatformImage(data: data) else { return }
+        guard let image = imageFromData(data) else { return }
 
         let cost = estimateCost(of: image)
         memoryCache.setObject(image, forKey: key as NSString, cost: cost)
 
         let filePath = diskPath(forKey: key)
         ioQueue.async {
+            guard let stored = image.jpegData(compressionQuality: 0.85) else { return }
             do {
-                try data.write(to: filePath, options: .atomic)
+                try stored.write(to: filePath, options: .atomic)
             } catch {
                 Task { @MainActor in
                     AppLogger.error("Failed to write image data to disk: \(error.localizedDescription)", category: .content)
@@ -145,8 +155,8 @@ final class ImageCache {
     }
 
     func imageFromData(_ data: Data?) -> PlatformImage? {
-        guard let data else { return nil }
-        return PlatformImage(data: data)
+        guard let data, let image = PlatformImage(data: data) else { return nil }
+        return Self.downsampled(image)
     }
 
     private func diskPath(forKey key: String) -> URL {
@@ -160,9 +170,58 @@ final class ImageCache {
         return digest.map { String(format: "%02hhx", $0) }.joined()
     }
 
+    #if DEBUG
+    func debugCost(of image: PlatformImage) -> Int { estimateCost(of: image) }
+    #endif
+
     private func estimateCost(of image: PlatformImage) -> Int {
-        guard let cgImage = image.cgImage else { return 0 }
-        return cgImage.bytesPerRow * cgImage.height
+        if let cgImage = Self.cgImage(of: image) {
+            return cgImage.bytesPerRow * cgImage.height
+        }
+        #if canImport(UIKit)
+        let pixels = Int(image.size.width * image.scale) * Int(image.size.height * image.scale)
+        #else
+        let pixels = image.representations.map { $0.pixelsWide * $0.pixelsHigh }.max()
+            ?? Int(image.size.width * image.size.height)
+        #endif
+        return max(1, pixels) * 4
+    }
+
+    private static func cgImage(of image: PlatformImage) -> CGImage? {
+        #if canImport(UIKit)
+        image.cgImage
+        #else
+        image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #endif
+    }
+
+    private static func downsampled(_ image: PlatformImage) -> PlatformImage {
+        guard let source = cgImage(of: image) else { return image }
+        let longest = max(source.width, source.height)
+        guard longest > Int(maxPixelSize) else { return image }
+        let scale = maxPixelSize / CGFloat(longest)
+        let width = max(1, Int(CGFloat(source.width) * scale))
+        let height = max(1, Int(CGFloat(source.height) * scale))
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: source.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let scaled = context.makeImage() else { return image }
+        #if canImport(UIKit)
+        return UIImage(cgImage: scaled, scale: image.scale, orientation: image.imageOrientation)
+        #else
+        let size = image.size.width > 0 && image.size.height > 0
+            ? image.size
+            : NSSize(width: width, height: height)
+        return NSImage(cgImage: scaled, size: size)
+        #endif
     }
 
     /// Bounds the disk tier once per launch: evicts least-recently-used files until the

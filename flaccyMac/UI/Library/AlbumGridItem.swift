@@ -24,6 +24,11 @@ final class AlbumGridItem: NSCollectionViewItem {
     private var isHovering = false
     private var isDropTargeted = false
 
+    override func viewWillLayout() {
+        super.viewWillLayout()
+        updateShadowPath()
+    }
+
     override func loadView() {
         view = AlbumGridItemView(owner: self)
         view.wantsLayer = true
@@ -155,6 +160,7 @@ final class AlbumGridItem: NSCollectionViewItem {
 
     #if DEBUG
     var debugShownImage: CGImage? { artworkTile.displayedImage }
+    var debugShadowPath: CGPath? { shadowWrap.layer?.shadowPath }
     #endif
 
     func setDropTargeted(_ targeted: Bool) {
@@ -203,6 +209,16 @@ final class AlbumGridItem: NSCollectionViewItem {
         applyScale(pressed ? 0.97 : (isHovering ? 1.03 : 1))
     }
 
+    fileprivate func updateShadowPath() {
+        guard let layer = shadowWrap.layer, !shadowWrap.bounds.isEmpty else { return }
+        layer.shadowPath = CGPath(
+            roundedRect: shadowWrap.bounds,
+            cornerWidth: artworkTile.cornerRadius,
+            cornerHeight: artworkTile.cornerRadius,
+            transform: nil
+        )
+    }
+
     fileprivate func contextMenu() -> NSMenu? {
         onMenu?()
     }
@@ -232,6 +248,11 @@ private final class AlbumGridItemView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        owner?.updateShadowPath()
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

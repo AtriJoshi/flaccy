@@ -43,9 +43,7 @@ final class TransportButton: NSButton {
             return
         }
         currentSymbol = (symbolName, pointSize)
-        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .medium)
-        image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
+        image = MacSymbolImage.configured(symbolName, pointSize: pointSize, weight: .medium)
     }
 
     override var intrinsicContentSize: NSSize {

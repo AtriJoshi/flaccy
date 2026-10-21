@@ -1270,11 +1270,11 @@ final class AudioPlayer: AudioPlaying {
         "\(track.albumTitle)\u{0}\(track.artist)"
     }
 
-    /// Full art preferred, thumbnail as a stopgap so system Now Playing never
-    /// has to wait for the large decode (or sit empty after a cache eviction).
+    /// Media-panel-sized art preferred, thumbnail as a stopgap so system Now
+    /// Playing never has to wait for a large decode or sit empty after eviction.
     private func resolveArtwork(for track: Track) -> PlatformImage? {
         track.artwork
-            ?? AlbumArtworkCache.shared.artwork(forAlbum: track.albumTitle, artist: track.artist)
+            ?? AlbumArtworkCache.shared.nowPlayingArtwork(forAlbum: track.albumTitle, artist: track.artist)
             ?? AlbumArtworkCache.shared.thumbnail(forAlbum: track.albumTitle, artist: track.artist)
     }
 
@@ -1287,8 +1287,8 @@ final class AudioPlayer: AudioPlaying {
         if let resolved = resolveArtwork(for: track) {
             nowPlayingArtworkImage = resolved
         }
-        if AlbumArtworkCache.shared.artwork(forAlbum: track.albumTitle, artist: track.artist) == nil {
-            AlbumArtworkCache.shared.loadArtwork(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
+        if AlbumArtworkCache.shared.nowPlayingArtwork(forAlbum: track.albumTitle, artist: track.artist) == nil {
+            AlbumArtworkCache.shared.loadNowPlayingArtwork(forAlbum: track.albumTitle, artist: track.artist) { [weak self] image in
                 guard let self else { return }
                 if let image, self.nowPlayingArtworkKey == key {
                     self.nowPlayingArtworkImage = image
@@ -1736,6 +1736,11 @@ final class AudioPlayer: AudioPlaying {
     /// always picked up. All database work runs off the main actor and only
     /// the gating flags stay on it.
     func retryPendingScrobbles() async {
+        #if DEBUG
+        if CommandLine.arguments.contains("--memory-audit") || CommandLine.arguments.contains("--skip-keychain") {
+            return
+        }
+        #endif
         guard !isRetryingScrobbles else {
             scrobbleRetryRequested = true
             return

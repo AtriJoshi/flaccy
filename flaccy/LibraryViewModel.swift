@@ -293,7 +293,24 @@ final class LibraryViewModel {
         let lastPlayed: Date?
     }
 
-    private var cachedMeta: [String: TrackMeta]?
+    private static let sharedMetaLock = NSLock()
+    private static var sharedMeta: [ObjectIdentifier: [String: TrackMeta]] = [:]
+    private static var sharedMetaGeneration = 0
+
+    #if DEBUG
+    private(set) static var debugMetaBuildCount = 0
+
+    static func debugResetMetaBuildCount() {
+        sharedMetaLock.lock()
+        debugMetaBuildCount = 0
+        sharedMetaLock.unlock()
+    }
+
+    static func debugInvalidateSharedMeta() { invalidateSharedMeta() }
+
+    func debugTrackMetaCount() -> Int { trackMeta.count }
+    #endif
+
     private var cachedScrobbleCounts: (period: ChartPeriod, counts: [String: Int])?
     private var scrobbleCountsWarming = false
     private var cachedRediscover: (keys: Set<String>, albums: [Album])?
@@ -302,12 +319,21 @@ final class LibraryViewModel {
     private let rediscoverMinPlays = 2
 
     private var trackMeta: [String: TrackMeta] {
-        cacheLock.lock()
-        if let cached = cachedMeta {
-            cacheLock.unlock()
+        let key = ObjectIdentifier(library)
+        Self.sharedMetaLock.lock()
+        if let cached = Self.sharedMeta[key] {
+            Self.sharedMetaLock.unlock()
             return cached
         }
-        cacheLock.unlock()
+        let generation = Self.sharedMetaGeneration
+        Self.sharedMetaLock.unlock()
+
+        #if DEBUG
+        Self.sharedMetaLock.lock()
+        Self.debugMetaBuildCount += 1
+        Self.sharedMetaLock.unlock()
+        #endif
+
         var map = [String: TrackMeta]()
         if let records = try? DatabaseManager.shared.fetchAllTracks() {
             map.reserveCapacity(records.count)
@@ -319,10 +345,27 @@ final class LibraryViewModel {
                 )
             }
         }
-        cacheLock.lock()
-        cachedMeta = map
-        cacheLock.unlock()
-        return map
+
+        Self.sharedMetaLock.lock()
+        if generation == Self.sharedMetaGeneration {
+            Self.sharedMeta[key] = map
+        }
+        let result = Self.sharedMeta[key] ?? map
+        Self.sharedMetaLock.unlock()
+        return result
+    }
+
+    private static func invalidateSharedMeta() {
+        sharedMetaLock.lock()
+        sharedMeta.removeAll()
+        sharedMetaGeneration &+= 1
+        sharedMetaLock.unlock()
+    }
+
+    private static func removeSharedMeta(for library: LibraryProviding) {
+        sharedMetaLock.lock()
+        sharedMeta.removeValue(forKey: ObjectIdentifier(library))
+        sharedMetaLock.unlock()
     }
 
     #if os(macOS)
@@ -821,6 +864,7 @@ final class LibraryViewModel {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        Self.removeSharedMeta(for: library)
     }
 
     /// Merges the two things that decide launch chrome — the bounded load bar
@@ -1092,18 +1136,6 @@ final class LibraryViewModel {
                 guard epoch == self.snapshotEpoch else { return }
                 self.snapshotPublisher.send(snapshot)
             }
-        }
-    }
-
-    /// Warm the inactive list caches in the background after a library load so
-    /// the first switch to Songs/Artists is a cache hit.
-    private func prewarmSortCaches() {
-        snapshotQueue.async { [weak self] in
-            guard let self else { return }
-            _ = self.sortedAlbums
-            _ = self.sortedSongs
-            _ = self.sortedArtists
-            _ = self.songSearchKeys()
         }
     }
 
@@ -1444,7 +1476,6 @@ final class LibraryViewModel {
     @objc private func libraryDidUpdate() {
         invalidateSortCaches()
         publishSnapshot(intent: .refreshLibrary)
-        prewarmSortCaches()
     }
 
     private func invalidateSortCaches() {
@@ -1455,7 +1486,6 @@ final class LibraryViewModel {
         cachedRecentAlbums = nil
         cachedPlaylists = nil
         cachedSuggestions = nil
-        cachedMeta = nil
         cachedRediscover = nil
         cachedAlbumAdded = nil
         cachedAlbumPlayed = nil
@@ -1464,13 +1494,14 @@ final class LibraryViewModel {
         cachedFirstAlbumByArtist = nil
         cachedSongSearchKeys = nil
         cacheLock.unlock()
+        Self.invalidateSharedMeta()
     }
 
     @objc private func trackDidChange() {
         cachedRecentAlbums = nil
         cachedRediscover = nil
         cachedAlbumPlayed = nil
-        cachedMeta = nil
+        Self.invalidateSharedMeta()
         if albumSort == .recentlyPlayed { cachedSortedAlbums = nil }
         if songSort == .recentlyPlayed { cachedSortedSongs = nil }
         publishMiniPlayerState()

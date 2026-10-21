@@ -314,10 +314,7 @@ final class ArtworkEditorViewController: NSViewController {
         let hint = NSTextField(labelWithString: String(localized: "or drop an image here"))
         hint.font = .systemFont(ofSize: 12)
         hint.textColor = MacColors.onArtwork(0.5)
-        let buttons = NSStackView(views: [chooseButton, pasteButton])
-        buttons.orientation = .horizontal
-        buttons.spacing = 10
-        buttons.alignment = .centerY
+        let buttons = MacLiquidGlass.buttonGroup([chooseButton, pasteButton], spacing: 10)
         let sources = NSStackView(views: [buttons, hint])
         sources.orientation = .vertical
         sources.spacing = 6

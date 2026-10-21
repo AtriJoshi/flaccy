@@ -392,17 +392,15 @@ final class Library: LibraryProviding {
         #endif
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
-            at: documentsDirectory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]
+            at: documentsDirectory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
         ) else { return false }
 
         var diskPaths = Set<String>()
-        var diskFilesByPath = [String: URL]()
 
         for case let fileURL as URL in enumerator {
             guard Self.audioExtensions.contains(fileURL.pathExtension.lowercased()) else { continue }
             let relPath = relativePath(for: fileURL)
             diskPaths.insert(relPath)
-            diskFilesByPath[relPath] = fileURL
             let found = diskPaths.count
             emitProgress { $0.filesFound = found }
         }
@@ -473,7 +471,7 @@ final class Library: LibraryProviding {
             let maxInflight = 8
             func addNext(_ group: inout TaskGroup<TrackRecord?>) -> Bool {
                 guard let relPath = pending.next() else { return false }
-                guard let fileURL = diskFilesByPath[relPath] else { return true }
+                let fileURL = documentsDirectory.appendingPathComponent(relPath)
                 group.addTask {
                     let metadata = await MetadataService.extractMetadata(from: fileURL)
                     return TrackRecord(

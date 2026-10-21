@@ -43,6 +43,16 @@ enum MacLiquidGlass {
         return container
     }
 
+    /// One container for a row of glass capsules, so their materials share a
+    /// render pass instead of each owning an independent backdrop surface.
+    static func buttonGroup(_ buttons: [GlassCapsuleButton], spacing: CGFloat = 8) -> NSView {
+        let stack = NSStackView(views: buttons)
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = spacing
+        return grouping(stack, spacing: spacing)
+    }
+
     /// A capsule-shaped solid fill matching the iOS reduced-transparency
     /// capsule look, used for badges over artwork where glass would be noise.
     static func solidCapsule(cornerRadius: CGFloat) -> NSView {
