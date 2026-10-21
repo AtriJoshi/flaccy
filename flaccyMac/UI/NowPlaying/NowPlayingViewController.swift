@@ -46,9 +46,11 @@ final class NowPlayingViewController: NSViewController {
     private let elapsedLabel = NSTextField(labelWithString: "0:00")
     private let remainingLabel = NSTextField(labelWithString: "-0:00")
     private var volumeButton: TransportButton!
-    private let volumeSlider = NSSlider()
+    private let volumeSlider = VolumeSlider()
     private let volumeLabel = NSTextField(labelWithString: "")
     private var volumeBeforeMute: Float?
+    private var equalizerButton: TransportButton!
+    private var equalizerPopover: NSPopover?
 
     private var sleepCapsule: CapsuleButton!
     private var shareCapsule: CapsuleButton!
@@ -311,16 +313,18 @@ final class NowPlayingViewController: NSViewController {
 
         volumeSlider.minValue = 0
         volumeSlider.maxValue = 1
-        volumeSlider.controlSize = .small
+        volumeSlider.controlSize = .regular
+        volumeSlider.trackFillColor = .labelColor
         volumeSlider.isContinuous = true
         volumeSlider.target = self
         volumeSlider.action = #selector(volumeChanged)
         volumeSlider.toolTip = String(localized: "Volume")
         volumeSlider.setAccessibilityLabel(String(localized: "Volume"))
         volumeSlider.translatesAutoresizingMaskIntoConstraints = false
-        volumeSlider.widthAnchor.constraint(equalToConstant: 170).isActive = true
+        volumeSlider.widthAnchor.constraint(equalToConstant: 190).isActive = true
+        volumeSlider.heightAnchor.constraint(equalToConstant: 26).isActive = true
 
-        volumeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        volumeLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
         volumeLabel.textColor = MacColors.tertiaryLabel
         volumeLabel.alignment = .right
         volumeLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -329,7 +333,7 @@ final class NowPlayingViewController: NSViewController {
 
         let row = NSStackView(views: [volumeButton, volumeSlider, volumeLabel])
         row.orientation = .horizontal
-        row.spacing = 10
+        row.spacing = 8
         row.alignment = .centerY
         refreshVolume()
         return row
@@ -372,6 +376,9 @@ final class NowPlayingViewController: NSViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(volumeDidChangeExternally), name: AudioPlayer.volumeDidChange, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(equalizerChanged), name: EqualizerEngine.stateDidChange, object: nil
+        )
         // Restored from the reader's last session, not reset to closed.
         lyricsPanel.setActive(lyricsShown)
         queuePanel.setActive(queueShown)
@@ -382,6 +389,7 @@ final class NowPlayingViewController: NSViewController {
         sleepTimerChanged()
         queueChanged()
         refreshVolume()
+        equalizerChanged()
         prefetchLyrics()
     }
 
@@ -395,6 +403,7 @@ final class NowPlayingViewController: NSViewController {
 
     override func viewWillDisappear() {
         super.viewWillDisappear()
+        equalizerPopover?.close()
         backdrop.setPaused(true)
     }
 
@@ -709,6 +718,22 @@ final class NowPlayingViewController: NSViewController {
         refreshVolume()
     }
 
+    @objc private func equalizerChanged() {
+        equalizerButton.isActiveToggle = EqualizerEngine.shared.isRunning
+    }
+
+    @objc private func showEqualizerPanel() {
+        if let popover = equalizerPopover, popover.isShown {
+            popover.close()
+            return
+        }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = MacEqualizerQuickPanel()
+        popover.show(relativeTo: equalizerButton.bounds, of: equalizerButton, preferredEdge: .maxY)
+        equalizerPopover = popover
+    }
+
     private func refreshVolume() {
         let volume = player.volume
         volumeSlider.doubleValue = Double(volume)
@@ -747,11 +772,19 @@ final class NowPlayingViewController: NSViewController {
             self?.shareCurrentTrack(from: button)
         }
 
+        equalizerButton = TransportButton(
+            symbolName: "slider.vertical.3", pointSize: 13,
+            accessibilityLabel: EqualizerCopy.title, target: self, action: #selector(showEqualizerPanel)
+        )
+        equalizerButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        equalizerButton.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        equalizerButton.isActiveToggle = EqualizerEngine.shared.isRunning
+
         routePicker.translatesAutoresizingMaskIntoConstraints = false
         routePicker.widthAnchor.constraint(equalToConstant: 34).isActive = true
         routePicker.heightAnchor.constraint(equalToConstant: 26).isActive = true
 
-        let row = NSStackView(views: [sleepCapsule, shareCapsule, routePicker])
+        let row = NSStackView(views: [sleepCapsule, shareCapsule, equalizerButton, routePicker])
         row.orientation = .horizontal
         row.spacing = 10
         row.alignment = .centerY
