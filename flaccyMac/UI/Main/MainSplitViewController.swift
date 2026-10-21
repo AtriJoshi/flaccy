@@ -13,7 +13,12 @@ final class MainSplitViewController: NSSplitViewController {
 
     var inspectorContentView: NSView { inspectorHost.view }
     private var inspectorItem: NSSplitViewItem?
+    private var sidebarItem: NSSplitViewItem?
     private var nowPlayingController: NowPlayingViewController?
+    private var sidebarWasCollapsed = false
+    private var toolbarWasVisible = true
+    private var windowBackgroundColor: NSColor?
+    private var titlebarAccessories: [(controller: NSTitlebarAccessoryViewController, hidden: Bool)] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -26,6 +31,7 @@ final class MainSplitViewController: NSSplitViewController {
         sidebarItem.minimumThickness = 190
         sidebarItem.maximumThickness = 280
         addSplitViewItem(sidebarItem)
+        self.sidebarItem = sidebarItem
 
         let contentItem = NSSplitViewItem(viewController: contentRouter)
         contentItem.minimumThickness = 480
@@ -101,7 +107,7 @@ final class MainSplitViewController: NSSplitViewController {
             self?.closeNowPlaying()
         }
         nowPlayingController = controller
-        view.window?.toolbar?.isVisible = false
+        hideNowPlayingChrome()
         parent?.addChild(controller)
         let overlay = controller.view
         overlay.translatesAutoresizingMaskIntoConstraints = false
@@ -130,9 +136,10 @@ final class MainSplitViewController: NSSplitViewController {
         guard let controller = nowPlayingController else { return }
         nowPlayingController = nil
         let overlay = controller.view
-        let finish = {
+        let finish = { [weak self] in
             overlay.removeFromSuperview()
             controller.removeFromParent()
+            self?.restoreNowPlayingChrome()
         }
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             finish()
@@ -142,9 +149,48 @@ final class MainSplitViewController: NSSplitViewController {
                 overlay.animator().alphaValue = 0
             }, completionHandler: finish)
         }
-        view.window?.toolbar?.isVisible = true
         view.window?.makeFirstResponder(nil)
         AppLogger.info("Now Playing immersive closed", category: .ui)
+    }
+
+    /// The sidebar's scroll-pocket material and the titlebar pills live above
+    /// the content overlay, so an immersive Now Playing would otherwise keep a
+    /// strip of library chrome along the top edge. Collapse the sidebar and
+    /// park the accessories for the duration, then put both back exactly as
+    /// they were.
+    private func hideNowPlayingChrome() {
+        guard let window = view.window else { return }
+        if let sidebarItem {
+            sidebarWasCollapsed = sidebarItem.isCollapsed
+            sidebarItem.isCollapsed = true
+        }
+        titlebarAccessories = window.titlebarAccessoryViewControllers.map {
+            ($0, $0.isHidden)
+        }
+        for accessory in window.titlebarAccessoryViewControllers {
+            accessory.isHidden = true
+            accessory.view.isHidden = true
+        }
+        toolbarWasVisible = window.toolbar?.isVisible ?? false
+        windowBackgroundColor = window.backgroundColor
+        window.backgroundColor = .black
+        window.toolbar?.isVisible = false
+    }
+
+    private func restoreNowPlayingChrome() {
+        guard nowPlayingController == nil, let window = view.window else { return }
+        if let sidebarItem {
+            sidebarItem.isCollapsed = sidebarWasCollapsed
+        }
+        for entry in titlebarAccessories {
+            entry.controller.isHidden = entry.hidden
+            entry.controller.view.isHidden = entry.hidden
+        }
+        titlebarAccessories.removeAll()
+        if let windowBackgroundColor {
+            window.backgroundColor = windowBackgroundColor
+        }
+        window.toolbar?.isVisible = toolbarWasVisible
     }
 }
 

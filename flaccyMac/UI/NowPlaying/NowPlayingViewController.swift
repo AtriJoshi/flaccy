@@ -81,6 +81,7 @@ final class NowPlayingViewController: NSViewController {
     override func loadView() {
         let root = AppearanceReactiveView()
         root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor.black.cgColor
 
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(backdrop)

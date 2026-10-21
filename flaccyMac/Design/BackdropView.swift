@@ -41,6 +41,7 @@ final class BackdropView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.masksToBounds = true
+        layer?.isOpaque = true
         layer?.backgroundColor = NSColor.black.cgColor
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !configureMetal() {
             configureFallbackGradient()
@@ -158,6 +159,8 @@ final class BackdropView: NSView {
 
         let metalView = MTKView(frame: bounds, device: device)
         metalView.delegate = self
+        metalView.layer?.isOpaque = true
+        metalView.clearColor = MTLClearColorMake(0, 0, 0, 1)
         metalView.preferredFramesPerSecond = Self.idleFramesPerSecond
         metalView.framebufferOnly = true
         metalView.autoResizeDrawable = false
