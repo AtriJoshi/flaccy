@@ -6,6 +6,10 @@ final class VolumeSlider: NSSlider {
         NSSize(width: super.intrinsicContentSize.width, height: 24)
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     override func scrollWheel(with event: NSEvent) {
         let delta = Double(event.scrollingDeltaY + event.scrollingDeltaX)
         guard delta != 0 else { return }

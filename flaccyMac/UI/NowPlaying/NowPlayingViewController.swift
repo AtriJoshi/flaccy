@@ -313,7 +313,7 @@ final class NowPlayingViewController: NSViewController {
 
         volumeSlider.minValue = 0
         volumeSlider.maxValue = 1
-        volumeSlider.controlSize = .regular
+        volumeSlider.controlSize = .large
         volumeSlider.trackFillColor = .labelColor
         volumeSlider.isContinuous = true
         volumeSlider.target = self
@@ -322,7 +322,7 @@ final class NowPlayingViewController: NSViewController {
         volumeSlider.setAccessibilityLabel(String(localized: "Volume"))
         volumeSlider.translatesAutoresizingMaskIntoConstraints = false
         volumeSlider.widthAnchor.constraint(equalToConstant: 190).isActive = true
-        volumeSlider.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        volumeSlider.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
         volumeLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
         volumeLabel.textColor = MacColors.tertiaryLabel
@@ -397,6 +397,8 @@ final class NowPlayingViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        view.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
         view.window?.makeFirstResponder(view)
         backdrop.setPaused(false)
     }
