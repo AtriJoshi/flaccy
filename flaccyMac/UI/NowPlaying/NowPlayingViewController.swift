@@ -322,7 +322,7 @@ final class NowPlayingViewController: NSViewController {
         volumeSlider.setAccessibilityLabel(String(localized: "Volume"))
         volumeSlider.translatesAutoresizingMaskIntoConstraints = false
         volumeSlider.widthAnchor.constraint(equalToConstant: 190).isActive = true
-        volumeSlider.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        volumeSlider.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
         volumeLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
         volumeLabel.textColor = MacColors.tertiaryLabel
