@@ -7,9 +7,10 @@ jobs:
   build-ios:
     runs-on: macos-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout original repository
         uses: actions/checkout@v4
         with:
+          repository: guitaripod/flaccy
           lfs: true
         
       - name: Build Unsigned IPA
@@ -18,7 +19,7 @@ jobs:
             -project flaccy.xcodeproj \
             -scheme flaccy \
             -configuration Release \
-            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
             -derivedDataPath $PWD/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
