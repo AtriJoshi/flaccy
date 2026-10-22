@@ -1,0 +1,32 @@
+name: Build Flaccy IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Build Unsigned IPA
+        run: |
+          xcodebuild -project flaccy.xcodeproj \
+            -scheme flaccy \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive -archivePath $PWD/build/flaccy.xcarchive
+            
+          mkdir -p Payload
+          cp -r build/flaccy.xcarchive/Products/Applications/flaccy.app Payload/
+          zip -r flaccy.ipa Payload
+          
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flaccy-iOS-App
+          path: flaccy.ipa
