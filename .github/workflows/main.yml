@@ -13,12 +13,12 @@ jobs:
           repository: guitaripod/flaccy
           lfs: true
         
-      - name: Build Unsigned IPA
+      - name: Build Unsigned IPA (Debug)
         run: |
           xcodebuild build \
             -project flaccy.xcodeproj \
             -scheme flaccy \
-            -configuration Release \
+            -configuration Debug \
             -destination "generic/platform=iOS" \
             -derivedDataPath $PWD/DerivedData \
             CODE_SIGN_IDENTITY="" \
@@ -26,7 +26,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
             
           mkdir -p Payload
-          cp -r DerivedData/Build/Products/Release-iphoneos/flaccy.app Payload/
+          cp -r DerivedData/Build/Products/Debug-iphoneos/flaccy.app Payload/
           zip -r flaccy.ipa Payload
           
       - name: Upload IPA Artifact
