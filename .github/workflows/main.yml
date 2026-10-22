@@ -12,17 +12,18 @@ jobs:
         
       - name: Build Unsigned IPA
         run: |
-          xcodebuild -project flaccy.xcodeproj \
+          xcodebuild build \
+            -project flaccy.xcodeproj \
             -scheme flaccy \
             -configuration Release \
             -sdk iphoneos \
+            -derivedDataPath $PWD/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            archive -archivePath $PWD/build/flaccy.xcarchive
+            CODE_SIGNING_ALLOWED=NO
             
           mkdir -p Payload
-          cp -r build/flaccy.xcarchive/Products/Applications/flaccy.app Payload/
+          cp -r DerivedData/Build/Products/Release-iphoneos/flaccy.app Payload/
           zip -r flaccy.ipa Payload
           
       - name: Upload IPA Artifact
